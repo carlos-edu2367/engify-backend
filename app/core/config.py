@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     mailgun_api_key: str = ""
     mailgun_domain: str = ""
     mailgun_from: str = "noreply@engify.app"
-    frontend_url: str = "http://localhost:3000"
+    frontend_url: str = "https://engify-frontend.vercel.app" if environment == "prod" else "http://localhost:5174"
 
     # Storage — Supabase Storage REST API
     # storage_url: https://<project-ref>.supabase.co
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     storage_download_expires_in: int = 3600  # 1 hora
 
     # CORS
-    allowed_origins: list[str] = ["http://localhost:3000"]
+    allowed_origins: list[str] = ["https://engify-frontend.vercel.app" if environment == "prod" else "http://localhost:5174"]
 
     # Trial period
     trial_days: int = 7
