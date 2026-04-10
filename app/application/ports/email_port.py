@@ -10,7 +10,8 @@ from uuid import UUID
 class RecoveryCodeEmailInput:
     destinatario: str
     nome: str
-    code: str  # plain code — nunca armazenar este valor
+    code: str        # plain code — nunca armazenar este valor
+    user_id: UUID    # usado para montar o link de reset no email
 
 
 @dataclass

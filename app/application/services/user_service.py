@@ -140,6 +140,7 @@ class RecoveryPasswordService():
                     destinatario=found.email,
                     nome=found.nome,
                     code=plain_code,  # plain code — apenas no email, nunca no banco
+                    user_id=found.id,
                 ))
             except Exception:
                 pass  # email falhou, código ainda está salvo; usuário pode tentar novamente
@@ -158,7 +159,7 @@ class RecoveryPasswordService():
         found = await self.user_repo.get_by_id(user_id)
         hashed = self.hash.hash(new_password)
         found.change_password(hashed)
-        code.use_code(recovery_code)
+        code.use_code(_hash_code(recovery_code))  # use_code compara com hash armazenado
         saved = await self.user_repo.save(found)
         await self.recovery_repo.save(code)
         await self.uow.commit()

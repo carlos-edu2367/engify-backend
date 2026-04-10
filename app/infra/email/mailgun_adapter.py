@@ -48,32 +48,36 @@ class MailgunEmailAdapter(EmailPort):
         )
 
     async def enviar_recovery_code(self, input: RecoveryCodeEmailInput) -> None:
-        """Envia email com o código de recuperação de senha."""
+        """Envia email com link assinado de recuperação de senha."""
         if not self._validar_email(input.destinatario):
             logger.warning("Recovery code email: destinatário inválido")
             return
 
+        reset_link = (
+            f"{self._frontend_url}/recovery"
+            f"?uid={input.user_id}"
+            f"&token={input.code}"
+        )
+
         conteudo = f"""
             <p>Olá, <strong>{input.nome}</strong>!</p>
             <p>Recebemos uma solicitação de recuperação de senha para a sua conta Engify.</p>
-            <p>Use o código abaixo para redefinir sua senha. Ele é válido por <strong>30 minutos</strong>.</p>
-            <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
-                <p style="margin: 0; font-size: 13px; color: #6b7280;">Seu código de recuperação:</p>
-                <p style="margin: 10px 0 0 0; font-size: 22px; font-weight: bold; letter-spacing: 4px; color: #1f2937; font-family: monospace;">
-                    {input.code}
-                </p>
-            </div>
+            <p>Clique no botão abaixo para definir uma nova senha.
+               O link é válido por <strong>30 minutos</strong> e pode ser usado apenas uma vez.</p>
             <p style="font-size: 13px; color: #6b7280;">
-                Se você não solicitou esta recuperação, ignore este e-mail. Sua senha permanece inalterada.
+                Se você não solicitou esta recuperação, ignore este e-mail com segurança.
+                Sua senha permanece inalterada.
             </p>
         """
         corpo_html = self._gerar_layout_base(
             titulo_pagina="Recuperação de Senha",
             conteudo_html=conteudo,
+            cta_link=reset_link,
+            cta_texto="Redefinir Senha",
         )
         await self._enviar(
             para=input.destinatario,
-            assunto="Código de recuperação de senha — Engify",
+            assunto="Recuperação de senha — Engify",
             corpo_html=corpo_html,
         )
 
