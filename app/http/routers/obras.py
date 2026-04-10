@@ -5,16 +5,20 @@ from app.http.schemas.obras import (
     CreateObraRequest, UpdateObraRequest, UpdateStatusRequest,
     ObraResponse, ObraListItem,
     ObraClienteResponse, ItemClienteView, ImageClienteView,
+    RegisterObraImageRequest, ObraImageResponse,
 )
+from app.http.schemas.financeiro import CreateObraPagamentoRequest, PagamentoResponse
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.dependencies.auth import CurrentUser, EngineerUser, AdminUser
 from app.http.dependencies.pagination import Pagination
-from app.http.dependencies.services import ObraServiceDep, ItemServiceDep, ObraImageServiceDep
-from app.application.dtos.obra import CreateObraDTO, EditObraInfo
+from app.http.dependencies.services import ObraServiceDep, ItemServiceDep, ObraImageServiceDep, FinanceiroServiceDep
+from app.application.dtos.obra import CreateObraDTO, EditObraInfo, CreateObraImage
+from app.application.dtos.financeiro import CreatePagamentoDTO
+from app.domain.entities.financeiro import MovClass
 from app.domain.entities.obra import Status
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
-from app.infra.cache.keys import obras_list_key, obra_detail_key, obras_pattern, obra_cliente_key
+from app.infra.cache.keys import obras_list_key, obra_detail_key, obras_pattern, obra_cliente_key, pagamentos_pattern, public_obra_key
 
 router = APIRouter(prefix="/obras", tags=["Obras"])
 
@@ -178,6 +182,55 @@ async def update_obra_status(
     return _obra_to_response(updated)
 
 
+# ── Pagamentos por Obra ────────────────────────────────────────────────────────
+
+@router.post("/{obra_id}/pagamentos", response_model=PagamentoResponse, status_code=201)
+async def create_obra_pagamento(
+    obra_id: UUID,
+    body: CreateObraPagamentoRequest,
+    user: EngineerUser,
+    svc: ObraServiceDep,
+    fin_svc: FinanceiroServiceDep,
+):
+    """Agenda um pagamento vinculado à obra. Restrito a ADMIN e ENG."""
+    try:
+        await svc.get_obra(obra_id, user.team.id)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Obra não encontrada")
+
+    dto = CreatePagamentoDTO(
+        title=body.title,
+        details=body.details,
+        valor=body.valor,
+        classe=MovClass.SERVICO,
+        data_agendada=body.data_agendada,
+        payment_cod=body.payment_cod,
+        obra_id=obra_id,
+    )
+    try:
+        pag = await fin_svc.create_pagamento(dto, user.team.id)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    redis = get_redis()
+    async for key in redis.scan_iter(match=pagamentos_pattern(user.team.id), count=100):
+        await redis.delete(key)
+
+    return PagamentoResponse(
+        id=pag.id,
+        title=pag.title,
+        details=pag.details,
+        valor=pag.valor.amount,
+        classe=pag.classe,
+        status=pag.status,
+        data_agendada=pag.data_agendada,
+        payment_cod=pag.payment_cod,
+        obra_id=pag.obra_id,
+        diarist_id=pag.diarist_id,
+        payment_date=pag.payment_date,
+    )
+
+
 @router.delete("/{obra_id}", response_model=MessageResponse)
 async def delete_obra(obra_id: UUID, user: AdminUser, svc: ObraServiceDep):
     """Soft-delete da obra. Restrito a ADMIN."""
@@ -190,6 +243,50 @@ async def delete_obra(obra_id: UUID, user: AdminUser, svc: ObraServiceDep):
     redis = get_redis()
     await _invalidate_obras_cache(redis, user.team.id)
     return MessageResponse(message="Obra removida com sucesso")
+
+
+# ── Imagens da Obra ────────────────────────────────────────────────────────────
+
+@router.post("/{obra_id}/images", response_model=ObraImageResponse, status_code=201)
+async def register_obra_image(
+    obra_id: UUID,
+    body: RegisterObraImageRequest,
+    user: EngineerUser,
+    svc: ObraServiceDep,
+    image_svc: ObraImageServiceDep,
+):
+    """
+    Registra uma imagem da obra após upload direto ao Supabase Storage.
+    Fluxo: POST /storage/upload-url (resource_type='obra') → PUT signed_url → este endpoint.
+    Restrito a ADMIN e ENG.
+    """
+    try:
+        await svc.get_obra(obra_id, user.team.id)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Obra não encontrada")
+
+    dto = CreateObraImage(
+        obra_id=obra_id,
+        team_id=user.team.id,
+        file_path=body.file_path,
+        file_name=body.file_name,
+        content_type=body.content_type,
+    )
+    image = await image_svc.register_image(dto)
+
+    # Invalida cache da visão do cliente e da visão pública
+    redis = get_redis()
+    await redis.delete(obra_cliente_key(user.team.id, obra_id))
+    await redis.delete(public_obra_key(obra_id))
+
+    return ObraImageResponse(
+        id=image.id,
+        obra_id=image.obra_id,
+        file_path=image.file_path,
+        file_name=image.file_name,
+        content_type=image.content_type,
+        created_at=image.created_at,
+    )
 
 
 # ── Visão do Cliente ───────────────────────────────────────────────────────────

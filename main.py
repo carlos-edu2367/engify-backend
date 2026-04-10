@@ -13,6 +13,7 @@ from app.http.middleware.error_middleware import register_exception_handlers
 from app.http.routers import auth
 from app.http.routers import teams, users, obras, items, diarias, financeiro, storage
 from app.http.routers import mural
+from app.http.routers import public_obras
 
 app = FastAPI(
     title=settings.app_name,
@@ -65,6 +66,7 @@ app.include_router(diarias.router, prefix=settings.api_prefix)
 app.include_router(financeiro.router, prefix=settings.api_prefix)
 app.include_router(storage.router, prefix=settings.api_prefix)
 app.include_router(mural.router, prefix=settings.api_prefix)
+app.include_router(public_obras.router, prefix=settings.api_prefix)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

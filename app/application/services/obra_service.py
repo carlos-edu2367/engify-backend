@@ -11,7 +11,7 @@ from app.application.providers.uow import UOWProvider
 from app.application.dtos.obra import (CreateObraDTO, CreateDiary, DiariesResponse,
                                        EditDiary, EditObraInfo, CreateItem, UpdateItem,
                                        CreateMuralPost, CreateMuralAttachment,
-                                       CreateItemAttachment)
+                                       CreateItemAttachment, CreateObraImage)
 from app.domain.entities.money import Money
 from uuid import UUID
 from datetime import datetime
@@ -147,17 +147,20 @@ class DiaryService():
         await self.uow.commit()
 
     async def count_diaries_by_period(self, init_date: datetime, end_date: datetime,
-                                      team_id: UUID) -> int:
-        return await self.diary_repo.count_by_period(init_date, end_date, team_id)
+                                      team_id: UUID,
+                                      obra_id: UUID | None = None) -> int:
+        return await self.diary_repo.count_by_period(init_date, end_date, team_id, obra_id)
 
     async def list_diaries_by_period(self, init_date: datetime, end_date: datetime,
-                                     team_id: UUID, page: int, limit: int) -> list[DiariesResponse]:
+                                     team_id: UUID, page: int, limit: int,
+                                     obra_id: UUID | None = None) -> list[DiariesResponse]:
         diaries = await self.diary_repo.get_by_period(
             initial_date=init_date, final_date=end_date,
-            team_id=team_id, page=page, limit=limit
+            team_id=team_id, page=page, limit=limit, obra_id=obra_id,
         )
         return [
             DiariesResponse(
+                id=d.id,
                 diarist_id=d.diarista.id,
                 diarist_name=d.diarista.nome,
                 descricao_diaria=d.descricao_diaria,
@@ -247,11 +250,29 @@ class ItemAttachmentService():
 
 
 class ObraImageService():
-    def __init__(self, image_repo: ImageRepository):
+    def __init__(self, image_repo: ImageRepository, uow: UOWProvider):
         self.image_repo = image_repo
+        self.uow = uow
 
     async def list_by_obra(self, obra_id: UUID) -> list[Image]:
         return await self.image_repo.list_by_obra(obra_id)
+
+    async def register_image(self, dto: CreateObraImage) -> Image:
+        image = Image(
+            obra_id=dto.obra_id,
+            team_id=dto.team_id,
+            file_path=dto.file_path,
+            file_name=dto.file_name,
+            content_type=dto.content_type,
+        )
+        saved = await self.image_repo.save(image)
+        await self.uow.commit()
+        return saved
+
+    async def delete_image(self, image: Image) -> None:
+        image.delete()
+        await self.image_repo.save(image)
+        await self.uow.commit()
 
 
 class MuralService():

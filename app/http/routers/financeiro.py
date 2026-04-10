@@ -232,6 +232,20 @@ async def list_pagamentos(
     return result
 
 
+@router.get("/pagamentos/{pagamento_id}", response_model=PagamentoResponse)
+async def get_pagamento(
+    pagamento_id: UUID,
+    user: FinanceiroUser,
+    svc: FinanceiroServiceDep,
+):
+    """Retorna um pagamento agendado pelo ID. Restrito a ADMIN e FIN."""
+    try:
+        pag = await svc.get_pagamento(pagamento_id, user.team.id)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Pagamento não encontrado")
+    return _pag_response(pag)
+
+
 @router.put("/pagamentos/{pagamento_id}", response_model=PagamentoResponse)
 async def update_pagamento(
     pagamento_id: UUID,

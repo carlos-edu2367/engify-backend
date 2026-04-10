@@ -37,12 +37,13 @@ class DiaryRepository(ABC):
 
     @abstractmethod
     async def get_by_period(self, initial_date: datetime, final_date: datetime,
-                            team_id: UUID, page: int, limit: int) -> list[Diaria]:
+                            team_id: UUID, page: int, limit: int,
+                            obra_id: UUID | None = None) -> list[Diaria]:
         pass
 
     @abstractmethod
     async def count_by_period(self, initial_date: datetime, final_date: datetime,
-                              team_id: UUID) -> int:
+                              team_id: UUID, obra_id: UUID | None = None) -> int:
         pass
 
     @abstractmethod
@@ -85,6 +86,10 @@ class ItemAttachmentRepository(ABC):
 class ImageRepository(ABC):
     @abstractmethod
     async def list_by_obra(self, obra_id: UUID) -> list[Image]:
+        pass
+
+    @abstractmethod
+    async def save(self, image: Image) -> Image:
         pass
 
 

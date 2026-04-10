@@ -179,6 +179,7 @@ async def get_item_attachment_service(session: Session) -> ItemAttachmentService
 async def get_obra_image_service(session: Session) -> ObraImageService:
     return ObraImageService(
         image_repo=ImageRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
     )
 
 

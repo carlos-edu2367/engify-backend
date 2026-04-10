@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 from uuid import UUID
 from datetime import datetime
+from typing import Optional
 
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.dependencies.auth import EngineerUser, AdminUser, ManagerUser
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/diarias", tags=["Diárias"])
 
 def _diary_to_response(d) -> DiariesResponse:
     return DiariesResponse(
+        id=d.id,
         diarist_id=d.diarista.id,
         diarist_name=d.diarista.nome,
         descricao_diaria=d.descricao_diaria,
@@ -59,6 +61,7 @@ async def list_diaries(
     svc: DiaryServiceDep,
     start: datetime = Query(..., description="Data inicial (ISO 8601)"),
     end: datetime = Query(..., description="Data final (ISO 8601)"),
+    obra_id: Optional[UUID] = Query(None, description="Filtrar por obra"),
 ):
     """
     Lista diárias por período. Cache Redis 5min.
@@ -72,6 +75,7 @@ async def list_diaries(
         user.team.id,
         start.isoformat(), end.isoformat(),
         pagination.page, pagination.limit,
+        obra_id=obra_id,
     )
     cached = await redis.get(cache_key)
     if cached:
@@ -81,9 +85,10 @@ async def list_diaries(
         init_date=start, end_date=end,
         team_id=user.team.id,
         page=pagination.page, limit=pagination.limit,
+        obra_id=obra_id,
     )
     total = await svc.count_diaries_by_period(
-        init_date=start, end_date=end, team_id=user.team.id
+        init_date=start, end_date=end, team_id=user.team.id, obra_id=obra_id,
     )
     result = PaginatedResponse.build(
         items=diaries, page=pagination.page,

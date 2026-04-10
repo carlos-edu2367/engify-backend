@@ -155,17 +155,21 @@ class DiaryRepositoryImpl(DiaryRepository):
         return model.to_domain()
 
     async def get_by_period(self, initial_date: datetime, final_date: datetime,
-                            team_id: UUID, page: int, limit: int) -> list[Diaria]:
+                            team_id: UUID, page: int, limit: int,
+                            obra_id: UUID | None = None) -> list[Diaria]:
         offset = (page - 1) * limit
+        conditions = [
+            DiaryModel.team_id == team_id,
+            DiaryModel.data >= initial_date,
+            DiaryModel.data <= final_date,
+            DiaryModel.is_deleted == False,  # noqa: E712
+        ]
+        if obra_id is not None:
+            conditions.append(DiaryModel.obra_id == obra_id)
         stmt = (
             select(DiaryModel)
             .options(selectinload(DiaryModel.diarista), selectinload(DiaryModel.obra))
-            .where(
-                DiaryModel.team_id == team_id,
-                DiaryModel.data >= initial_date,
-                DiaryModel.data <= final_date,
-                DiaryModel.is_deleted == False,  # noqa: E712
-            )
+            .where(*conditions)
             .order_by(DiaryModel.data.desc())
             .limit(limit)
             .offset(offset)
@@ -174,13 +178,16 @@ class DiaryRepositoryImpl(DiaryRepository):
         return [m.to_domain() for m in result.scalars().all()]
 
     async def count_by_period(self, initial_date: datetime, final_date: datetime,
-                              team_id: UUID) -> int:
-        stmt = select(func.count()).select_from(DiaryModel).where(
+                              team_id: UUID, obra_id: UUID | None = None) -> int:
+        conditions = [
             DiaryModel.team_id == team_id,
             DiaryModel.data >= initial_date,
             DiaryModel.data <= final_date,
             DiaryModel.is_deleted == False,  # noqa: E712
-        )
+        ]
+        if obra_id is not None:
+            conditions.append(DiaryModel.obra_id == obra_id)
+        stmt = select(func.count()).select_from(DiaryModel).where(*conditions)
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
@@ -247,16 +254,13 @@ class ItemAttachmentRepositoryImpl(ItemAttachmentRepository):
         return [m.to_domain() for m in result.scalars().all()]
 
     async def save(self, attachment: ItemAttachment) -> ItemAttachment:
-        if attachment.id is None:
-            attachment.id = uuid4()
+        stmt = select(ItemAttachmentModel).where(ItemAttachmentModel.id == attachment.id)
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model is None:
             model = ItemAttachmentModel.from_domain(attachment)
             self._session.add(model)
         else:
-            stmt = select(ItemAttachmentModel).where(ItemAttachmentModel.id == attachment.id)
-            result = await self._session.execute(stmt)
-            model = result.scalar_one_or_none()
-            if not model:
-                raise DomainError("Anexo não encontrado para atualização")
             model.update_from_domain(attachment)
         await self._session.flush()
         return model.to_domain()
@@ -274,3 +278,15 @@ class ImageRepositoryImpl(ImageRepository):
         )
         result = await self._session.execute(stmt)
         return [m.to_domain() for m in result.scalars().all()]
+
+    async def save(self, image: Image) -> Image:
+        stmt = select(ImageModel).where(ImageModel.id == image.id)
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model is None:
+            model = ImageModel.from_domain(image)
+            self._session.add(model)
+        else:
+            model.is_deleted = image.is_deleted
+        await self._session.flush()
+        return model.to_domain()

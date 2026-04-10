@@ -64,6 +64,16 @@ class PagamentoResponse(BaseModel):
     payment_date: Optional[datetime] = None
 
 
+# ── Pagamento por Obra (Engenheiro) ───────────────────────────────────────────
+
+class CreateObraPagamentoRequest(BaseModel):
+    title: str
+    details: str
+    valor: Decimal
+    data_agendada: datetime
+    payment_cod: str
+
+
 # ── Anexos ─────────────────────────────────────────────────────────────────────
 
 class CreateMovimentacaoAttachmentRequest(BaseModel):

@@ -109,6 +109,8 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
             return stmt
         if filters.status:
             stmt = stmt.where(PagamentoAgendadoModel.status == filters.status.value)
+        if filters.obra_id:
+            stmt = stmt.where(PagamentoAgendadoModel.obra_id == filters.obra_id)
         return stmt
 
     async def list_by_team(self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None) -> list[PagamentoAgendado]:

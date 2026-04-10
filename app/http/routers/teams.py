@@ -69,7 +69,7 @@ async def create_first_user(request: Request, body: CreateFirstUserRequest, svc:
 
 @router.get("/me", response_model=TeamResponse)
 async def get_my_team(user: CurrentUser, svc: TeamServiceDep):
-    """Retorna os dados do time do usuário autenticado. Cache Redis 5min."""
+    """Retorna os dados do time do usuário autenticado. Cache Redis 60s."""
     redis = get_redis()
     cache_key = team_key(user.team.id)
     cached = await redis.get(cache_key)
@@ -84,7 +84,7 @@ async def get_my_team(user: CurrentUser, svc: TeamServiceDep):
         plan=user.team.plan,
         days_to_expire=days,
     )
-    await redis.set(cache_key, response.model_dump_json(), ex=300)
+    await redis.set(cache_key, response.model_dump_json(), ex=60)
     return response
 
 

@@ -91,6 +91,23 @@ class ItemAttachmentResponse(BaseModel):
     created_at: datetime
 
 
+# ── Obra Images ────────────────────────────────────────────────────────────────
+
+class RegisterObraImageRequest(BaseModel):
+    file_path: str
+    file_name: str
+    content_type: str
+
+
+class ObraImageResponse(BaseModel):
+    id: UUID
+    obra_id: UUID
+    file_path: str
+    file_name: str
+    content_type: str
+    created_at: datetime
+
+
 # ── Mural ──────────────────────────────────────────────────────────────────────
 
 class CreateMuralPostRequest(BaseModel):
@@ -146,3 +163,35 @@ class ObraClienteResponse(BaseModel):
     data_entrega: Optional[datetime] = None
     items: list[ItemClienteView]
     images: list[ImageClienteView]
+
+
+# ── Visão Pública (sem autenticação, com URLs assinadas embutidas) ─────────────
+
+class PublicImageView(BaseModel):
+    id: UUID
+    file_name: str
+    download_url: str
+
+
+class PublicItemAttachmentView(BaseModel):
+    id: UUID
+    file_name: str
+    download_url: str
+    content_type: str
+
+
+class PublicItemView(BaseModel):
+    id: UUID
+    title: str
+    status: Status
+    attachments: list[PublicItemAttachmentView]
+
+
+class PublicObraResponse(BaseModel):
+    id: UUID
+    title: str
+    description: str
+    status: Status
+    data_entrega: Optional[datetime] = None
+    items: list[PublicItemView]
+    images: list[PublicImageView]

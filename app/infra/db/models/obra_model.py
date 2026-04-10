@@ -269,6 +269,7 @@ class ImageModel(Base, TimestampMixin):
         img.content_type = self.content_type
         img.bucket = self.bucket
         img.is_deleted = self.is_deleted
+        img.created_at = self.created_at
         return img
 
     @classmethod

@@ -12,7 +12,7 @@ from app.http.dependencies.services import ItemServiceDep, ObraServiceDep, ItemA
 from app.application.dtos.obra import CreateItem, UpdateItem, CreateItemAttachment
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
-from app.infra.cache.keys import items_list_key, items_pattern, item_attachments_key, item_attachments_pattern
+from app.infra.cache.keys import items_list_key, items_pattern, item_attachments_key, item_attachments_pattern, public_obra_key
 from app.core.limiter import limiter
 
 router = APIRouter(prefix="/obras/{obra_id}/items", tags=["Items"])
@@ -66,6 +66,7 @@ async def create_item(
 
     redis = get_redis()
     await _invalidate_items_cache(redis, user.team.id, obra_id)
+    await redis.delete(public_obra_key(obra_id))
     return _item_to_response(item)
 
 
@@ -126,6 +127,7 @@ async def update_item(
 
     redis = get_redis()
     await _invalidate_items_cache(redis, user.team.id, obra_id)
+    await redis.delete(public_obra_key(obra_id))
     return _item_to_response(updated)
 
 
@@ -152,6 +154,7 @@ async def delete_item(
 
     redis = get_redis()
     await _invalidate_items_cache(redis, user.team.id, obra_id)
+    await redis.delete(public_obra_key(obra_id))
     return MessageResponse(message="Item removido com sucesso")
 
 
@@ -206,6 +209,7 @@ async def register_item_attachment(
 
     redis = get_redis()
     await _invalidate_attachments_cache(redis, user.team.id, item_id)
+    await redis.delete(public_obra_key(obra_id))
     return _attachment_to_response(attachment)
 
 
@@ -260,4 +264,5 @@ async def delete_item_attachment(
 
     redis = get_redis()
     await _invalidate_attachments_cache(redis, user.team.id, item_id)
+    await redis.delete(public_obra_key(obra_id))
     return MessageResponse(message="Attachment removido com sucesso")

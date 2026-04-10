@@ -68,6 +68,7 @@ class AddMovimentacaoAttachmentDTO(BaseModel):
 
 class PagamentoFiltersDTO(BaseModel):
     status: Optional[PaymentStatus] = None
+    obra_id: Optional[UUID] = None
 
 
 class MovimentacaoFiltersDTO(BaseModel):

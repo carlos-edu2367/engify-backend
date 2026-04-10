@@ -87,6 +87,7 @@ class Image():
         self.content_type = content_type
         self.bucket = bucket
         self.is_deleted = False
+        self.created_at = datetime.now(timezone.utc)
 
     def delete(self):
         self.is_deleted = True

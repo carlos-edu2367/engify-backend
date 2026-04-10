@@ -22,6 +22,7 @@ class CreateDiary(BaseModel):
     data_pagamento: Optional[datetime] = None  # quando o pagamento deve ser efetuado
 
 class DiariesResponse(BaseModel):
+    id: UUID
     diarist_id: UUID
     diarist_name: str
     descricao_diaria: Optional[str]
@@ -78,6 +79,16 @@ class CreateMuralAttachment(BaseModel):
 
 class CreateItemAttachment(BaseModel):
     item_id: UUID
+    team_id: UUID
+    file_path: str
+    file_name: str
+    content_type: str
+
+
+# ── ObraImage ──────────────────────────────────────────────────────────────────
+
+class CreateObraImage(BaseModel):
+    obra_id: UUID
     team_id: UUID
     file_path: str
     file_name: str

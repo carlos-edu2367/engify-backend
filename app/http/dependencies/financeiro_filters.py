@@ -10,8 +10,9 @@ from app.application.dtos.financeiro import PagamentoFiltersDTO, MovimentacaoFil
 
 async def get_pagamento_filters(
     status: Annotated[Optional[PaymentStatus], Query(description="Filtro de status do pagamento")] = None,
+    obra_id: Annotated[Optional[UUID], Query(description="Filtro por Obra ID")] = None,
 ) -> PagamentoFiltersDTO:
-    return PagamentoFiltersDTO(status=status)
+    return PagamentoFiltersDTO(status=status, obra_id=obra_id)
 
 
 async def get_movimentacao_filters(

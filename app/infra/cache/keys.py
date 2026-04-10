@@ -29,8 +29,12 @@ def diaristas_list_key(team_id: UUID, page: int, limit: int) -> str:
     return f"{team_id}:diaristas:list:{page}:{limit}"
 
 
-def diarias_list_key(team_id: UUID, start: str, end: str, page: int, limit: int) -> str:
-    return f"{team_id}:diarias:{start}:{end}:{page}:{limit}"
+def diarias_list_key(team_id: UUID, start: str, end: str, page: int, limit: int,
+                     obra_id: UUID | None = None) -> str:
+    base = f"{team_id}:diarias:{start}:{end}:{page}:{limit}"
+    if obra_id is not None:
+        base += f":{obra_id}"
+    return base
 
 
 import hashlib
@@ -127,3 +131,8 @@ def movimentacao_attachments_pattern(team_id: UUID, mov_id: UUID) -> str:
 def mural_post_attachments_key(team_id: UUID, obra_id: UUID, post_id: UUID) -> str:
     # Encaixado dentro de mural_pattern — invalidado por _invalidate_mural_cache.
     return f"{team_id}:obras:{obra_id}:mural:{post_id}:attachments"
+
+
+def public_obra_key(obra_id: UUID) -> str:
+    """Cache da visão pública da obra (sem tenant prefix — acesso sem autenticação)."""
+    return f"public:obra:{obra_id}"
