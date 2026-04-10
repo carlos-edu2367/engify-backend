@@ -5,12 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.application.providers.repo.obra_repo import (
-    ObraRepository, DiaryRepository, ItemRepository, ItemAttachmentRepository, ImageRepository
+    ObraRepository, DiaryRepository, ItemRepository, ItemAttachmentRepository,
+    ImageRepository, CategoriaObraRepository,
 )
-from app.domain.entities.obra import Obra, Status, Item, Diaria, ItemAttachment, Image
+from app.domain.entities.obra import Obra, Status, Item, Diaria, ItemAttachment, Image, CategoriaObra
 from app.domain.errors import DomainError
 from app.infra.db.models.obra_model import (
-    ObraModel, ItemModel, DiaryModel, ItemAttachmentModel, ImageModel
+    ObraModel, ItemModel, DiaryModel, ItemAttachmentModel, ImageModel, CategoriaObraModel,
 )
 from app.infra.db.models.team_model import DiaristModel
 
@@ -78,6 +79,32 @@ class ObraRepositoryImpl(ObraRepository):
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
+    async def get_by_categoria(self, categoria_id: UUID, team_id: UUID,
+                               page: int, limit: int) -> list[Obra]:
+        offset = (page - 1) * limit
+        stmt = (
+            select(ObraModel)
+            .where(
+                ObraModel.categoria_id == categoria_id,
+                ObraModel.team_id == team_id,
+                ObraModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(ObraModel.created_date.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
+    async def count_by_categoria(self, categoria_id: UUID, team_id: UUID) -> int:
+        stmt = select(func.count()).select_from(ObraModel).where(
+            ObraModel.categoria_id == categoria_id,
+            ObraModel.team_id == team_id,
+            ObraModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
+
     async def save(self, obra: Obra) -> Obra:
         if obra.id is None:
             obra.id = uuid4()
@@ -90,6 +117,71 @@ class ObraRepositoryImpl(ObraRepository):
             if not model:
                 raise DomainError("Obra não encontrada para atualização")
             model.update_from_domain(obra)
+        await self._session.flush()
+        return model.to_domain()
+
+
+class CategoriaObraRepositoryImpl(CategoriaObraRepository):
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_by_id(self, id: UUID, team_id: UUID) -> CategoriaObra:
+        stmt = select(CategoriaObraModel).where(
+            CategoriaObraModel.id == id,
+            CategoriaObraModel.team_id == team_id,
+            CategoriaObraModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model:
+            raise DomainError("Categoria não encontrada")
+        return model.to_domain()
+
+    async def get_by_team(self, team_id: UUID, page: int, limit: int) -> list[CategoriaObra]:
+        offset = (page - 1) * limit
+        stmt = (
+            select(CategoriaObraModel)
+            .where(
+                CategoriaObraModel.team_id == team_id,
+                CategoriaObraModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(CategoriaObraModel.title.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
+    async def count_by_team(self, team_id: UUID) -> int:
+        stmt = select(func.count()).select_from(CategoriaObraModel).where(
+            CategoriaObraModel.team_id == team_id,
+            CategoriaObraModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
+
+    async def get_by_nome(self, title: str, team_id: UUID) -> CategoriaObra | None:
+        stmt = select(CategoriaObraModel).where(
+            CategoriaObraModel.title == title,
+            CategoriaObraModel.team_id == team_id,
+            CategoriaObraModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        return model.to_domain() if model else None
+
+    async def save(self, categoria: CategoriaObra) -> CategoriaObra:
+        if categoria.id is None:
+            categoria.id = uuid4()
+            model = CategoriaObraModel.from_domain(categoria)
+            self._session.add(model)
+        else:
+            stmt = select(CategoriaObraModel).where(CategoriaObraModel.id == categoria.id)
+            result = await self._session.execute(stmt)
+            model = result.scalar_one_or_none()
+            if not model:
+                raise DomainError("Categoria não encontrada para atualização")
+            model.update_from_domain(categoria)
         await self._session.flush()
         return model.to_domain()
 

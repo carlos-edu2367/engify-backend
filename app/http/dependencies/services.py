@@ -22,12 +22,12 @@ from app.application.services.user_service import UserService, RecoveryPasswordS
 from app.application.services.team_service import TeamService, DiaristService
 from app.application.services.obra_service import (
     ObraService, ItemService, DiaryService,
-    ItemAttachmentService, ObraImageService, MuralService,
+    ItemAttachmentService, ObraImageService, MuralService, CategoriaObraService,
 )
 from app.application.services.financeiro_service import FinanceiroService
 from app.infra.db.repositories.obra_repository import (
     ObraRepositoryImpl, ItemRepositoryImpl, DiaryRepositoryImpl,
-    ItemAttachmentRepositoryImpl, ImageRepositoryImpl,
+    ItemAttachmentRepositoryImpl, ImageRepositoryImpl, CategoriaObraRepositoryImpl,
 )
 from app.infra.db.repositories.mural_repository import MuralRepositoryImpl
 from app.infra.db.repositories.financeiro_repository import (
@@ -191,6 +191,14 @@ async def get_mural_service(session: Session) -> MuralService:
     )
 
 
+async def get_categoria_obra_service(session: Session) -> CategoriaObraService:
+    return CategoriaObraService(
+        categoria_repo=CategoriaObraRepositoryImpl(session),
+        obra_repo=ObraRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 RecoveryServiceDep = Annotated[RecoveryPasswordService, Depends(get_recovery_service)]
 TeamServiceDep = Annotated[TeamService, Depends(get_team_service)]
@@ -202,4 +210,5 @@ FinanceiroServiceDep = Annotated[FinanceiroService, Depends(get_financeiro_servi
 ItemAttachmentServiceDep = Annotated[ItemAttachmentService, Depends(get_item_attachment_service)]
 ObraImageServiceDep = Annotated[ObraImageService, Depends(get_obra_image_service)]
 MuralServiceDep = Annotated[MuralService, Depends(get_mural_service)]
+CategoriaObraServiceDep = Annotated[CategoriaObraService, Depends(get_categoria_obra_service)]
 StorageProviderDep = Annotated[S3StorageProvider, Depends(get_storage_provider)]

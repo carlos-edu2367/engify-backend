@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
-from app.domain.entities.obra import Obra, Status, Diaria, Item, ItemAttachment, Image, MuralPost, MuralAttachment
+from app.domain.entities.obra import Obra, Status, Diaria, Item, ItemAttachment, Image, MuralPost, MuralAttachment, CategoriaObra
 from datetime import datetime
 
 
@@ -26,7 +26,37 @@ class ObraRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_by_categoria(self, categoria_id: UUID, team_id: UUID, page: int, limit: int) -> list[Obra]:
+        pass
+
+    @abstractmethod
+    async def count_by_categoria(self, categoria_id: UUID, team_id: UUID) -> int:
+        pass
+
+    @abstractmethod
     async def save(self, obra: Obra) -> Obra:
+        pass
+
+
+class CategoriaObraRepository(ABC):
+    @abstractmethod
+    async def get_by_id(self, id: UUID, team_id: UUID) -> CategoriaObra:
+        pass
+
+    @abstractmethod
+    async def get_by_team(self, team_id: UUID, page: int, limit: int) -> list[CategoriaObra]:
+        pass
+
+    @abstractmethod
+    async def count_by_team(self, team_id: UUID) -> int:
+        pass
+
+    @abstractmethod
+    async def get_by_nome(self, title: str, team_id: UUID) -> CategoriaObra | None:
+        pass
+
+    @abstractmethod
+    async def save(self, categoria: CategoriaObra) -> CategoriaObra:
         pass
 
 

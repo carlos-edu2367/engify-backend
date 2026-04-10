@@ -1,9 +1,9 @@
-from app.domain.entities.obra import Obra, Status, Item, Diaria, Image, ItemAttachment, MuralPost, MuralAttachment
+from app.domain.entities.obra import Obra, Status, Item, Diaria, Image, ItemAttachment, MuralPost, MuralAttachment, CategoriaObra
 from app.domain.entities.financeiro import PagamentoAgendado, MovClass
 from app.domain.errors import DomainError
 from app.application.providers.repo.obra_repo import (
     ObraRepository, DiaryRepository, ItemRepository,
-    ItemAttachmentRepository, ImageRepository, MuralRepository,
+    ItemAttachmentRepository, ImageRepository, MuralRepository, CategoriaObraRepository,
 )
 from app.application.providers.repo.team_repos import DiaristRepository
 from app.application.providers.repo.financeiro_repo import PagamentoAgendadoRepository
@@ -11,7 +11,8 @@ from app.application.providers.uow import UOWProvider
 from app.application.dtos.obra import (CreateObraDTO, CreateDiary, DiariesResponse,
                                        EditDiary, EditObraInfo, CreateItem, UpdateItem,
                                        CreateMuralPost, CreateMuralAttachment,
-                                       CreateItemAttachment, CreateObraImage)
+                                       CreateItemAttachment, CreateObraImage,
+                                       CreateCategoriaObraDTO, UpdateCategoriaObraDTO)
 from app.domain.entities.money import Money
 from uuid import UUID
 from datetime import datetime
@@ -30,7 +31,8 @@ class ObraService():
             responsavel_id=dto.responsavel_id,
             description=dto.description,
             valor=valor,
-            data_entrega=dto.data_entrega
+            data_entrega=dto.data_entrega,
+            categoria_id=dto.categoria_id,
         )
         saved = await self.obra_repo.save(new)
         await self.uow.commit()
@@ -74,10 +76,21 @@ class ObraService():
             obra.valor = Money(dtos.valor)
         if dtos.data_entrega:
             obra.data_entrega = dtos.data_entrega
+        if dtos.remove_categoria:
+            obra.categoria_id = None
+        elif dtos.categoria_id is not None:
+            obra.categoria_id = dtos.categoria_id
 
         saved = await self.obra_repo.save(obra)
         await self.uow.commit()
         return saved
+
+    async def list_by_categoria(self, categoria_id: UUID, team_id: UUID,
+                                page: int, limit: int) -> list[Obra]:
+        return await self.obra_repo.get_by_categoria(categoria_id, team_id, page, limit)
+
+    async def count_by_categoria(self, categoria_id: UUID, team_id: UUID) -> int:
+        return await self.obra_repo.count_by_categoria(categoria_id, team_id)
 
 
 class DiaryService():
@@ -338,3 +351,68 @@ class MuralService():
         attachment.delete()
         await self.mural_repo.save_attachment(attachment)
         await self.uow.commit()
+
+
+class CategoriaObraService():
+    def __init__(self, categoria_repo: CategoriaObraRepository,
+                 obra_repo: ObraRepository, uow: UOWProvider):
+        self.categoria_repo = categoria_repo
+        self.obra_repo = obra_repo
+        self.uow = uow
+
+    async def create_categoria(self, dto: CreateCategoriaObraDTO) -> CategoriaObra:
+        existing = await self.categoria_repo.get_by_nome(dto.title, dto.team_id)
+        if existing:
+            raise DomainError("Já existe uma categoria com esse nome neste time")
+        new = CategoriaObra(
+            title=dto.title,
+            team_id=dto.team_id,
+            descricao=dto.descricao,
+            cor=dto.cor,
+        )
+        saved = await self.categoria_repo.save(new)
+        await self.uow.commit()
+        return saved
+
+    async def get_categoria(self, categoria_id: UUID, team_id: UUID) -> CategoriaObra:
+        return await self.categoria_repo.get_by_id(categoria_id, team_id)
+
+    async def list_categorias(self, team_id: UUID, page: int, limit: int) -> list[CategoriaObra]:
+        return await self.categoria_repo.get_by_team(team_id, page, limit)
+
+    async def count_categorias(self, team_id: UUID) -> int:
+        return await self.categoria_repo.count_by_team(team_id)
+
+    async def update_categoria(self, categoria: CategoriaObra,
+                               dto: UpdateCategoriaObraDTO) -> CategoriaObra:
+        if dto.title is not None and dto.title != categoria.title:
+            existing = await self.categoria_repo.get_by_nome(dto.title, categoria.team_id)
+            if existing and existing.id != categoria.id:
+                raise DomainError("Já existe uma categoria com esse nome neste time")
+            categoria.title = dto.title
+        if dto.descricao is not None:
+            categoria.descricao = dto.descricao
+        if dto.cor is not None:
+            categoria.cor = dto.cor
+        saved = await self.categoria_repo.save(categoria)
+        await self.uow.commit()
+        return saved
+
+    async def delete_categoria(self, categoria: CategoriaObra) -> None:
+        # Set null em todas as obras vinculadas antes de excluir a categoria
+        obras = await self.obra_repo.get_by_categoria(
+            categoria.id, categoria.team_id, page=1, limit=10_000
+        )
+        for obra in obras:
+            obra.categoria_id = None
+            await self.obra_repo.save(obra)
+        categoria.delete()
+        await self.categoria_repo.save(categoria)
+        await self.uow.commit()
+
+    async def list_obras_by_categoria(self, categoria_id: UUID, team_id: UUID,
+                                      page: int, limit: int) -> list[Obra]:
+        return await self.obra_repo.get_by_categoria(categoria_id, team_id, page, limit)
+
+    async def count_obras_by_categoria(self, categoria_id: UUID, team_id: UUID) -> int:
+        return await self.obra_repo.count_by_categoria(categoria_id, team_id)

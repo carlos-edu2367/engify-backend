@@ -136,3 +136,15 @@ def mural_post_attachments_key(team_id: UUID, obra_id: UUID, post_id: UUID) -> s
 def public_obra_key(obra_id: UUID) -> str:
     """Cache da visão pública da obra (sem tenant prefix — acesso sem autenticação)."""
     return f"public:obra:{obra_id}"
+
+
+def categorias_obra_list_key(team_id: UUID, page: int, limit: int) -> str:
+    return f"{team_id}:categorias_obra:list:{page}:{limit}"
+
+
+def categoria_obra_detail_key(team_id: UUID, categoria_id: UUID) -> str:
+    return f"{team_id}:categorias_obra:{categoria_id}"
+
+
+def categorias_obra_pattern(team_id: UUID) -> str:
+    return f"{team_id}:categorias_obra:*"

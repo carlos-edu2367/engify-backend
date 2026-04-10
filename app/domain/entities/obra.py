@@ -17,7 +17,8 @@ class Obra():
                  team_id: UUID, responsavel_id: UUID,
                  description: str, id: UUID = None,
                  valor: Money = None, status: Status = Status.PLANEJAMENTO,
-                 created_date: datetime = None, data_entrega: datetime = None):
+                 created_date: datetime = None, data_entrega: datetime = None, 
+                 categoria_id: UUID = None):
         self.id = id
         self.title = title
         self.team_id = team_id
@@ -28,6 +29,7 @@ class Obra():
         self.created_date = created_date
         self.data_entrega = data_entrega
         self.is_deleted = False
+        self.categoria_id = categoria_id
 
         if not self.created_date:
             self.created_date = datetime.now(timezone.utc)
@@ -35,6 +37,20 @@ class Obra():
     def delete(self):
         self.is_deleted = True
 
+class CategoriaObra():
+    def __init__(self, title: str, team_id: UUID, descricao: str | None = None,
+                 cor: str | None = None, id: UUID | None = None,
+                 created_at: datetime = None):
+        self.id = id
+        self.title = title
+        self.team_id = team_id
+        self.descricao = descricao
+        self.cor = cor
+        self.is_deleted = False
+        self.created_at = created_at or datetime.now(timezone.utc)
+
+    def delete(self) -> None:
+        self.is_deleted = True
 
 class Item():
     def __init__(self, title: str, obra_id: UUID, team_id: UUID,

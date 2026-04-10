@@ -5,8 +5,62 @@ from sqlalchemy import String, DateTime, Numeric, Boolean, Float, ForeignKey, In
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infra.db.models.base import Base, TimestampMixin
-from app.domain.entities.obra import Obra, Status, Item, Image, ItemAttachment, Diaria, MuralPost, MuralAttachment
+from app.domain.entities.obra import Obra, Status, Item, Image, ItemAttachment, Diaria, MuralPost, MuralAttachment, CategoriaObra
 from app.domain.entities.money import Money
+
+
+class CategoriaObraModel(Base, TimestampMixin):
+    __tablename__ = "categorias_obra"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cor: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    obras: Mapped[list["ObraModel"]] = relationship(
+        back_populates="categoria", lazy="raise"
+    )
+
+    __table_args__ = (
+        Index("idx_categorias_obra_team_deleted", "team_id", "is_deleted"),
+        Index("idx_categorias_obra_team_title", "team_id", "title"),
+    )
+
+    def to_domain(self) -> CategoriaObra:
+        c = object.__new__(CategoriaObra)
+        c.id = self.id
+        c.team_id = self.team_id
+        c.title = self.title
+        c.descricao = self.descricao
+        c.cor = self.cor
+        c.is_deleted = self.is_deleted
+        c.created_at = self.created_at
+        return c
+
+    @classmethod
+    def from_domain(cls, cat: CategoriaObra) -> "CategoriaObraModel":
+        return cls(
+            id=cat.id or uuid.uuid4(),
+            team_id=cat.team_id,
+            title=cat.title,
+            descricao=cat.descricao,
+            cor=cat.cor,
+            is_deleted=cat.is_deleted,
+        )
+
+    def update_from_domain(self, cat: CategoriaObra) -> None:
+        self.title = cat.title
+        self.descricao = cat.descricao
+        self.cor = cat.cor
+        self.is_deleted = cat.is_deleted
 
 
 class ObraModel(Base, TimestampMixin):
@@ -25,6 +79,11 @@ class ObraModel(Base, TimestampMixin):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    categoria_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("categorias_obra.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(String(2000), nullable=False, default="")
     valor_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
@@ -39,6 +98,9 @@ class ObraModel(Base, TimestampMixin):
 
     team: Mapped["TeamModel"] = relationship(  # type: ignore[name-defined]
         back_populates="obras", lazy="raise"
+    )
+    categoria: Mapped["CategoriaObraModel | None"] = relationship(
+        back_populates="obras", lazy="raise", foreign_keys=[categoria_id]
     )
     items: Mapped[list["ItemModel"]] = relationship(
         back_populates="obra", lazy="raise"
@@ -68,6 +130,7 @@ class ObraModel(Base, TimestampMixin):
         obra.title = self.title
         obra.team_id = self.team_id
         obra.responsavel_id = self.responsavel_id
+        obra.categoria_id = self.categoria_id
         obra.description = self.description
         obra.valor = Money(self.valor_amount, self.valor_currency) if self.valor_amount is not None else None
         obra.status = Status(self.status)
@@ -82,6 +145,7 @@ class ObraModel(Base, TimestampMixin):
             id=obra.id or uuid.uuid4(),
             team_id=obra.team_id,
             responsavel_id=obra.responsavel_id,
+            categoria_id=obra.categoria_id,
             title=obra.title,
             description=obra.description,
             valor_amount=obra.valor.amount if obra.valor else None,
@@ -95,6 +159,7 @@ class ObraModel(Base, TimestampMixin):
     def update_from_domain(self, obra: Obra) -> None:
         self.title = obra.title
         self.responsavel_id = obra.responsavel_id
+        self.categoria_id = obra.categoria_id
         self.description = obra.description
         self.valor_amount = obra.valor.amount if obra.valor else None
         self.valor_currency = obra.valor.currency if obra.valor else "BRL"

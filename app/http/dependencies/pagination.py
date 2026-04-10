@@ -15,7 +15,7 @@ class PaginationParams:
 
 async def get_pagination(
     page: Annotated[int, Query(ge=1, description="Número da página")] = 1,
-    limit: Annotated[int, Query(ge=1, le=100, description="Itens por página (máx 100)")] = 20,
+    limit: Annotated[int, Query(ge=1, le=500, description="Itens por página (máx 500)")] = 20,
 ) -> PaginationParams:
     return PaginationParams(page=page, limit=limit)
 

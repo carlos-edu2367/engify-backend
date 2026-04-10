@@ -14,6 +14,7 @@ from app.http.routers import auth
 from app.http.routers import teams, users, obras, items, diarias, financeiro, storage
 from app.http.routers import mural
 from app.http.routers import public_obras
+from app.http.routers import categorias_obras
 
 app = FastAPI(
     title=settings.app_name,
@@ -67,6 +68,7 @@ app.include_router(financeiro.router, prefix=settings.api_prefix)
 app.include_router(storage.router, prefix=settings.api_prefix)
 app.include_router(mural.router, prefix=settings.api_prefix)
 app.include_router(public_obras.router, prefix=settings.api_prefix)
+app.include_router(categorias_obras.router, prefix=settings.api_prefix)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

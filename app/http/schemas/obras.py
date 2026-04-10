@@ -14,6 +14,7 @@ class CreateObraRequest(BaseModel):
     description: str
     valor: Optional[Decimal] = None
     data_entrega: Optional[datetime] = None
+    categoria_id: Optional[UUID] = None
 
 
 class UpdateObraRequest(BaseModel):
@@ -22,6 +23,8 @@ class UpdateObraRequest(BaseModel):
     description: Optional[str] = None
     valor: Optional[Decimal] = None
     data_entrega: Optional[datetime] = None
+    categoria_id: Optional[UUID] = None
+    remove_categoria: bool = False
 
 
 class UpdateStatusRequest(BaseModel):
@@ -38,6 +41,7 @@ class ObraResponse(BaseModel):
     valor: Optional[Decimal] = None
     data_entrega: Optional[datetime] = None
     created_date: datetime
+    categoria_id: Optional[UUID] = None
 
 
 class ObraListItem(BaseModel):
@@ -48,6 +52,37 @@ class ObraListItem(BaseModel):
     valor: Optional[Decimal] = None
     data_entrega: Optional[datetime] = None
     created_date: datetime
+    categoria_id: Optional[UUID] = None
+
+
+# ── CategoriaObra ─────────────────────────────────────────────────────────────
+
+class CreateCategoriaObraRequest(BaseModel):
+    title: str
+    descricao: Optional[str] = None
+    cor: Optional[str] = None
+
+
+class UpdateCategoriaObraRequest(BaseModel):
+    title: Optional[str] = None
+    descricao: Optional[str] = None
+    cor: Optional[str] = None
+
+
+class CategoriaObraResponse(BaseModel):
+    id: UUID
+    team_id: UUID
+    title: str
+    descricao: Optional[str] = None
+    cor: Optional[str] = None
+    created_at: datetime
+
+
+class CategoriaObraListItem(BaseModel):
+    id: UUID
+    title: str
+    descricao: Optional[str] = None
+    cor: Optional[str] = None
 
 
 # ── Items ─────────────────────────────────────────────────────────────────────

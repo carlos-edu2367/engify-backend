@@ -34,6 +34,7 @@ def _obra_to_response(obra) -> ObraResponse:
         valor=obra.valor.amount if obra.valor else None,
         data_entrega=obra.data_entrega,
         created_date=obra.created_date,
+        categoria_id=obra.categoria_id,
     )
 
 
@@ -46,6 +47,7 @@ def _obra_to_list_item(obra) -> ObraListItem:
         valor=obra.valor.amount if obra.valor else None,
         data_entrega=obra.data_entrega,
         created_date=obra.created_date,
+        categoria_id=obra.categoria_id,
     )
 
 
@@ -67,6 +69,7 @@ async def create_obra(body: CreateObraRequest, user: EngineerUser, svc: ObraServ
         description=body.description,
         valor=body.valor,
         data_entrega=body.data_entrega,
+        categoria_id=body.categoria_id,
     )
     obra = await svc.create_obra(dto)
     redis = get_redis()
@@ -142,7 +145,8 @@ async def update_obra(
 ):
     """Atualiza dados da obra. Restrito a ADMIN e ENG."""
     if not any([body.title, body.responsavel_id, body.description,
-                body.valor is not None, body.data_entrega]):
+                body.valor is not None, body.data_entrega,
+                body.categoria_id is not None, body.remove_categoria]):
         raise HTTPException(status_code=422, detail="Nenhum campo para atualizar")
 
     try:
@@ -156,6 +160,8 @@ async def update_obra(
         description=body.description,
         valor=body.valor,
         data_entrega=body.data_entrega,
+        categoria_id=body.categoria_id,
+        remove_categoria=body.remove_categoria,
     )
     updated = await svc.update_obra(obra, dto)
     redis = get_redis()

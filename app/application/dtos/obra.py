@@ -12,6 +12,7 @@ class CreateObraDTO(BaseModel):
     description: str
     valor: Optional[Decimal] = None
     data_entrega: Optional[datetime] = None
+    categoria_id: Optional[UUID] = None
 
 class CreateDiary(BaseModel):
     diarista_id: UUID
@@ -42,6 +43,23 @@ class EditObraInfo(BaseModel):
     description: Optional[str] = None
     valor: Optional[Decimal] = None
     data_entrega: Optional[datetime] = None
+    categoria_id: Optional[UUID] = None
+    remove_categoria: bool = False
+
+
+# ── CategoriaObra ──────────────────────────────────────────────────────────────
+
+class CreateCategoriaObraDTO(BaseModel):
+    title: str
+    team_id: UUID
+    descricao: Optional[str] = None
+    cor: Optional[str] = None
+
+
+class UpdateCategoriaObraDTO(BaseModel):
+    title: Optional[str] = None
+    descricao: Optional[str] = None
+    cor: Optional[str] = None
 
 class CreateItem(BaseModel):
     title: str
