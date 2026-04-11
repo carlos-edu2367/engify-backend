@@ -64,6 +64,10 @@ class PagamentoResponse(BaseModel):
     payment_date: Optional[datetime] = None
 
 
+class PagamentoReadResponse(PagamentoResponse):
+    pix_copy_and_past: Optional[str] = None
+
+
 # ── Pagamento por Obra (Engenheiro) ───────────────────────────────────────────
 
 class CreateObraPagamentoRequest(BaseModel):

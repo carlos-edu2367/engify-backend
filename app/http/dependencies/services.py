@@ -164,6 +164,7 @@ async def get_financeiro_service(session: Session) -> FinanceiroService:
         mov_repo=MovimentacaoRepositoryImpl(session),
         pagamento_repo=PagamentoAgendadoRepositoryImpl(session),
         mov_attachment_repo=MovimentacaoAttachmentRepositoryImpl(session),
+        diarist_repo=DiaristRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
     )
 

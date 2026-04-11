@@ -4,13 +4,15 @@ from datetime import datetime, timezone
 from app.application.providers.repo.financeiro_repo import (
     MovimentacaoRepository, PagamentoAgendadoRepository, MovimentacaoAttachmentRepository
 )
+from app.application.providers.repo.team_repos import DiaristRepository
 from app.application.providers.uow import UOWProvider
 from app.application.dtos.financeiro import (
     CreateMovimentacaoDTO, MovimentacaoResponse,
-    CreatePagamentoDTO, EditPagamentoDTO, PagamentoResponse,
+    CreatePagamentoDTO, EditPagamentoDTO, PagamentoReadResponse, PagamentoResponse,
     AddMovimentacaoAttachmentDTO, MovimentacaoFiltersDTO,
     PagamentoFiltersDTO
 )
+from app.application.providers.utility.pix_provider import generate_pix_copy_and_past
 from app.domain.entities.financeiro import (
     Movimentacao, MovimentacaoTypes, MovClass, Natureza,
     PagamentoAgendado, PaymentStatus, MovimentacaoAttachment
@@ -25,11 +27,13 @@ class FinanceiroService():
         mov_repo: MovimentacaoRepository,
         pagamento_repo: PagamentoAgendadoRepository,
         mov_attachment_repo: MovimentacaoAttachmentRepository,
+        diarist_repo: DiaristRepository,
         uow: UOWProvider,
     ):
         self.mov_repo = mov_repo
         self.pagamento_repo = pagamento_repo
         self.mov_attachment_repo = mov_attachment_repo
+        self.diarist_repo = diarist_repo
         self.uow = uow
 
     # ── Movimentações ─────────────────────────────────────────────────────────
@@ -94,6 +98,7 @@ class FinanceiroService():
     async def create_pagamento(
         self, dto: CreatePagamentoDTO, team_id: UUID
     ) -> PagamentoAgendado:
+        receiver_name = await self._resolve_receiver_name(dto.diarist_id, team_id)
         pag = PagamentoAgendado(
             team_id=team_id,
             title=dto.title,
@@ -102,6 +107,12 @@ class FinanceiroService():
             classe=dto.classe,
             data_agendada=dto.data_agendada,
             payment_cod=dto.payment_cod,
+            pix_copy_and_past=generate_pix_copy_and_past(
+                payment_code=dto.payment_cod,
+                amount=dto.valor,
+                receiver_name=receiver_name,
+                city="GOIANIA",
+            ),
             obra_id=dto.obra_id,
             diarist_id=dto.diarist_id,
         )
@@ -111,7 +122,7 @@ class FinanceiroService():
 
     async def list_pagamentos(
         self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None
-    ) -> list[PagamentoResponse]:
+    ) -> list[PagamentoReadResponse]:
         pags = await self.pagamento_repo.list_by_team(team_id, page, limit, filters)
         return [_pag_to_response(p) for p in pags]
 
@@ -140,6 +151,15 @@ class FinanceiroService():
             pagamento.payment_cod = dto.payment_cod
         if dto.obra_id is not None:
             pagamento.obra_id = dto.obra_id
+
+        receiver_name = await self._resolve_receiver_name(pagamento.diarist_id, pagamento.team_id)
+        amount = dto.valor if dto.valor is not None else pagamento.valor.amount
+        pagamento.pix_copy_and_past = generate_pix_copy_and_past(
+            payment_code=pagamento.payment_cod,
+            amount=amount,
+            receiver_name=receiver_name,
+            city="GOIANIA",
+        )
 
         saved = await self.pagamento_repo.save(pagamento)
         await self.uow.commit()
@@ -170,6 +190,15 @@ class FinanceiroService():
         await self.uow.commit()
         return saved_mov
 
+    async def _resolve_receiver_name(self, diarist_id: UUID | None, team_id: UUID) -> str:
+        if not diarist_id:
+            return "Engify Payments"
+        try:
+            diarist = await self.diarist_repo.get_by_id(diarist_id, team_id)
+        except errors.DomainError:
+            return "Engify Payments"
+        return diarist.nome or "Engify Payments"
+
 
 def _mov_to_response(m: Movimentacao) -> MovimentacaoResponse:
     return MovimentacaoResponse(
@@ -185,8 +214,8 @@ def _mov_to_response(m: Movimentacao) -> MovimentacaoResponse:
     )
 
 
-def _pag_to_response(p: PagamentoAgendado) -> PagamentoResponse:
-    return PagamentoResponse(
+def _pag_to_response(p: PagamentoAgendado) -> PagamentoReadResponse:
+    return PagamentoReadResponse(
         id=p.id,
         title=p.title,
         details=p.details,
@@ -195,6 +224,7 @@ def _pag_to_response(p: PagamentoAgendado) -> PagamentoResponse:
         status=p.status,
         data_agendada=p.data_agendada,
         payment_cod=p.payment_cod,
+        pix_copy_and_past=p.pix_copy_and_past,
         obra_id=p.obra_id,
         diarist_id=p.diarist_id,
         payment_date=p.payment_date,

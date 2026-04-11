@@ -4,7 +4,7 @@ from uuid import UUID
 
 from app.http.schemas.financeiro import (
     CreateMovimentacaoRequest, MovimentacaoResponse,
-    CreatePagamentoRequest, UpdatePagamentoRequest, PagamentoResponse,
+    CreatePagamentoRequest, UpdatePagamentoRequest, PagamentoReadResponse, PagamentoResponse,
     CreateMovimentacaoAttachmentRequest, MovimentacaoAttachmentResponse,
 )
 from app.http.schemas.common import MessageResponse, PaginatedResponse
@@ -208,7 +208,7 @@ async def create_pagamento(
     return _pag_response(pag)
 
 
-@router.get("/pagamentos", response_model=PaginatedResponse[PagamentoResponse])
+@router.get("/pagamentos", response_model=PaginatedResponse[PagamentoReadResponse])
 async def list_pagamentos(
     user: FinanceiroUser,
     pagination: Pagination,
@@ -221,7 +221,7 @@ async def list_pagamentos(
     cache_key = pagamentos_list_key(user.team.id, pagination.page, pagination.limit, filters_dict)
     cached = await redis.get(cache_key)
     if cached:
-        return PaginatedResponse[PagamentoResponse].model_validate_json(cached)
+        return PaginatedResponse[PagamentoReadResponse].model_validate_json(cached)
 
     items = await svc.list_pagamentos(user.team.id, pagination.page, pagination.limit, filters)
     total = await svc.count_pagamentos(user.team.id, filters)
@@ -232,7 +232,7 @@ async def list_pagamentos(
     return result
 
 
-@router.get("/pagamentos/{pagamento_id}", response_model=PagamentoResponse)
+@router.get("/pagamentos/{pagamento_id}", response_model=PagamentoReadResponse)
 async def get_pagamento(
     pagamento_id: UUID,
     user: FinanceiroUser,
@@ -243,7 +243,7 @@ async def get_pagamento(
         pag = await svc.get_pagamento(pagamento_id, user.team.id)
     except DomainError:
         raise HTTPException(status_code=404, detail="Pagamento não encontrado")
-    return _pag_response(pag)
+    return _pag_read_response(pag)
 
 
 @router.put("/pagamentos/{pagamento_id}", response_model=PagamentoResponse)
@@ -314,6 +314,17 @@ def _pag_response(p) -> PagamentoResponse:
         id=p.id, title=p.title, details=p.details,
         valor=p.valor.amount, classe=p.classe, status=p.status,
         data_agendada=p.data_agendada, payment_cod=p.payment_cod,
+        obra_id=p.obra_id, diarist_id=p.diarist_id,
+        payment_date=p.payment_date,
+    )
+
+
+def _pag_read_response(p) -> PagamentoReadResponse:
+    return PagamentoReadResponse(
+        id=p.id, title=p.title, details=p.details,
+        valor=p.valor.amount, classe=p.classe, status=p.status,
+        data_agendada=p.data_agendada, payment_cod=p.payment_cod,
+        pix_copy_and_past=p.pix_copy_and_past,
         obra_id=p.obra_id, diarist_id=p.diarist_id,
         payment_date=p.payment_date,
     )

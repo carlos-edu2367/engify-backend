@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, DateTime, Numeric, Boolean, ForeignKey, Index
+from sqlalchemy import String, DateTime, Numeric, Boolean, ForeignKey, Index, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infra.db.models.base import Base, TimestampMixin
@@ -133,7 +133,8 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
     valor_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
     classe: Mapped[str] = mapped_column(String(20), nullable=False)
     data_agendada: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    payment_cod: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payment_cod: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pix_copy_and_past: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=PaymentStatus.AGUARDANDO.value
     )
@@ -164,6 +165,7 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         p.classe = MovClass(self.classe)
         p.data_agendada = self.data_agendada
         p.payment_cod = self.payment_cod
+        p.pix_copy_and_past = self.pix_copy_and_past
         p.status = PaymentStatus(self.status)
         p.payment_date = self.payment_date
         return p
@@ -182,6 +184,7 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
             classe=p.classe.value,
             data_agendada=p.data_agendada,
             payment_cod=p.payment_cod,
+            pix_copy_and_past=p.pix_copy_and_past,
             status=p.status.value,
             payment_date=p.payment_date,
         )
@@ -190,6 +193,7 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         self.status = p.status.value
         self.payment_date = p.payment_date
         self.payment_cod = p.payment_cod
+        self.pix_copy_and_past = p.pix_copy_and_past
         self.title = p.title
         self.details = p.details
         self.valor_amount = p.valor.amount
@@ -257,5 +261,4 @@ class MovimentacaoAttachmentModel(Base, TimestampMixin):
 
     def update_from_domain(self, a: MovimentacaoAttachment) -> None:
         self.is_deleted = a.is_deleted
-
 

@@ -51,6 +51,7 @@ class PagamentoAgendado():
     def __init__(self, team_id: UUID, title: str,
                  details: str, valor: Money, data_agendada: datetime, classe: MovClass,
                  payment_cod: str = None,
+                 pix_copy_and_past: str = None,
                  status: PaymentStatus = PaymentStatus.AGUARDANDO,
                  diarist_id: UUID = None, obra_id: UUID = None,
                  id: UUID = None, payment_date: datetime = None):
@@ -62,6 +63,7 @@ class PagamentoAgendado():
         self.classe = classe
         self.data_agendada = data_agendada
         self.payment_cod = payment_cod
+        self.pix_copy_and_past = pix_copy_and_past
         self.status = status
         self.diarist_id = diarist_id
         self.obra_id = obra_id

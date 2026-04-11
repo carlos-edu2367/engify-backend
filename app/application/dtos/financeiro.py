@@ -60,6 +60,10 @@ class PagamentoResponse(BaseModel):
     payment_date: Optional[datetime] = None
 
 
+class PagamentoReadResponse(PagamentoResponse):
+    pix_copy_and_past: Optional[str] = None
+
+
 class AddMovimentacaoAttachmentDTO(BaseModel):
     file_path: str
     file_name: str
@@ -76,4 +80,3 @@ class MovimentacaoFiltersDTO(BaseModel):
     period_end: Optional[datetime] = None
     obra_id: Optional[UUID] = None
     classe: Optional[MovClass] = None
-

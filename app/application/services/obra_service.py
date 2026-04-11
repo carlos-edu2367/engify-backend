@@ -13,6 +13,7 @@ from app.application.dtos.obra import (CreateObraDTO, CreateDiary, DiariesRespon
                                        CreateMuralPost, CreateMuralAttachment,
                                        CreateItemAttachment, CreateObraImage,
                                        CreateCategoriaObraDTO, UpdateCategoriaObraDTO)
+from app.application.providers.utility.pix_provider import generate_pix_copy_and_past
 from app.domain.entities.money import Money
 from uuid import UUID
 from datetime import datetime
@@ -133,6 +134,12 @@ class DiaryService():
             diarist_id=diarist.id,
             obra_id=obra.id,
             payment_cod=diarist.chave_pix,
+            pix_copy_and_past=generate_pix_copy_and_past(
+                payment_code=diarist.chave_pix,
+                amount=(diarist.valor_diaria * saved.quantidade).amount,
+                receiver_name=diarist.nome,
+                city="GOIANIA",
+            ),
         )
         await self.pagamento_repo.save(pag)
 
