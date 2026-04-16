@@ -1,5 +1,5 @@
 from app.domain.entities.money import Money
-from uuid import UUID, uuid4
+from uuid import UUID
 from enum import Enum
 from datetime import datetime, timezone
 
@@ -34,7 +34,8 @@ class Movimentacao():
                  obra_id: UUID = None, id: UUID = None,
                  natureza: Natureza = Natureza.MANUAL,
                  data_movimentacao: datetime = None,
-                 pagamento_id: UUID = None):
+                 pagamento_id: UUID = None,
+                 lote_info: dict | None = None):
         self.id = id
         self.team_id = team_id
         self.title = title
@@ -45,6 +46,8 @@ class Movimentacao():
         self.natureza = natureza
         self.data_movimentacao = data_movimentacao or datetime.now(timezone.utc)
         self.pagamento_id = pagamento_id
+        # Metadados estruturados do lote — preenchido apenas em baixas em lote
+        self.lote_info = lote_info
 
 
 class PagamentoAgendado():
@@ -76,7 +79,7 @@ class MovimentacaoAttachment():
     """
     def __init__(self, movimentacao_id: UUID, team_id: UUID, file_path: str,
                  file_name: str, content_type: str, id: UUID = None):
-        self.id = id or uuid4()
+        self.id = id  # None para novas entidades; o repositório gera o UUID
         self.movimentacao_id = movimentacao_id
         self.team_id = team_id
         self.file_path = file_path

@@ -10,7 +10,7 @@ from app.application.dtos.financeiro import (
     CreateMovimentacaoDTO, MovimentacaoResponse,
     CreatePagamentoDTO, EditPagamentoDTO, PagamentoReadResponse, PagamentoResponse,
     AddMovimentacaoAttachmentDTO, MovimentacaoFiltersDTO,
-    PagamentoFiltersDTO
+    PagamentoFiltersDTO, BaixaLoteDTO, LotePagamentoResultDTO,
 )
 from app.application.providers.utility.pix_provider import generate_pix_copy_and_past
 from app.domain.entities.financeiro import (
@@ -190,6 +190,69 @@ class FinanceiroService():
         await self.uow.commit()
         return saved_mov
 
+    async def pay_lote(self, dto: BaixaLoteDTO) -> LotePagamentoResultDTO:
+        """
+        Baixa em lote: valida todos os pagamentos, atualiza status e cria uma
+        única Movimentação de saída consolidada. Operação atômica — falha total
+        ou sucesso total.
+        """
+        if not dto.pagamento_ids:
+            raise errors.DomainError("A lista de pagamentos não pode ser vazia")
+
+        pagamentos = await self.pagamento_repo.list_by_ids(dto.pagamento_ids, dto.team_id)
+
+        # Valida que todos os IDs foram encontrados no tenant
+        encontrados = {p.id for p in pagamentos}
+        nao_encontrados = set(dto.pagamento_ids) - encontrados
+        if nao_encontrados:
+            raise errors.DomainError(
+                f"Pagamento(s) não encontrado(s) ou de outro tenant: "
+                f"{', '.join(str(i) for i in nao_encontrados)}"
+            )
+
+        # Valida status de todos antes de alterar qualquer um
+        ja_pagos = [p for p in pagamentos if p.status == PaymentStatus.PAGO]
+        if ja_pagos:
+            raise errors.DomainError(
+                f"Pagamento(s) já efetuado(s): "
+                f"{', '.join(str(p.id) for p in ja_pagos)}"
+            )
+
+        agora = datetime.now(timezone.utc)
+        total = sum(p.valor.amount for p in pagamentos)
+
+        # Marca todos como pagos
+        for pag in pagamentos:
+            pag.status = PaymentStatus.PAGO
+            pag.payment_date = agora
+            await self.pagamento_repo.save(pag)
+
+        # Monta descrição e metadados estruturados
+        descricao = _build_lote_descricao(pagamentos, total)
+        lote_info = _build_lote_info(pagamentos)
+
+        mov = Movimentacao(
+            team_id=dto.team_id,
+            title=f"Baixa em lote — {len(pagamentos)} pagamento(s)",
+            type=MovimentacaoTypes.SAIDA,
+            valor=Money(total),
+            classe=MovClass.OPERACIONAL,
+            natureza=Natureza.MANUAL,
+            lote_info=lote_info,
+        )
+        # Usa o campo details via title (description formatada no lote_info)
+        # e sobrescreve title com a descrição legível
+        mov.title = descricao[:255]
+
+        saved_mov = await self.mov_repo.save(mov)
+        await self.uow.commit()
+
+        return LotePagamentoResultDTO(
+            quantidade=len(pagamentos),
+            valor_total=total,
+            movimentacao_id=saved_mov.id,
+        )
+
     async def _resolve_receiver_name(self, diarist_id: UUID | None, team_id: UUID) -> str:
         if not diarist_id:
             return "Engify Payments"
@@ -198,6 +261,48 @@ class FinanceiroService():
         except errors.DomainError:
             return "Engify Payments"
         return diarist.nome or "Engify Payments"
+
+
+_MAX_LOTE_INLINE = 50  # acima disso, detalha só no lote_info (JSONB)
+
+
+def _fmt_brl(valor) -> str:
+    """Formata Decimal como 'R$ 1.234,56'."""
+    from decimal import Decimal as _D
+    v = _D(str(valor)).quantize(_D("0.01"))
+    s = f"{v:,.2f}"              # "1,234.56"
+    inteiro, centavos = s.split(".")
+    inteiro = inteiro.replace(",", ".")  # "1.234"
+    return f"R$ {inteiro},{centavos}"
+
+
+def _build_lote_descricao(pagamentos: list, total) -> str:
+    linhas = ["Baixa em lote de pagamentos:\n"]
+    detalhados = pagamentos if len(pagamentos) <= _MAX_LOTE_INLINE else pagamentos[:_MAX_LOTE_INLINE]
+    for p in detalhados:
+        linhas.append(
+            f"- Relacionado ao pagamento de id {p.id}, "
+            f"{p.title}, no valor de {_fmt_brl(p.valor.amount)}"
+        )
+    if len(pagamentos) > _MAX_LOTE_INLINE:
+        restantes = len(pagamentos) - _MAX_LOTE_INLINE
+        linhas.append(f"- ... e mais {restantes} pagamento(s) (ver lote_info)")
+    linhas.append(f"\nTotal: {_fmt_brl(total)}")
+    return "\n".join(linhas)
+
+
+def _build_lote_info(pagamentos: list) -> dict:
+    return {
+        "lote_ids": [str(p.id) for p in pagamentos],
+        "lote_detalhes": [
+            {
+                "id": str(p.id),
+                "descricao": p.title,
+                "valor": str(p.valor.amount),
+            }
+            for p in pagamentos
+        ],
+    }
 
 
 def _mov_to_response(m: Movimentacao) -> MovimentacaoResponse:

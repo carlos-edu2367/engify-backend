@@ -6,19 +6,24 @@ from app.http.schemas.obras import (
     ObraResponse, ObraListItem,
     ObraClienteResponse, ItemClienteView, ImageClienteView,
     RegisterObraImageRequest, ObraImageResponse,
+    AddRecebimentoRequest, RecebimentoResponse,
 )
 from app.http.schemas.financeiro import CreateObraPagamentoRequest, PagamentoResponse
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.dependencies.auth import CurrentUser, EngineerUser, AdminUser
 from app.http.dependencies.pagination import Pagination
-from app.http.dependencies.services import ObraServiceDep, ItemServiceDep, ObraImageServiceDep, FinanceiroServiceDep
+from app.http.dependencies.services import ObraServiceDep, ItemServiceDep, ObraImageServiceDep, FinanceiroServiceDep, RecebimentoServiceDep
 from app.application.dtos.obra import CreateObraDTO, EditObraInfo, CreateObraImage
 from app.application.dtos.financeiro import CreatePagamentoDTO
 from app.domain.entities.financeiro import MovClass
 from app.domain.entities.obra import Status
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
-from app.infra.cache.keys import obras_list_key, obra_detail_key, obras_pattern, obra_cliente_key, pagamentos_pattern, public_obra_key
+from app.infra.cache.keys import (
+    obras_list_key, obra_detail_key, obras_pattern, obra_cliente_key,
+    pagamentos_pattern, public_obra_key,
+    entradas_obra_key, entradas_obra_pattern,
+)
 
 router = APIRouter(prefix="/obras", tags=["Obras"])
 
@@ -32,6 +37,7 @@ def _obra_to_response(obra) -> ObraResponse:
         team_id=obra.team_id,
         status=obra.status,
         valor=obra.valor.amount if obra.valor else None,
+        total_recebido=obra.total_recebido,
         data_entrega=obra.data_entrega,
         created_date=obra.created_date,
         categoria_id=obra.categoria_id,
@@ -45,6 +51,7 @@ def _obra_to_list_item(obra) -> ObraListItem:
         status=obra.status,
         responsavel_id=obra.responsavel_id,
         valor=obra.valor.amount if obra.valor else None,
+        total_recebido=obra.total_recebido,
         data_entrega=obra.data_entrega,
         created_date=obra.created_date,
         categoria_id=obra.categoria_id,
@@ -235,6 +242,82 @@ async def create_obra_pagamento(
         diarist_id=pag.diarist_id,
         payment_date=pag.payment_date,
     )
+
+
+# ── Recebimentos ──────────────────────────────────────────────────────────────
+
+@router.post("/{obra_id}/recebimentos", response_model=ObraResponse, status_code=201)
+async def add_recebimento(
+    obra_id: UUID,
+    body: AddRecebimentoRequest,
+    user: EngineerUser,
+    rec_svc: RecebimentoServiceDep,
+):
+    """
+    Registra um valor recebido na obra.
+    Atualiza total_recebido e cria movimentação de ENTRADA atomicamente.
+    Restrito a ADMIN e ENG.
+    """
+    from app.application.dtos.obra import AddRecebimentoDTO
+    dto = AddRecebimentoDTO(
+        obra_id=obra_id,
+        team_id=user.team.id,
+        valor=body.valor,
+    )
+    try:
+        obra = await rec_svc.add_recebimento(dto)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    redis = get_redis()
+    await _invalidate_obras_cache(redis, user.team.id)
+    async for key in redis.scan_iter(match=entradas_obra_pattern(user.team.id, obra_id), count=100):
+        await redis.delete(key)
+
+    return _obra_to_response(obra)
+
+
+@router.get("/{obra_id}/entradas", response_model=PaginatedResponse[RecebimentoResponse])
+async def list_entradas_obra(
+    obra_id: UUID,
+    user: CurrentUser,
+    pagination: Pagination,
+    rec_svc: RecebimentoServiceDep,
+    svc: ObraServiceDep,
+):
+    """
+    Lista movimentações de ENTRADA vinculadas à obra (paginado).
+    Cache Redis 5min.
+    """
+    try:
+        await svc.get_obra(obra_id, user.team.id)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Obra não encontrada")
+
+    redis = get_redis()
+    cache_key = entradas_obra_key(user.team.id, obra_id, pagination.page, pagination.limit)
+    cached = await redis.get(cache_key)
+    if cached:
+        return PaginatedResponse[RecebimentoResponse].model_validate_json(cached)
+
+    entradas = await rec_svc.list_entradas(obra_id, user.team.id, pagination.page, pagination.limit)
+    total = await rec_svc.count_entradas(obra_id, user.team.id)
+
+    items = [
+        RecebimentoResponse(
+            id=e.id,
+            title=e.title,
+            valor=e.valor.amount,
+            data_movimentacao=e.data_movimentacao,
+            obra_id=e.obra_id,
+        )
+        for e in entradas
+    ]
+    result = PaginatedResponse.build(
+        items=items, page=pagination.page, limit=pagination.limit, total=total
+    )
+    await redis.set(cache_key, result.model_dump_json(), ex=300)
+    return result
 
 
 @router.delete("/{obra_id}", response_model=MessageResponse)

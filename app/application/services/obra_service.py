@@ -1,18 +1,21 @@
 from app.domain.entities.obra import Obra, Status, Item, Diaria, Image, ItemAttachment, MuralPost, MuralAttachment, CategoriaObra
-from app.domain.entities.financeiro import PagamentoAgendado, MovClass
+from app.domain.entities.financeiro import Movimentacao, MovimentacaoTypes, MovClass, Natureza, PagamentoAgendado
 from app.domain.errors import DomainError
 from app.application.providers.repo.obra_repo import (
     ObraRepository, DiaryRepository, ItemRepository,
     ItemAttachmentRepository, ImageRepository, MuralRepository, CategoriaObraRepository,
 )
 from app.application.providers.repo.team_repos import DiaristRepository
-from app.application.providers.repo.financeiro_repo import PagamentoAgendadoRepository
+from app.application.providers.repo.financeiro_repo import (
+    MovimentacaoRepository, PagamentoAgendadoRepository,
+)
 from app.application.providers.uow import UOWProvider
 from app.application.dtos.obra import (CreateObraDTO, CreateDiary, DiariesResponse,
                                        EditDiary, EditObraInfo, CreateItem, UpdateItem,
                                        CreateMuralPost, CreateMuralAttachment,
                                        CreateItemAttachment, CreateObraImage,
-                                       CreateCategoriaObraDTO, UpdateCategoriaObraDTO)
+                                       CreateCategoriaObraDTO, UpdateCategoriaObraDTO,
+                                       AddRecebimentoDTO)
 from app.application.providers.utility.pix_provider import generate_pix_copy_and_past
 from app.domain.entities.money import Money
 from uuid import UUID
@@ -423,3 +426,41 @@ class CategoriaObraService():
 
     async def count_obras_by_categoria(self, categoria_id: UUID, team_id: UUID) -> int:
         return await self.obra_repo.count_by_categoria(categoria_id, team_id)
+
+
+class RecebimentoService():
+    """Orquestra adição de recebimentos à obra e listagem de entradas financeiras."""
+
+    def __init__(self, obra_repo: ObraRepository,
+                 mov_repo: MovimentacaoRepository,
+                 uow: UOWProvider):
+        self.obra_repo = obra_repo
+        self.mov_repo = mov_repo
+        self.uow = uow
+
+    async def add_recebimento(self, dto: AddRecebimentoDTO) -> Obra:
+        """Adiciona valor recebido à obra e cria movimentação de entrada atomicamente."""
+        obra = await self.obra_repo.get_by_id(dto.obra_id, dto.team_id)
+
+        obra.adicionar_recebimento(dto.valor)
+
+        mov = Movimentacao(
+            team_id=dto.team_id,
+            title=f"Recebimento — {obra.title}",
+            type=MovimentacaoTypes.ENTRADA,
+            valor=Money(dto.valor),
+            classe=MovClass.CONTRATO,
+            natureza=Natureza.MANUAL,
+            obra_id=obra.id,
+        )
+        await self.mov_repo.save(mov)
+        saved_obra = await self.obra_repo.save(obra)
+        await self.uow.commit()
+        return saved_obra
+
+    async def list_entradas(self, obra_id: UUID, team_id: UUID,
+                            page: int, limit: int) -> list[Movimentacao]:
+        return await self.mov_repo.list_entradas_by_obra(obra_id, team_id, page, limit)
+
+    async def count_entradas(self, obra_id: UUID, team_id: UUID) -> int:
+        return await self.mov_repo.count_entradas_by_obra(obra_id, team_id)

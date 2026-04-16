@@ -23,6 +23,14 @@ class MovimentacaoRepository(ABC):
         pass
 
     @abstractmethod
+    async def list_entradas_by_obra(self, obra_id: UUID, team_id: UUID, page: int, limit: int) -> list[Movimentacao]:
+        pass
+
+    @abstractmethod
+    async def count_entradas_by_obra(self, obra_id: UUID, team_id: UUID) -> int:
+        pass
+
+    @abstractmethod
     async def save(self, movimentacao: Movimentacao) -> Movimentacao:
         pass
 
@@ -33,13 +41,17 @@ class PagamentoAgendadoRepository(ABC):
         pass
 
     @abstractmethod
+    async def list_by_ids(self, ids: list[UUID], team_id: UUID) -> list[PagamentoAgendado]:
+        """Busca múltiplos pagamentos em uma única query. Seguro por tenant."""
+        pass
+
+    @abstractmethod
     async def list_by_team(self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None) -> list[PagamentoAgendado]:
         pass
 
     @abstractmethod
     async def count_by_team(self, team_id: UUID, filters: PagamentoFiltersDTO | None = None) -> int:
         pass
-
 
     @abstractmethod
     async def save(self, pagamento: PagamentoAgendado) -> PagamentoAgendado:

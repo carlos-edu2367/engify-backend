@@ -78,6 +78,18 @@ class CreateObraPagamentoRequest(BaseModel):
     payment_cod: str
 
 
+# ── Baixa em Lote ─────────────────────────────────────────────────────────────
+
+class BaixaLoteRequest(BaseModel):
+    pagamento_ids: list[UUID]
+
+
+class BaixaLoteResponse(BaseModel):
+    quantidade: int
+    valor_total: Decimal
+    movimentacao_id: UUID
+
+
 # ── Anexos ─────────────────────────────────────────────────────────────────────
 
 class CreateMovimentacaoAttachmentRequest(BaseModel):

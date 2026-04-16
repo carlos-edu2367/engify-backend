@@ -148,3 +148,12 @@ def categoria_obra_detail_key(team_id: UUID, categoria_id: UUID) -> str:
 
 def categorias_obra_pattern(team_id: UUID) -> str:
     return f"{team_id}:categorias_obra:*"
+
+
+def entradas_obra_key(team_id: UUID, obra_id: UUID, page: int, limit: int) -> str:
+    return f"{team_id}:obras:{obra_id}:entradas:{page}:{limit}"
+
+
+def entradas_obra_pattern(team_id: UUID, obra_id: UUID) -> str:
+    """Invalida cache de entradas de uma obra específica."""
+    return f"{team_id}:obras:{obra_id}:entradas*"

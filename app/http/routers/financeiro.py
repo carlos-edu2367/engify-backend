@@ -6,6 +6,7 @@ from app.http.schemas.financeiro import (
     CreateMovimentacaoRequest, MovimentacaoResponse,
     CreatePagamentoRequest, UpdatePagamentoRequest, PagamentoReadResponse, PagamentoResponse,
     CreateMovimentacaoAttachmentRequest, MovimentacaoAttachmentResponse,
+    BaixaLoteRequest, BaixaLoteResponse,
 )
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.dependencies.auth import FinanceiroUser
@@ -13,7 +14,7 @@ from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import FinanceiroServiceDep
 from app.application.dtos.financeiro import (
     CreateMovimentacaoDTO, CreatePagamentoDTO, EditPagamentoDTO,
-    AddMovimentacaoAttachmentDTO
+    AddMovimentacaoAttachmentDTO, BaixaLoteDTO,
 )
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
@@ -306,6 +307,40 @@ async def pay_pagamento(
         natureza=mov.natureza, obra_id=mov.obra_id,
         pagamento_id=mov.pagamento_id,
         data_movimentacao=mov.data_movimentacao,
+    )
+
+
+@router.post("/pagamentos/baixa-lote", response_model=BaixaLoteResponse, status_code=200)
+async def baixa_lote_pagamentos(
+    body: BaixaLoteRequest,
+    user: FinanceiroUser,
+    svc: FinanceiroServiceDep,
+):
+    """
+    Baixa em lote: marca múltiplos pagamentos como pagos e gera uma única
+    movimentação financeira consolidada. Operação atômica.
+    Restrito a ADMIN e FIN.
+    """
+    if not body.pagamento_ids:
+        raise HTTPException(status_code=422, detail="A lista de pagamentos não pode ser vazia")
+
+    dto = BaixaLoteDTO(
+        pagamento_ids=body.pagamento_ids,
+        team_id=user.team.id,
+    )
+    try:
+        resultado = await svc.pay_lote(dto)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    redis = get_redis()
+    await _invalidate_pagamentos_cache(redis, user.team.id)
+    await _invalidate_movimentacoes_cache(redis, user.team.id)
+
+    return BaixaLoteResponse(
+        quantidade=resultado.quantidade,
+        valor_total=resultado.valor_total,
+        movimentacao_id=resultado.movimentacao_id,
     )
 
 

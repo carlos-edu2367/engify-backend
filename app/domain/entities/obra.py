@@ -1,3 +1,4 @@
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 from app.domain.entities.money import Money
@@ -17,8 +18,9 @@ class Obra():
                  team_id: UUID, responsavel_id: UUID,
                  description: str, id: UUID = None,
                  valor: Money = None, status: Status = Status.PLANEJAMENTO,
-                 created_date: datetime = None, data_entrega: datetime = None, 
-                 categoria_id: UUID = None):
+                 created_date: datetime = None, data_entrega: datetime = None,
+                 categoria_id: UUID = None,
+                 total_recebido: Decimal = Decimal("0")):
         self.id = id
         self.title = title
         self.team_id = team_id
@@ -30,9 +32,21 @@ class Obra():
         self.data_entrega = data_entrega
         self.is_deleted = False
         self.categoria_id = categoria_id
+        self.total_recebido = total_recebido
 
         if not self.created_date:
             self.created_date = datetime.now(timezone.utc)
+
+    def adicionar_recebimento(self, valor: Decimal) -> None:
+        """Acumula um recebimento validando regras de negócio."""
+        if valor <= Decimal("0"):
+            raise DomainError("O valor do recebimento deve ser positivo")
+        novo_total = self.total_recebido + valor
+        if self.valor is not None and novo_total > self.valor.amount:
+            raise DomainError(
+                "O total recebido não pode ultrapassar o valor total da obra"
+            )
+        self.total_recebido = novo_total
 
     def delete(self):
         self.is_deleted = True

@@ -94,6 +94,7 @@ class ObraModel(Base, TimestampMixin):
         default=lambda: datetime.now(timezone.utc)
     )
     data_entrega: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_recebido: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False, default=Decimal("0"))
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     team: Mapped["TeamModel"] = relationship(  # type: ignore[name-defined]
@@ -136,6 +137,7 @@ class ObraModel(Base, TimestampMixin):
         obra.status = Status(self.status)
         obra.created_date = self.created_date
         obra.data_entrega = self.data_entrega
+        obra.total_recebido = self.total_recebido if self.total_recebido is not None else Decimal("0")
         obra.is_deleted = self.is_deleted
         return obra
 
@@ -153,6 +155,7 @@ class ObraModel(Base, TimestampMixin):
             status=obra.status.value,
             created_date=obra.created_date or datetime.now(timezone.utc),
             data_entrega=obra.data_entrega,
+            total_recebido=obra.total_recebido,
             is_deleted=obra.is_deleted,
         )
 
@@ -165,6 +168,7 @@ class ObraModel(Base, TimestampMixin):
         self.valor_currency = obra.valor.currency if obra.valor else "BRL"
         self.status = obra.status.value
         self.data_entrega = obra.data_entrega
+        self.total_recebido = obra.total_recebido
         self.is_deleted = obra.is_deleted
 
 

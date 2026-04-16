@@ -6,7 +6,7 @@ from app.application.providers.repo.financeiro_repo import (
     MovimentacaoRepository, PagamentoAgendadoRepository, MovimentacaoAttachmentRepository
 )
 from app.application.dtos.financeiro import MovimentacaoFiltersDTO, PagamentoFiltersDTO
-from app.domain.entities.financeiro import Movimentacao, PagamentoAgendado, MovimentacaoAttachment
+from app.domain.entities.financeiro import Movimentacao, MovimentacaoTypes, PagamentoAgendado, MovimentacaoAttachment
 from app.domain.errors import DomainError
 from app.infra.db.models.financeiro_model import (
     MovimentacaoModel, PagamentoAgendadoModel, MovimentacaoAttachmentModel
@@ -74,6 +74,32 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
         result = await self._session.execute(stmt)
         return [m.to_domain() for m in result.scalars().all()]
 
+    async def list_entradas_by_obra(self, obra_id: UUID, team_id: UUID,
+                                    page: int, limit: int) -> list[Movimentacao]:
+        offset = (page - 1) * limit
+        stmt = (
+            select(MovimentacaoModel)
+            .where(
+                MovimentacaoModel.obra_id == obra_id,
+                MovimentacaoModel.team_id == team_id,
+                MovimentacaoModel.type == MovimentacaoTypes.ENTRADA.value,
+            )
+            .order_by(MovimentacaoModel.data_movimentacao.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
+    async def count_entradas_by_obra(self, obra_id: UUID, team_id: UUID) -> int:
+        stmt = select(func.count()).select_from(MovimentacaoModel).where(
+            MovimentacaoModel.obra_id == obra_id,
+            MovimentacaoModel.team_id == team_id,
+            MovimentacaoModel.type == MovimentacaoTypes.ENTRADA.value,
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
+
     async def save(self, movimentacao: Movimentacao) -> Movimentacao:
         if movimentacao.id is None:
             movimentacao.id = uuid4()
@@ -103,6 +129,20 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
         if not model:
             raise DomainError("Pagamento não encontrado")
         return model.to_domain()
+
+    async def list_by_ids(self, ids: list[UUID], team_id: UUID) -> list[PagamentoAgendado]:
+        if not ids:
+            return []
+        stmt = (
+            select(PagamentoAgendadoModel)
+            .where(
+                PagamentoAgendadoModel.id.in_(ids),
+                PagamentoAgendadoModel.team_id == team_id,
+            )
+            .order_by(PagamentoAgendadoModel.id)
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
 
     def _apply_filters(self, stmt, filters: PagamentoFiltersDTO | None):
         if not filters:

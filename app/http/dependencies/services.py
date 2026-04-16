@@ -23,6 +23,7 @@ from app.application.services.team_service import TeamService, DiaristService
 from app.application.services.obra_service import (
     ObraService, ItemService, DiaryService,
     ItemAttachmentService, ObraImageService, MuralService, CategoriaObraService,
+    RecebimentoService,
 )
 from app.application.services.financeiro_service import FinanceiroService
 from app.infra.db.repositories.obra_repository import (
@@ -200,6 +201,14 @@ async def get_categoria_obra_service(session: Session) -> CategoriaObraService:
     )
 
 
+async def get_recebimento_service(session: Session) -> RecebimentoService:
+    return RecebimentoService(
+        obra_repo=ObraRepositoryImpl(session),
+        mov_repo=MovimentacaoRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 RecoveryServiceDep = Annotated[RecoveryPasswordService, Depends(get_recovery_service)]
 TeamServiceDep = Annotated[TeamService, Depends(get_team_service)]
@@ -212,4 +221,5 @@ ItemAttachmentServiceDep = Annotated[ItemAttachmentService, Depends(get_item_att
 ObraImageServiceDep = Annotated[ObraImageService, Depends(get_obra_image_service)]
 MuralServiceDep = Annotated[MuralService, Depends(get_mural_service)]
 CategoriaObraServiceDep = Annotated[CategoriaObraService, Depends(get_categoria_obra_service)]
+RecebimentoServiceDep = Annotated[RecebimentoService, Depends(get_recebimento_service)]
 StorageProviderDep = Annotated[S3StorageProvider, Depends(get_storage_provider)]

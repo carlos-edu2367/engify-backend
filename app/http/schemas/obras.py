@@ -39,6 +39,7 @@ class ObraResponse(BaseModel):
     team_id: UUID
     status: Status
     valor: Optional[Decimal] = None
+    total_recebido: Decimal = Decimal("0")
     data_entrega: Optional[datetime] = None
     created_date: datetime
     categoria_id: Optional[UUID] = None
@@ -50,9 +51,24 @@ class ObraListItem(BaseModel):
     status: Status
     responsavel_id: UUID
     valor: Optional[Decimal] = None
+    total_recebido: Decimal = Decimal("0")
     data_entrega: Optional[datetime] = None
     created_date: datetime
     categoria_id: Optional[UUID] = None
+
+
+# ── Recebimentos ───────────────────────────────────────────────────────────────
+
+class AddRecebimentoRequest(BaseModel):
+    valor: Decimal
+
+
+class RecebimentoResponse(BaseModel):
+    id: UUID
+    title: str
+    valor: Decimal
+    data_movimentacao: datetime
+    obra_id: Optional[UUID] = None
 
 
 # ── CategoriaObra ─────────────────────────────────────────────────────────────

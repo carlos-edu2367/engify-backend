@@ -57,7 +57,10 @@ async def _validate_resource_ownership(
         elif resource_type == "item":
             await item_svc.get_item(resource_id, team_id)
         elif resource_type == "financeiro":
-            await fin_svc.get_pagamento(resource_id, team_id)
+            # resource_id é sempre um movimentacao_id para anexos financeiros
+            mov = await fin_svc.get_movimentacao(resource_id)
+            if mov.team_id != team_id:
+                raise DomainError("Movimentação não pertence ao tenant")
         elif resource_type == "mural":
             await mural_svc.get_post(resource_id, team_id)
     except DomainError:

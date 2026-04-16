@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(alembic current *)",
+      "Bash(python -m alembic current)",
+      "Bash(python -m alembic upgrade head)"
+    ]
+  }
+}

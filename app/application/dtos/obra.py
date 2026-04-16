@@ -112,3 +112,11 @@ class CreateObraImage(BaseModel):
     file_name: str
     content_type: str
 
+
+# ── Recebimentos ───────────────────────────────────────────────────────────────
+
+class AddRecebimentoDTO(BaseModel):
+    obra_id: UUID
+    team_id: UUID
+    valor: Decimal
+

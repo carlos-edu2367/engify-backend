@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from sqlalchemy import String, DateTime, Numeric, Boolean, ForeignKey, Index, Text
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infra.db.models.base import Base, TimestampMixin
 from app.domain.entities.financeiro import (
@@ -45,6 +45,8 @@ class MovimentacaoModel(Base, TimestampMixin):
         DateTime(timezone=True), nullable=False,
         default=lambda: datetime.now(timezone.utc)
     )
+    # Metadados estruturados do lote; None para movimentações individuais
+    lote_info: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     team: Mapped["TeamModel"] = relationship(  # type: ignore[name-defined]
         back_populates="movimentacoes", lazy="raise"
@@ -72,6 +74,7 @@ class MovimentacaoModel(Base, TimestampMixin):
         self.data_movimentacao = m.data_movimentacao
         self.obra_id = m.obra_id
         self.pagamento_id = m.pagamento_id
+        self.lote_info = m.lote_info
 
     def to_domain(self) -> Movimentacao:
         m = object.__new__(Movimentacao)
@@ -85,6 +88,7 @@ class MovimentacaoModel(Base, TimestampMixin):
         m.classe = MovClass(self.classe)
         m.natureza = Natureza(self.natureza)
         m.data_movimentacao = self.data_movimentacao
+        m.lote_info = self.lote_info
         return m
 
     @classmethod
@@ -101,6 +105,7 @@ class MovimentacaoModel(Base, TimestampMixin):
             classe=m.classe.value,
             natureza=m.natureza.value,
             data_movimentacao=m.data_movimentacao or datetime.now(timezone.utc),
+            lote_info=m.lote_info,
         )
 
 

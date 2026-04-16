@@ -80,3 +80,14 @@ class MovimentacaoFiltersDTO(BaseModel):
     period_end: Optional[datetime] = None
     obra_id: Optional[UUID] = None
     classe: Optional[MovClass] = None
+
+
+class BaixaLoteDTO(BaseModel):
+    pagamento_ids: list[UUID]
+    team_id: UUID
+
+
+class LotePagamentoResultDTO(BaseModel):
+    quantidade: int
+    valor_total: Decimal
+    movimentacao_id: UUID
