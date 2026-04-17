@@ -157,3 +157,15 @@ def entradas_obra_key(team_id: UUID, obra_id: UUID, page: int, limit: int) -> st
 def entradas_obra_pattern(team_id: UUID, obra_id: UUID) -> str:
     """Invalida cache de entradas de uma obra específica."""
     return f"{team_id}:obras:{obra_id}:entradas*"
+
+
+def notif_list_key(user_id: UUID, team_id: UUID, page: int, limit: int) -> str:
+    return f"{team_id}:notif:{user_id}:list:{page}:{limit}"
+
+
+def notif_count_key(user_id: UUID, team_id: UUID) -> str:
+    return f"{team_id}:notif:{user_id}:count"
+
+
+def notif_pattern(user_id: UUID, team_id: UUID) -> str:
+    return f"{team_id}:notif:{user_id}:*"

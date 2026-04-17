@@ -1,5 +1,6 @@
 from app.domain.entities.obra import Obra, Status, Item, Diaria, Image, ItemAttachment, MuralPost, MuralAttachment, CategoriaObra
 from app.domain.entities.financeiro import Movimentacao, MovimentacaoTypes, MovClass, Natureza, PagamentoAgendado
+from app.domain.entities.notificacao import Notificacao, TipoNotificacao
 from app.domain.errors import DomainError
 from app.application.providers.repo.obra_repo import (
     ObraRepository, DiaryRepository, ItemRepository,
@@ -9,6 +10,7 @@ from app.application.providers.repo.team_repos import DiaristRepository
 from app.application.providers.repo.financeiro_repo import (
     MovimentacaoRepository, PagamentoAgendadoRepository,
 )
+from app.application.providers.repo.notificacao_repo import NotificacaoRepository
 from app.application.providers.uow import UOWProvider
 from app.application.dtos.obra import (CreateObraDTO, CreateDiary, DiariesResponse,
                                        EditDiary, EditObraInfo, CreateItem, UpdateItem,
@@ -292,6 +294,21 @@ class ObraImageService():
         await self.uow.commit()
         return saved
 
+    async def register_images(self, dtos: list[CreateObraImage]) -> list[Image]:
+        """Persiste múltiplos arquivos (imagens/vídeos) em uma única transação."""
+        saved_list = []
+        for dto in dtos:
+            image = Image(
+                obra_id=dto.obra_id,
+                team_id=dto.team_id,
+                file_path=dto.file_path,
+                file_name=dto.file_name,
+                content_type=dto.content_type,
+            )
+            saved_list.append(await self.image_repo.save(image))
+        await self.uow.commit()
+        return saved_list
+
     async def delete_image(self, image: Image) -> None:
         image.delete()
         await self.image_repo.save(image)
@@ -300,14 +317,14 @@ class ObraImageService():
 
 class MuralService():
     def __init__(self, mural_repo: MuralRepository, obra_repo: ObraRepository,
-                 uow: UOWProvider):
+                 uow: UOWProvider, notif_repo: NotificacaoRepository | None = None):
         self.mural_repo = mural_repo
         self.obra_repo = obra_repo
         self.uow = uow
+        self.notif_repo = notif_repo
 
     async def create_post(self, dto: CreateMuralPost) -> MuralPost:
-        # Valida que a obra existe e pertence ao time
-        await self.obra_repo.get_by_id(dto.obra_id, dto.team_id)
+        obra = await self.obra_repo.get_by_id(dto.obra_id, dto.team_id)
         post = MuralPost(
             obra_id=dto.obra_id,
             team_id=dto.team_id,
@@ -316,6 +333,21 @@ class MuralService():
             mentions=dto.mentions,
         )
         saved = await self.mural_repo.save_post(post)
+
+        if self.notif_repo and dto.mentions:
+            for user_id in dto.mentions:
+                if user_id == dto.author_id:
+                    continue
+                notif = Notificacao(
+                    user_id=user_id,
+                    team_id=dto.team_id,
+                    tipo=TipoNotificacao.MENCAO_MURAL,
+                    titulo="Você foi mencionado no mural",
+                    mensagem=f"Você foi mencionado em um post na obra \"{obra.title}\".",
+                    reference_id=obra.id,
+                )
+                await self.notif_repo.save(notif)
+
         await self.uow.commit()
         return saved
 

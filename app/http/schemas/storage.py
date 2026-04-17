@@ -2,14 +2,17 @@ from pydantic import BaseModel, field_validator
 from uuid import UUID
 from typing import Literal
 
+_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_VIDEO_TYPES = {"video/mp4", "video/quicktime", "video/webm"}
+_DOC_TYPES   = {"application/pdf"}
 
 ResourceType = Literal["obra", "item", "financeiro", "mural"]
 
 ALLOWED_UPLOAD_TYPES = {
-    "obra":       {"image/jpeg", "image/png", "image/webp"},
-    "item":       {"image/jpeg", "image/png", "image/webp"},
-    "financeiro": {"image/jpeg", "image/png", "image/webp", "application/pdf"},
-    "mural":      {"image/jpeg", "image/png", "image/webp", "application/pdf"},
+    "obra":       _IMAGE_TYPES | _VIDEO_TYPES,
+    "item":       _IMAGE_TYPES,
+    "financeiro": _IMAGE_TYPES | _DOC_TYPES,
+    "mural":      _IMAGE_TYPES | _DOC_TYPES,
 }
 
 
@@ -30,6 +33,21 @@ class UploadUrlResponse(BaseModel):
     upload_url: str
     path: str
     expires_in: int
+
+
+class BatchUploadUrlItem(BaseModel):
+    file_name: str
+    content_type: str
+
+
+class BatchUploadUrlRequest(BaseModel):
+    resource_type: ResourceType
+    resource_id: UUID
+    files: list[BatchUploadUrlItem]
+
+
+class BatchUploadUrlResponse(BaseModel):
+    uploads: list[UploadUrlResponse]
 
 
 class DownloadUrlRequest(BaseModel):

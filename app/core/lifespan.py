@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.infra.cache.client import init_redis, close_redis
@@ -16,9 +17,19 @@ async def lifespan(app: FastAPI):
     await init_redis()
     logger.info("startup: redis conectado")
 
+    from app.infra.scheduler.deadline_checker import deadline_checker_loop
+    deadline_task = asyncio.create_task(deadline_checker_loop())
+    logger.info("startup: deadline_checker iniciado")
+
     yield
 
     logger.info("shutdown: liberando recursos")
+    deadline_task.cancel()
+    try:
+        await deadline_task
+    except asyncio.CancelledError:
+        pass
+
     from app.http.dependencies.services import close_email_adapter
     await close_email_adapter()
     await close_redis()

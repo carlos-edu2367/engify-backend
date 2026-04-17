@@ -5,7 +5,7 @@ from app.http.schemas.obras import (
     CreateObraRequest, UpdateObraRequest, UpdateStatusRequest,
     ObraResponse, ObraListItem,
     ObraClienteResponse, ItemClienteView, ImageClienteView,
-    RegisterObraImageRequest, ObraImageResponse,
+    RegisterObraImageRequest, RegisterObraImagesBatchRequest, ObraImageResponse,
     AddRecebimentoRequest, RecebimentoResponse,
 )
 from app.http.schemas.financeiro import CreateObraPagamentoRequest, PagamentoResponse
@@ -376,6 +376,56 @@ async def register_obra_image(
         content_type=image.content_type,
         created_at=image.created_at,
     )
+
+
+@router.post("/{obra_id}/images/batch", response_model=list[ObraImageResponse], status_code=201)
+async def register_obra_images_batch(
+    obra_id: UUID,
+    body: RegisterObraImagesBatchRequest,
+    user: EngineerUser,
+    svc: ObraServiceDep,
+    image_svc: ObraImageServiceDep,
+):
+    """
+    Registra múltiplos arquivos (imagens e vídeos) de uma obra em uma única chamada.
+    Todos os arquivos devem ter sido enviados previamente via POST /storage/upload-urls.
+    Restrito a ADMIN e ENG.
+    """
+    if not body.files:
+        raise HTTPException(status_code=422, detail="A lista de arquivos não pode ser vazia")
+
+    try:
+        await svc.get_obra(obra_id, user.team.id)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Obra não encontrada")
+
+    dtos = [
+        CreateObraImage(
+            obra_id=obra_id,
+            team_id=user.team.id,
+            file_path=f.file_path,
+            file_name=f.file_name,
+            content_type=f.content_type,
+        )
+        for f in body.files
+    ]
+    images = await image_svc.register_images(dtos)
+
+    redis = get_redis()
+    await redis.delete(obra_cliente_key(user.team.id, obra_id))
+    await redis.delete(public_obra_key(obra_id))
+
+    return [
+        ObraImageResponse(
+            id=img.id,
+            obra_id=img.obra_id,
+            file_path=img.file_path,
+            file_name=img.file_name,
+            content_type=img.content_type,
+            created_at=img.created_at,
+        )
+        for img in images
+    ]
 
 
 # ── Visão do Cliente ───────────────────────────────────────────────────────────

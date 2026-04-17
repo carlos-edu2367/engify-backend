@@ -25,6 +25,7 @@ from app.application.services.obra_service import (
     ItemAttachmentService, ObraImageService, MuralService, CategoriaObraService,
     RecebimentoService,
 )
+from app.application.services.notificacao_service import NotificacaoService
 from app.application.services.financeiro_service import FinanceiroService
 from app.infra.db.repositories.obra_repository import (
     ObraRepositoryImpl, ItemRepositoryImpl, DiaryRepositoryImpl,
@@ -35,6 +36,7 @@ from app.infra.db.repositories.financeiro_repository import (
     MovimentacaoRepositoryImpl, PagamentoAgendadoRepositoryImpl,
     MovimentacaoAttachmentRepositoryImpl
 )
+from app.infra.db.repositories.notificacao_repository import NotificacaoRepositoryImpl
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +192,14 @@ async def get_mural_service(session: Session) -> MuralService:
         mural_repo=MuralRepositoryImpl(session),
         obra_repo=ObraRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
+        notif_repo=NotificacaoRepositoryImpl(session),
+    )
+
+
+async def get_notificacao_service(session: Session) -> NotificacaoService:
+    return NotificacaoService(
+        notif_repo=NotificacaoRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
     )
 
 
@@ -222,4 +232,5 @@ ObraImageServiceDep = Annotated[ObraImageService, Depends(get_obra_image_service
 MuralServiceDep = Annotated[MuralService, Depends(get_mural_service)]
 CategoriaObraServiceDep = Annotated[CategoriaObraService, Depends(get_categoria_obra_service)]
 RecebimentoServiceDep = Annotated[RecebimentoService, Depends(get_recebimento_service)]
+NotificacaoServiceDep = Annotated[NotificacaoService, Depends(get_notificacao_service)]
 StorageProviderDep = Annotated[S3StorageProvider, Depends(get_storage_provider)]

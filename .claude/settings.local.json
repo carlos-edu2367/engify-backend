@@ -3,7 +3,9 @@
     "allow": [
       "Bash(alembic current *)",
       "Bash(python -m alembic current)",
-      "Bash(python -m alembic upgrade head)"
+      "Bash(python -m alembic upgrade head)",
+      "Bash(python -c \"from app.http.routers.notificacoes import router; from app.infra.scheduler.deadline_checker import deadline_checker_loop; print\\('OK'\\)\")",
+      "Bash(python -c \"from main import app; print\\('routers:', [r.path for r in app.routes if hasattr\\(r,'path'\\) and 'notif' in r.path]\\)\")"
     ]
   }
 }

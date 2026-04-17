@@ -159,6 +159,10 @@ class ObraImageResponse(BaseModel):
     created_at: datetime
 
 
+class RegisterObraImagesBatchRequest(BaseModel):
+    files: list[RegisterObraImageRequest]
+
+
 # ── Mural ──────────────────────────────────────────────────────────────────────
 
 class CreateMuralPostRequest(BaseModel):

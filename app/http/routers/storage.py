@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 
 from app.http.schemas.storage import (
     UploadUrlRequest, UploadUrlResponse,
+    BatchUploadUrlRequest, BatchUploadUrlResponse,
     DownloadUrlRequest, DownloadUrlResponse,
     ALLOWED_UPLOAD_TYPES,
 )
@@ -21,10 +22,13 @@ BUCKET = "engify"
 
 # Extensões permitidas por content-type
 _ALLOWED_EXTENSIONS = {
-    "image/jpeg": {"jpg", "jpeg"},
-    "image/png": {"png"},
-    "image/webp": {"webp"},
-    "application/pdf": {"pdf"},
+    "image/jpeg":       {"jpg", "jpeg"},
+    "image/png":        {"png"},
+    "image/webp":       {"webp"},
+    "application/pdf":  {"pdf"},
+    "video/mp4":        {"mp4"},
+    "video/quicktime":  {"mov"},
+    "video/webm":       {"webm"},
 }
 
 
@@ -133,6 +137,57 @@ async def get_upload_url(
         path=data.path,
         expires_in=settings.storage_upload_expires_in,
     )
+
+
+@router.post("/upload-urls", response_model=BatchUploadUrlResponse)
+async def get_upload_urls_batch(
+    body: BatchUploadUrlRequest,
+    user: ManagerUser,
+    storage: StorageProviderDep,
+    obra_svc: ObraServiceDep,
+    item_svc: ItemServiceDep,
+    fin_svc: FinanceiroServiceDep,
+    mural_svc: MuralServiceDep,
+):
+    """
+    Gera múltiplas presigned URLs de upload em uma única chamada.
+    Útil para upload de lotes de imagens e vídeos.
+    Restrito a ADMIN, ENG e FINANCEIRO.
+    """
+    if not body.files:
+        raise HTTPException(status_code=422, detail="A lista de arquivos não pode ser vazia")
+
+    allowed = ALLOWED_UPLOAD_TYPES.get(body.resource_type, set())
+    for f in body.files:
+        if f.content_type not in allowed:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Tipo '{f.content_type}' não permitido para '{body.resource_type}'. "
+                       f"Permitidos: {sorted(allowed)}",
+            )
+
+    await _validate_resource_ownership(
+        body.resource_type, body.resource_id, user.team.id,
+        obra_svc, item_svc, fin_svc, mural_svc,
+    )
+
+    uploads = []
+    for f in body.files:
+        path = _build_path(body.resource_type, body.resource_id, f.file_name, f.content_type)
+        req = DirectUploadRequest(
+            bucket=BUCKET,
+            path=path,
+            content_type=f.content_type,
+            expires_in=settings.storage_upload_expires_in,
+        )
+        data = await storage.create_direct_upload(req)
+        uploads.append(UploadUrlResponse(
+            upload_url=data.upload_url,
+            path=data.path,
+            expires_in=settings.storage_upload_expires_in,
+        ))
+
+    return BatchUploadUrlResponse(uploads=uploads)
 
 
 @router.post("/download-url", response_model=DownloadUrlResponse)
