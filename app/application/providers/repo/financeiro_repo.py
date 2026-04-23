@@ -7,7 +7,7 @@ from app.application.dtos.financeiro import MovimentacaoFiltersDTO, PagamentoFil
 
 class MovimentacaoRepository(ABC):
     @abstractmethod
-    async def get_by_id(self, id: UUID) -> Movimentacao:
+    async def get_by_id(self, id: UUID, team_id: UUID | None = None) -> Movimentacao:
         pass
 
     @abstractmethod

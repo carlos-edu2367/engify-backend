@@ -34,3 +34,6 @@ class Notificacao:
 
     def marcar_lida(self) -> None:
         self.lida = True
+
+    def marcar_nao_lida(self) -> None:
+        self.lida = False

@@ -120,3 +120,9 @@ class AddRecebimentoDTO(BaseModel):
     team_id: UUID
     valor: Decimal
 
+
+class DeleteRecebimentoDTO(BaseModel):
+    obra_id: UUID
+    recebimento_id: UUID
+    team_id: UUID
+

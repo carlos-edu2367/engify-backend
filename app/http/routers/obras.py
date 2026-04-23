@@ -13,7 +13,7 @@ from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.dependencies.auth import CurrentUser, EngineerUser, AdminUser
 from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import ObraServiceDep, ItemServiceDep, ObraImageServiceDep, FinanceiroServiceDep, RecebimentoServiceDep
-from app.application.dtos.obra import CreateObraDTO, EditObraInfo, CreateObraImage
+from app.application.dtos.obra import CreateObraDTO, EditObraInfo, CreateObraImage, DeleteRecebimentoDTO
 from app.application.dtos.financeiro import CreatePagamentoDTO
 from app.domain.entities.financeiro import MovClass
 from app.domain.entities.obra import Status
@@ -21,7 +21,7 @@ from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
 from app.infra.cache.keys import (
     obras_list_key, obra_detail_key, obras_pattern, obra_cliente_key,
-    pagamentos_pattern, public_obra_key,
+    pagamentos_pattern, public_obra_key, movimentacoes_pattern,
     entradas_obra_key, entradas_obra_pattern,
 )
 
@@ -60,6 +60,12 @@ def _obra_to_list_item(obra) -> ObraListItem:
 
 async def _invalidate_obras_cache(redis, team_id: UUID) -> None:
     pattern = obras_pattern(team_id)
+    async for key in redis.scan_iter(match=pattern, count=100):
+        await redis.delete(key)
+
+
+async def _invalidate_movimentacoes_cache(redis, team_id: UUID) -> None:
+    pattern = movimentacoes_pattern(team_id)
     async for key in redis.scan_iter(match=pattern, count=100):
         await redis.delete(key)
 
@@ -271,10 +277,46 @@ async def add_recebimento(
 
     redis = get_redis()
     await _invalidate_obras_cache(redis, user.team.id)
+    await _invalidate_movimentacoes_cache(redis, user.team.id)
     async for key in redis.scan_iter(match=entradas_obra_pattern(user.team.id, obra_id), count=100):
         await redis.delete(key)
 
     return _obra_to_response(obra)
+
+
+@router.delete("/{obra_id}/recebimentos/{recebimento_id}", response_model=MessageResponse)
+async def delete_recebimento(
+    obra_id: UUID,
+    recebimento_id: UUID,
+    user: EngineerUser,
+    rec_svc: RecebimentoServiceDep,
+):
+    """
+    Remove um recebimento da obra.
+    Reverte total_recebido e faz soft-delete da movimentaÃ§Ã£o de entrada atomicamente.
+    Restrito a ADMIN e ENG.
+    """
+    dto = DeleteRecebimentoDTO(
+        obra_id=obra_id,
+        recebimento_id=recebimento_id,
+        team_id=user.team.id,
+    )
+    try:
+        await rec_svc.delete_recebimento(dto)
+    except DomainError as e:
+        detail = str(e)
+        normalized = detail.lower()
+        if "nao encontrada" in normalized or "nÃ£o encontrada" in normalized:
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+    redis = get_redis()
+    await _invalidate_obras_cache(redis, user.team.id)
+    await _invalidate_movimentacoes_cache(redis, user.team.id)
+    async for key in redis.scan_iter(match=entradas_obra_pattern(user.team.id, obra_id), count=100):
+        await redis.delete(key)
+
+    return MessageResponse(message="Recebimento removido com sucesso")
 
 
 @router.get("/{obra_id}/entradas", response_model=PaginatedResponse[RecebimentoResponse])

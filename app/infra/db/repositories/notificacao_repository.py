@@ -48,7 +48,15 @@ class NotificacaoRepositoryImpl(NotificacaoRepository):
                 lida=False,
             )
             .on_conflict_do_nothing(
-                constraint="uq_notif_user_tipo_ref"
+                index_elements=[
+                    NotificacaoModel.user_id,
+                    NotificacaoModel.tipo,
+                    NotificacaoModel.reference_id,
+                ],
+                index_where=NotificacaoModel.tipo.in_([
+                    TipoNotificacao.PRAZO_7_DIAS.value,
+                    TipoNotificacao.PRAZO_1_DIA.value,
+                ]),
             )
         )
         await self._session.execute(stmt)

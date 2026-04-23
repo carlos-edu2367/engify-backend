@@ -17,7 +17,7 @@ from app.application.dtos.obra import (CreateObraDTO, CreateDiary, DiariesRespon
                                        CreateMuralPost, CreateMuralAttachment,
                                        CreateItemAttachment, CreateObraImage,
                                        CreateCategoriaObraDTO, UpdateCategoriaObraDTO,
-                                       AddRecebimentoDTO)
+                                       AddRecebimentoDTO, DeleteRecebimentoDTO)
 from app.application.providers.utility.pix_provider import generate_pix_copy_and_past
 from app.domain.entities.money import Money
 from uuid import UUID
@@ -335,7 +335,8 @@ class MuralService():
         saved = await self.mural_repo.save_post(post)
 
         if self.notif_repo and dto.mentions:
-            for user_id in dto.mentions:
+            mentioned_users = set(dto.mentions)
+            for user_id in mentioned_users:
                 if user_id == dto.author_id:
                     continue
                 notif = Notificacao(
@@ -382,6 +383,10 @@ class MuralService():
 
     async def list_attachments(self, post_id: UUID) -> list[MuralAttachment]:
         return await self.mural_repo.list_attachments(post_id)
+
+    async def list_attachments_by_obra(self, obra_id: UUID, team_id: UUID) -> list[MuralAttachment]:
+        await self.obra_repo.get_by_id(obra_id, team_id)
+        return await self.mural_repo.list_attachments_by_obra(obra_id, team_id)
 
     async def get_attachment(self, attachment_id: UUID, team_id: UUID) -> MuralAttachment:
         return await self.mural_repo.get_attachment(attachment_id, team_id)
@@ -485,6 +490,31 @@ class RecebimentoService():
             natureza=Natureza.MANUAL,
             obra_id=obra.id,
         )
+        await self.mov_repo.save(mov)
+        saved_obra = await self.obra_repo.save(obra)
+        await self.uow.commit()
+        return saved_obra
+
+    async def delete_recebimento(self, dto: DeleteRecebimentoDTO) -> Obra:
+        """
+        Remove um recebimento da obra de forma atÃ´mica.
+        Reverte total_recebido e faz soft-delete da movimentaÃ§Ã£o de entrada.
+        """
+        obra = await self.obra_repo.get_by_id(dto.obra_id, dto.team_id)
+        mov = await self.mov_repo.get_by_id(dto.recebimento_id, dto.team_id)
+
+        if mov.obra_id != obra.id:
+            raise DomainError("Recebimento nÃ£o pertence Ã  obra informada")
+        if mov.type != MovimentacaoTypes.ENTRADA:
+            raise DomainError("MovimentaÃ§Ã£o informada nÃ£o Ã© um recebimento")
+        if mov.pagamento_id is not None:
+            raise DomainError("MovimentaÃ§Ã£o informada nÃ£o Ã© um recebimento de obra")
+        if mov.natureza != Natureza.MANUAL:
+            raise DomainError("NÃ£o Ã© possÃ­vel remover recebimentos importados automaticamente")
+
+        obra.remover_recebimento(mov.valor.amount)
+        mov.delete()
+
         await self.mov_repo.save(mov)
         saved_obra = await self.obra_repo.save(obra)
         await self.uow.commit()

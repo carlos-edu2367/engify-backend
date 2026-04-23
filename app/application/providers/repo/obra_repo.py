@@ -149,5 +149,9 @@ class MuralRepository(ABC):
         pass
 
     @abstractmethod
+    async def list_attachments_by_obra(self, obra_id: UUID, team_id: UUID) -> list[MuralAttachment]:
+        pass
+
+    @abstractmethod
     async def get_attachment(self, attachment_id: UUID, team_id: UUID) -> MuralAttachment:
         pass

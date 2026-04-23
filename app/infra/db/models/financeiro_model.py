@@ -47,6 +47,7 @@ class MovimentacaoModel(Base, TimestampMixin):
     )
     # Metadados estruturados do lote; None para movimentações individuais
     lote_info: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     team: Mapped["TeamModel"] = relationship(  # type: ignore[name-defined]
         back_populates="movimentacoes", lazy="raise"
@@ -62,6 +63,7 @@ class MovimentacaoModel(Base, TimestampMixin):
         Index("idx_movimentacoes_team_type", "team_id", "type"),
         # Movimentações de uma obra específica (nullable, só indexa quando preenchido)
         Index("idx_movimentacoes_obra", "obra_id"),
+        Index("idx_movimentacoes_team_deleted", "team_id", "is_deleted"),
     )
 
     def update_from_domain(self, m: Movimentacao) -> None:
@@ -75,6 +77,7 @@ class MovimentacaoModel(Base, TimestampMixin):
         self.obra_id = m.obra_id
         self.pagamento_id = m.pagamento_id
         self.lote_info = m.lote_info
+        self.is_deleted = m.is_deleted
 
     def to_domain(self) -> Movimentacao:
         m = object.__new__(Movimentacao)
@@ -89,6 +92,7 @@ class MovimentacaoModel(Base, TimestampMixin):
         m.natureza = Natureza(self.natureza)
         m.data_movimentacao = self.data_movimentacao
         m.lote_info = self.lote_info
+        m.is_deleted = self.is_deleted
         return m
 
     @classmethod
@@ -106,6 +110,7 @@ class MovimentacaoModel(Base, TimestampMixin):
             natureza=m.natureza.value,
             data_movimentacao=m.data_movimentacao or datetime.now(timezone.utc),
             lote_info=m.lote_info,
+            is_deleted=m.is_deleted,
         )
 
 
@@ -266,4 +271,3 @@ class MovimentacaoAttachmentModel(Base, TimestampMixin):
 
     def update_from_domain(self, a: MovimentacaoAttachment) -> None:
         self.is_deleted = a.is_deleted
-

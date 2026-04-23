@@ -35,7 +35,8 @@ class Movimentacao():
                  natureza: Natureza = Natureza.MANUAL,
                  data_movimentacao: datetime = None,
                  pagamento_id: UUID = None,
-                 lote_info: dict | None = None):
+                 lote_info: dict | None = None,
+                 is_deleted: bool = False):
         self.id = id
         self.team_id = team_id
         self.title = title
@@ -48,6 +49,10 @@ class Movimentacao():
         self.pagamento_id = pagamento_id
         # Metadados estruturados do lote — preenchido apenas em baixas em lote
         self.lote_info = lote_info
+        self.is_deleted = is_deleted
+
+    def delete(self) -> None:
+        self.is_deleted = True
 
 
 class PagamentoAgendado():

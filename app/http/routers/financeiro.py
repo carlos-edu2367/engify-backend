@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from uuid import UUID
 
 from app.http.schemas.financeiro import (
@@ -22,7 +22,9 @@ from app.infra.cache.keys import (
     movimentacoes_list_key, movimentacoes_pattern,
     pagamentos_list_key, pagamentos_pattern,
     movimentacao_attachments_key, movimentacao_attachments_pattern,
+    movimentacao_delete_lock_key, movimentacao_deleted_tombstone_key,
 )
+from app.core.limiter import limiter
 
 router = APIRouter(prefix="/financeiro", tags=["Financeiro"])
 
@@ -48,7 +50,9 @@ async def _invalidate_pagamentos_cache(redis, team_id: UUID) -> None:
 # ── Movimentações ─────────────────────────────────────────────────────────────
 
 @router.post("/movimentacoes", response_model=MovimentacaoResponse, status_code=201)
+@limiter.limit("30/minute")
 async def create_movimentacao(
+    request: Request,
     body: CreateMovimentacaoRequest,
     user: FinanceiroUser,
     svc: FinanceiroServiceDep,
@@ -71,6 +75,45 @@ async def create_movimentacao(
         pagamento_id=mov.pagamento_id,
         data_movimentacao=mov.data_movimentacao,
     )
+
+
+@router.delete("/movimentacoes/{movimentacao_id}", response_model=MessageResponse)
+@limiter.limit("30/minute")
+async def delete_movimentacao(
+    request: Request,
+    movimentacao_id: UUID,
+    user: FinanceiroUser,
+    svc: FinanceiroServiceDep,
+):
+    redis = get_redis()
+    tombstone_key = movimentacao_deleted_tombstone_key(user.team.id, movimentacao_id)
+    if await redis.get(tombstone_key):
+        return MessageResponse(message="MovimentaÃ§Ã£o removida com sucesso")
+
+    lock_key = movimentacao_delete_lock_key(user.team.id, movimentacao_id)
+    lock_acquired = await redis.set(lock_key, "1", ex=30, nx=True)
+    if not lock_acquired:
+        raise HTTPException(status_code=409, detail="RemoÃ§Ã£o da movimentaÃ§Ã£o jÃ¡ estÃ¡ em processamento")
+
+    try:
+        try:
+            mov = await svc.get_movimentacao_by_team(movimentacao_id, user.team.id)
+        except DomainError:
+            if await redis.get(tombstone_key):
+                return MessageResponse(message="MovimentaÃ§Ã£o removida com sucesso")
+            raise HTTPException(status_code=404, detail="MovimentaÃ§Ã£o nÃ£o encontrada")
+
+        try:
+            await svc.delete_movimentacao(mov)
+        except DomainError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        await redis.set(tombstone_key, "1", ex=60)
+        await _invalidate_movimentacoes_cache(redis, user.team.id)
+        await _invalidate_mov_attachments_cache(redis, user.team.id, movimentacao_id)
+        return MessageResponse(message="MovimentaÃ§Ã£o removida com sucesso")
+    finally:
+        await redis.delete(lock_key)
 
 
 from app.http.dependencies.financeiro_filters import MovimentacaoFiltersDep, PagamentoFiltersDep
@@ -109,9 +152,7 @@ async def add_movimentacao_attachment(
     svc: FinanceiroServiceDep,
 ):
     try:
-        mov = await svc.get_movimentacao(movimentacao_id)
-        if mov.team_id != user.team.id:
-            raise HTTPException(status_code=404, detail="Movimentação não encontrada")
+        mov = await svc.get_movimentacao_by_team(movimentacao_id, user.team.id)
         dto = AddMovimentacaoAttachmentDTO(
             file_path=body.file_path, file_name=body.file_name, content_type=body.content_type
         )
@@ -144,9 +185,7 @@ async def list_movimentacao_attachments(
         return [MovimentacaoAttachmentResponse.model_validate(a) for a in json.loads(cached)]
 
     try:
-        mov = await svc.get_movimentacao(movimentacao_id)
-        if mov.team_id != user.team.id:
-            raise HTTPException(status_code=404, detail="Movimentação não encontrada")
+        await svc.get_movimentacao_by_team(movimentacao_id, user.team.id)
         atts = await svc.get_attachments(movimentacao_id)
         result = [
             MovimentacaoAttachmentResponse(
@@ -173,9 +212,7 @@ async def delete_movimentacao_attachment(
     svc: FinanceiroServiceDep,
 ):
     try:
-        mov = await svc.get_movimentacao(movimentacao_id)
-        if mov.team_id != user.team.id:
-            raise HTTPException(status_code=404, detail="Movimentação não encontrada")
+        await svc.get_movimentacao_by_team(movimentacao_id, user.team.id)
         await svc.delete_attachment(attachment_id, user.team.id)
         redis = get_redis()
         await _invalidate_mov_attachments_cache(redis, user.team.id, movimentacao_id)

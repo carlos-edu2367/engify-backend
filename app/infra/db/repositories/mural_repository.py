@@ -112,6 +112,22 @@ class MuralRepositoryImpl(MuralRepository):
         result = await self._session.execute(stmt)
         return [m.to_domain() for m in result.scalars().all()]
 
+    async def list_attachments_by_obra(self, obra_id: UUID, team_id: UUID) -> list[MuralAttachment]:
+        stmt = (
+            select(MuralAttachmentModel)
+            .join(MuralPostModel, MuralAttachmentModel.post_id == MuralPostModel.id)
+            .where(
+                MuralPostModel.obra_id == obra_id,
+                MuralPostModel.team_id == team_id,
+                MuralPostModel.is_deleted == False,  # noqa: E712
+                MuralAttachmentModel.team_id == team_id,
+                MuralAttachmentModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(MuralAttachmentModel.created_at.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
     async def get_attachment(self, attachment_id: UUID, team_id: UUID) -> MuralAttachment:
         stmt = select(MuralAttachmentModel).where(
             MuralAttachmentModel.id == attachment_id,

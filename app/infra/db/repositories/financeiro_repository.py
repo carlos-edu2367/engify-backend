@@ -17,12 +17,17 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get_by_id(self, id: UUID) -> Movimentacao:
-        stmt = select(MovimentacaoModel).where(MovimentacaoModel.id == id)
+    async def get_by_id(self, id: UUID, team_id: UUID | None = None) -> Movimentacao:
+        stmt = select(MovimentacaoModel).where(
+            MovimentacaoModel.id == id,
+            MovimentacaoModel.is_deleted == False,  # noqa: E712
+        )
+        if team_id is not None:
+            stmt = stmt.where(MovimentacaoModel.team_id == team_id)
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         if not model:
-            raise DomainError("Movimentação não encontrada")
+            raise DomainError("Movimentacao nao encontrada")
         return model.to_domain()
 
     def _apply_filters(self, stmt, filters: MovimentacaoFiltersDTO | None):
@@ -42,7 +47,10 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
         offset = (page - 1) * limit
         stmt = (
             select(MovimentacaoModel)
-            .where(MovimentacaoModel.team_id == team_id)
+            .where(
+                MovimentacaoModel.team_id == team_id,
+                MovimentacaoModel.is_deleted == False,  # noqa: E712
+            )
             .order_by(MovimentacaoModel.data_movimentacao.desc())
         )
         stmt = self._apply_filters(stmt, filters)
@@ -52,7 +60,8 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
 
     async def count_by_team(self, team_id: UUID, filters: MovimentacaoFiltersDTO | None = None) -> int:
         stmt = select(func.count()).select_from(MovimentacaoModel).where(
-            MovimentacaoModel.team_id == team_id
+            MovimentacaoModel.team_id == team_id,
+            MovimentacaoModel.is_deleted == False,  # noqa: E712
         )
         stmt = self._apply_filters(stmt, filters)
         result = await self._session.execute(stmt)
@@ -66,6 +75,7 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
             .where(
                 MovimentacaoModel.obra_id == obra_id,
                 MovimentacaoModel.team_id == team_id,
+                MovimentacaoModel.is_deleted == False,  # noqa: E712
             )
             .order_by(MovimentacaoModel.data_movimentacao.desc())
             .limit(limit)
@@ -83,6 +93,7 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
                 MovimentacaoModel.obra_id == obra_id,
                 MovimentacaoModel.team_id == team_id,
                 MovimentacaoModel.type == MovimentacaoTypes.ENTRADA.value,
+                MovimentacaoModel.is_deleted == False,  # noqa: E712
             )
             .order_by(MovimentacaoModel.data_movimentacao.desc())
             .limit(limit)
@@ -96,6 +107,7 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
             MovimentacaoModel.obra_id == obra_id,
             MovimentacaoModel.team_id == team_id,
             MovimentacaoModel.type == MovimentacaoTypes.ENTRADA.value,
+            MovimentacaoModel.is_deleted == False,  # noqa: E712
         )
         result = await self._session.execute(stmt)
         return result.scalar_one()
@@ -110,7 +122,7 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
             result = await self._session.execute(stmt)
             model = result.scalar_one_or_none()
             if not model:
-                raise DomainError("Movimentação não encontrada para atualização")
+                raise DomainError("Movimentacao nao encontrada para atualizacao")
             model.update_from_domain(movimentacao)
         await self._session.flush()
         return model.to_domain()
@@ -127,7 +139,7 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         if not model:
-            raise DomainError("Pagamento não encontrado")
+            raise DomainError("Pagamento nao encontrado")
         return model.to_domain()
 
     async def list_by_ids(self, ids: list[UUID], team_id: UUID) -> list[PagamentoAgendado]:
@@ -185,7 +197,7 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
             result = await self._session.execute(stmt)
             model = result.scalar_one_or_none()
             if not model:
-                raise DomainError("Pagamento não encontrado para atualização")
+                raise DomainError("Pagamento nao encontrado para atualizacao")
             model.update_from_domain(pagamento)
         await self._session.flush()
         return model.to_domain()
@@ -203,7 +215,7 @@ class MovimentacaoAttachmentRepositoryImpl(MovimentacaoAttachmentRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         if not model:
-            raise DomainError("Anexo não encontrado")
+            raise DomainError("Anexo nao encontrado")
         return model.to_domain()
 
     async def list_by_movimentacao(self, movimentacao_id: UUID) -> list[MovimentacaoAttachment]:
@@ -230,7 +242,7 @@ class MovimentacaoAttachmentRepositoryImpl(MovimentacaoAttachmentRepository):
             result = await self._session.execute(stmt)
             model = result.scalar_one_or_none()
             if not model:
-                raise DomainError("Anexo não encontrado para atualização")
+                raise DomainError("Anexo nao encontrado para atualizacao")
             model.update_from_domain(attachment)
         await self._session.flush()
         return model.to_domain()

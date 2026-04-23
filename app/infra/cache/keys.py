@@ -128,9 +128,22 @@ def movimentacao_attachments_pattern(team_id: UUID, mov_id: UUID) -> str:
     return f"{team_id}:movimentacoes:{mov_id}:attachments*"
 
 
+def movimentacao_delete_lock_key(team_id: UUID, mov_id: UUID) -> str:
+    return f"{team_id}:movimentacoes:{mov_id}:delete:lock"
+
+
+def movimentacao_deleted_tombstone_key(team_id: UUID, mov_id: UUID) -> str:
+    return f"{team_id}:movimentacoes:{mov_id}:delete:done"
+
+
 def mural_post_attachments_key(team_id: UUID, obra_id: UUID, post_id: UUID) -> str:
     # Encaixado dentro de mural_pattern — invalidado por _invalidate_mural_cache.
     return f"{team_id}:obras:{obra_id}:mural:{post_id}:attachments"
+
+
+def mural_obra_attachments_key(team_id: UUID, obra_id: UUID) -> str:
+    # Encaixado dentro de mural_pattern — invalidado por _invalidate_mural_cache.
+    return f"{team_id}:obras:{obra_id}:mural:attachments"
 
 
 def public_obra_key(obra_id: UUID) -> str:

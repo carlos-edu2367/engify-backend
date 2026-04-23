@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, Boolean, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import String, DateTime, Boolean, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.infra.db.models.base import Base, TimestampMixin
@@ -35,7 +35,17 @@ class NotificacaoModel(Base, TimestampMixin):
         Index("idx_notificacoes_user_lida", "user_id", "lida"),
         Index("idx_notificacoes_team", "team_id"),
         # Dedup: evita notificação duplicada do mesmo tipo para o mesmo recurso
-        UniqueConstraint("user_id", "tipo", "reference_id", name="uq_notif_user_tipo_ref"),
+        Index(
+            "uq_notif_user_tipo_ref_prazo",
+            "user_id",
+            "tipo",
+            "reference_id",
+            unique=True,
+            postgresql_where=tipo.in_([
+                TipoNotificacao.PRAZO_7_DIAS.value,
+                TipoNotificacao.PRAZO_1_DIA.value,
+            ]),
+        ),
     )
 
     def to_domain(self) -> Notificacao:

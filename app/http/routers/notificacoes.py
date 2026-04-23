@@ -100,6 +100,25 @@ async def marcar_lida(
     )
 
 
+@router.patch("/{notif_id}/nao-lida", response_model=NotificacaoResponse)
+async def marcar_nao_lida(
+    notif_id: UUID,
+    user: CurrentUser,
+    svc: NotificacaoServiceDep,
+):
+    notif = await svc.marcar_nao_lida(notif_id, user.id, user.team.id)
+    await _invalidate_cache(user.id, user.team.id)
+    return NotificacaoResponse(
+        id=notif.id,
+        tipo=notif.tipo,
+        titulo=notif.titulo,
+        mensagem=notif.mensagem,
+        reference_id=notif.reference_id,
+        lida=notif.lida,
+        created_at=notif.created_at,
+    )
+
+
 @router.patch("/marcar-todas-lidas", response_model=MessageResponse)
 async def marcar_todas_lidas(
     user: CurrentUser,

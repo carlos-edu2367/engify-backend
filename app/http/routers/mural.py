@@ -9,14 +9,19 @@ from app.http.schemas.obras import (
     RegisterMuralAttachmentRequest,
 )
 from app.http.schemas.common import MessageResponse, PaginatedResponse
-from app.http.dependencies.auth import CurrentUser, ManagerUser, AdminUser
+from app.http.dependencies.auth import ManagerUser
 from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import MuralServiceDep, ObraServiceDep
 from app.application.dtos.obra import CreateMuralPost, CreateMuralAttachment
 from app.domain.entities.user import Roles
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
-from app.infra.cache.keys import mural_list_key, mural_pattern, mural_post_attachments_key
+from app.infra.cache.keys import (
+    mural_list_key,
+    mural_pattern,
+    mural_post_attachments_key,
+    mural_obra_attachments_key,
+)
 from app.core.limiter import limiter
 
 router = APIRouter(prefix="/obras/{obra_id}/mural", tags=["Mural"])
@@ -192,6 +197,35 @@ async def add_attachment(
     redis = get_redis()
     await _invalidate_mural_cache(redis, user.team.id, obra_id)
     return _attachment_to_response(attachment)
+
+
+@router.get("/attachments", response_model=list[MuralAttachmentResponse])
+async def list_obra_attachments(
+    obra_id: UUID,
+    user: ManagerUser,
+    svc: MuralServiceDep,
+    obra_svc: ObraServiceDep,
+):
+    """Lista somente os attachments presentes no mural da obra. Cache Redis 10min."""
+    try:
+        await obra_svc.get_obra(obra_id, user.team.id)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Obra nÃ£o encontrada")
+
+    redis = get_redis()
+    cache_key = mural_obra_attachments_key(user.team.id, obra_id)
+    cached = await redis.get(cache_key)
+    if cached:
+        return [MuralAttachmentResponse.model_validate(a) for a in json.loads(cached)]
+
+    attachments = await svc.list_attachments_by_obra(obra_id, user.team.id)
+    result = [_attachment_to_response(a) for a in attachments]
+    await redis.set(
+        cache_key,
+        json.dumps([r.model_dump(mode="json") for r in result]),
+        ex=600,
+    )
+    return result
 
 
 @router.get("/{post_id}/attachments", response_model=list[MuralAttachmentResponse])

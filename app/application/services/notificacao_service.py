@@ -27,6 +27,13 @@ class NotificacaoService:
         await self.uow.commit()
         return saved
 
+    async def marcar_nao_lida(self, notif_id: UUID, user_id: UUID, team_id: UUID) -> Notificacao:
+        notif = await self.notif_repo.get_by_id(notif_id, user_id)
+        notif.marcar_nao_lida()
+        saved = await self.notif_repo.save(notif)
+        await self.uow.commit()
+        return saved
+
     async def marcar_todas_lidas(self, user_id: UUID, team_id: UUID) -> None:
         await self.notif_repo.marcar_todas_lidas(user_id, team_id)
         await self.uow.commit()

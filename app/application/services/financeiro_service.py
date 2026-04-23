@@ -66,6 +66,31 @@ class FinanceiroService():
     async def get_movimentacao(self, id: UUID) -> Movimentacao:
         return await self.mov_repo.get_by_id(id)
 
+    async def get_movimentacao_by_team(self, id: UUID, team_id: UUID) -> Movimentacao:
+        return await self.mov_repo.get_by_id(id, team_id)
+
+    async def delete_movimentacao(self, movimentacao: Movimentacao) -> None:
+        if movimentacao.pagamento_id is not None:
+            raise errors.DomainError(
+                "NÃ£o Ã© possÃ­vel remover uma movimentaÃ§Ã£o gerada por pagamento"
+            )
+        if movimentacao.lote_info:
+            raise errors.DomainError(
+                "NÃ£o Ã© possÃ­vel remover uma movimentaÃ§Ã£o gerada por baixa em lote"
+            )
+        if movimentacao.natureza != Natureza.MANUAL:
+            raise errors.DomainError(
+                "NÃ£o Ã© possÃ­vel remover uma movimentaÃ§Ã£o importada automaticamente"
+            )
+        if movimentacao.type == MovimentacaoTypes.ENTRADA and movimentacao.obra_id is not None:
+            raise errors.DomainError(
+                "Recebimentos vinculados Ã  obra devem ser gerenciados pelo fluxo de recebimentos"
+            )
+
+        movimentacao.delete()
+        await self.mov_repo.save(movimentacao)
+        await self.uow.commit()
+
     # ── Movimentações Anexos ──────────────────────────────────────────────────
 
     async def add_attachment(

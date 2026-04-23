@@ -48,6 +48,14 @@ class Obra():
             )
         self.total_recebido = novo_total
 
+    def remover_recebimento(self, valor: Decimal) -> None:
+        """Reverte um recebimento validando consistÃªncia do total acumulado."""
+        if valor <= Decimal("0"):
+            raise DomainError("O valor do recebimento deve ser positivo")
+        if valor > self.total_recebido:
+            raise DomainError("O total recebido da obra estÃ¡ inconsistente para remoÃ§Ã£o")
+        self.total_recebido -= valor
+
     def delete(self):
         self.is_deleted = True
 
