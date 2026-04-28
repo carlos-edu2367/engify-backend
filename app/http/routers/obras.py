@@ -10,7 +10,7 @@ from app.http.schemas.obras import (
 )
 from app.http.schemas.financeiro import CreateObraPagamentoRequest, PagamentoResponse
 from app.http.schemas.common import MessageResponse, PaginatedResponse
-from app.http.dependencies.auth import CurrentUser, EngineerUser, AdminUser
+from app.http.dependencies.auth import CurrentUser, EngineerUser, AdminUser, ManagerUser
 from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import ObraServiceDep, ItemServiceDep, ObraImageServiceDep, FinanceiroServiceDep, RecebimentoServiceDep
 from app.application.dtos.obra import CreateObraDTO, EditObraInfo, CreateObraImage, DeleteRecebimentoDTO
@@ -186,16 +186,20 @@ async def update_obra(
 async def update_obra_status(
     obra_id: UUID,
     body: UpdateStatusRequest,
-    user: EngineerUser,
+    user: ManagerUser,
     svc: ObraServiceDep,
 ):
-    """Atualiza o status da obra. Restrito a ADMIN e ENG."""
+    """Atualiza o status da obra. Restrito a ADMIN, ENG e FIN. Transição FINANCEIRO->FINALIZADO restrita a ADMIN/FIN."""
     try:
         obra = await svc.get_obra(obra_id, user.team.id)
     except DomainError:
         raise HTTPException(status_code=404, detail="Obra não encontrada")
 
-    updated = await svc.update_status(obra, body.status)
+    try:
+        updated = await svc.update_status(obra, body.status, caller_role=user.role.value)
+    except DomainError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+        
     redis = get_redis()
     await _invalidate_obras_cache(redis, user.team.id)
     return _obra_to_response(updated)

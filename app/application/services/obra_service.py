@@ -65,7 +65,21 @@ class ObraService():
         await self.obra_repo.save(obra)
         await self.uow.commit()
 
-    async def update_status(self, obra: Obra, status: Status) -> Obra:
+    async def update_status(self, obra: Obra, status: Status, caller_role: str | None = None) -> Obra:
+        """Atualiza o status da obra.
+        A transição para FINALIZADO a partir de FINANCEIRO exige role ADMIN ou FINANCEIRO.
+        """
+        from app.domain.entities.user import Roles
+        
+        if (
+            obra.status == Status.FINANCEIRO
+            and status == Status.FINALIZADO
+            and caller_role not in (Roles.ADMIN.value, Roles.FINANCEIRO.value)
+        ):
+            raise DomainError(
+                "Apenas ADMIN ou FINANCEIRO podem finalizar uma obra em status Financeiro"
+            )
+            
         obra.status = status
         saved = await self.obra_repo.save(obra)
         await self.uow.commit()
@@ -221,7 +235,7 @@ class ItemService():
         await self.uow.commit()
         return saved
 
-    async def update_item(self, dtos: UpdateItem, item: Item) -> Item:
+    async def update_item(self, dtos: UpdateItem, item: Item, caller_role: str | None = None) -> Item:
         if dtos.title:
             item.title = dtos.title
         if dtos.responsavel_id:
@@ -229,6 +243,16 @@ class ItemService():
         if dtos.descricao:
             item.description = dtos.descricao
         if dtos.status:
+            from app.domain.entities.user import Roles
+            
+            if (
+                item.status == Status.FINANCEIRO
+                and dtos.status == Status.FINALIZADO
+                and caller_role not in (Roles.ADMIN.value, Roles.FINANCEIRO.value)
+            ):
+                raise DomainError(
+                    "Apenas ADMIN ou FINANCEIRO podem finalizar um item em status Financeiro"
+                )
             item.status = dtos.status
 
         saved = await self.item_repo.save(item)

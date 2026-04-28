@@ -10,6 +10,7 @@ from app.domain.errors import DomainError
 class Status(Enum):
     PLANEJAMENTO = "planejamento"
     EM_ANDAMENTO = "em_andamento"
+    FINANCEIRO = "financeiro"
     FINALIZADO = "finalizado"
 
 

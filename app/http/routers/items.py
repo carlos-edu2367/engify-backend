@@ -7,7 +7,7 @@ from app.http.schemas.obras import (
     RegisterItemAttachmentRequest, ItemAttachmentResponse,
 )
 from app.http.schemas.common import MessageResponse
-from app.http.dependencies.auth import CurrentUser, EngineerUser
+from app.http.dependencies.auth import CurrentUser, EngineerUser, ManagerUser
 from app.http.dependencies.services import ItemServiceDep, ObraServiceDep, ItemAttachmentServiceDep
 from app.application.dtos.obra import CreateItem, UpdateItem, CreateItemAttachment
 from app.domain.errors import DomainError
@@ -102,11 +102,11 @@ async def update_item(
     obra_id: UUID,
     item_id: UUID,
     body: UpdateItemRequest,
-    user: EngineerUser,
+    user: ManagerUser,
     item_svc: ItemServiceDep,
     obra_svc: ObraServiceDep,
 ):
-    """Atualiza um item. Restrito a ADMIN e ENG."""
+    """Atualiza um item. Restrito a ADMIN, ENG e FIN. Transição FINANCEIRO->FINALIZADO restrita a ADMIN/FIN."""
     await _get_obra_or_404(obra_svc, obra_id, user.team.id)
 
     try:
@@ -123,7 +123,10 @@ async def update_item(
         responsavel_id=body.responsavel_id,
         status=body.status,
     )
-    updated = await item_svc.update_item(dto, item)
+    try:
+        updated = await item_svc.update_item(dto, item, caller_role=user.role.value)
+    except DomainError as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
     redis = get_redis()
     await _invalidate_items_cache(redis, user.team.id, obra_id)
