@@ -25,20 +25,28 @@ _REFRESH_COOKIE = "refresh_token"
 _COOKIE_MAX_AGE = settings.refresh_token_expire_days * 24 * 60 * 60
 
 
+def _refresh_cookie_path() -> str:
+    return f"{settings.api_prefix}/auth/refresh"
+
+
+def _refresh_cookie_samesite() -> str:
+    return "lax" if settings.environment == "dev" else "none"
+
+
 def _set_refresh_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key=_REFRESH_COOKIE,
         value=token,
         httponly=True,
         secure=settings.environment != "dev",
-        samesite="lax",
+        samesite=_refresh_cookie_samesite(),
         max_age=_COOKIE_MAX_AGE,
-        path="/api/v1/auth/refresh",
+        path=_refresh_cookie_path(),
     )
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(key=_REFRESH_COOKIE, path="/api/v1/auth/refresh")
+    response.delete_cookie(key=_REFRESH_COOKIE, path=_refresh_cookie_path())
 
 
 @router.post("/login", response_model=TokenResponse)
