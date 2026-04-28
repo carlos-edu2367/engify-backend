@@ -64,6 +64,16 @@ class Settings(BaseSettings):
                 return False
         return value
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value):
+        if isinstance(value, str):
+            if value.startswith("postgres://"):
+                return value.replace("postgres://", "postgresql+asyncpg://", 1)
+            if value.startswith("postgresql://"):
+                return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
