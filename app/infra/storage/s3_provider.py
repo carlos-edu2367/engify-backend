@@ -124,6 +124,36 @@ class S3StorageProvider(StorageProvider):
             exists=True,
         )
 
+    async def upload_bytes(
+        self,
+        bucket: str,
+        path: str,
+        content: bytes,
+        content_type: str,
+    ) -> StoredFileMetadata:
+        path_encoded = urllib.parse.quote(path, safe="/")
+        url = f"{self._base_url}/storage/v1/object/{self._bucket}/{path_encoded}"
+        headers = {
+            **self._headers,
+            "Content-Type": content_type,
+            "x-upsert": "true",
+        }
+
+        async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
+            response = await client.post(url, content=content)
+
+        if response.status_code not in (200, 201):
+            raise RuntimeError(
+                f"Erro ao enviar arquivo ao storage: HTTP {response.status_code}: {response.text[:200]}"
+            )
+
+        return StoredFileMetadata(
+            path=path,
+            size=len(content),
+            content_type=content_type,
+            exists=True,
+        )
+
     async def delete_file(self, bucket: str, path: str) -> None:
         """
         Deleta um arquivo do Supabase Storage.

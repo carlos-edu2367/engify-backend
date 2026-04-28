@@ -8,13 +8,26 @@ from app.http.schemas.financeiro import (
     CreateMovimentacaoAttachmentRequest, MovimentacaoAttachmentResponse,
     BaixaLoteRequest, BaixaLoteResponse,
 )
+from app.http.schemas.commission_report import (
+    CreateCommissionReportRequest,
+    CreateCommissionReportResponse,
+    CommissionReportJobStatusResponse,
+)
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.dependencies.auth import FinanceiroUser
 from app.http.dependencies.pagination import Pagination
-from app.http.dependencies.services import FinanceiroServiceDep
+from app.http.dependencies.services import (
+    FinanceiroServiceDep,
+    GenerateCommissionReportUseCaseDep,
+    CommissionReportJobStatusUseCaseDep,
+)
 from app.application.dtos.financeiro import (
     CreateMovimentacaoDTO, CreatePagamentoDTO, EditPagamentoDTO,
     AddMovimentacaoAttachmentDTO, BaixaLoteDTO,
+)
+from app.application.use_cases.generate_monthly_commission_report import (
+    GenerateMonthlyCommissionReportInput,
+    GetCommissionReportJobStatusInput,
 )
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
@@ -379,6 +392,56 @@ async def baixa_lote_pagamentos(
         valor_total=resultado.valor_total,
         movimentacao_id=resultado.movimentacao_id,
     )
+
+
+@router.post("/relatorios/comissao-obras", response_model=CreateCommissionReportResponse, status_code=202)
+@limiter.limit("10/minute")
+async def create_commission_report(
+    request: Request,
+    body: CreateCommissionReportRequest,
+    user: FinanceiroUser,
+    use_case: GenerateCommissionReportUseCaseDep,
+):
+    try:
+        result = await use_case.execute(
+            GenerateMonthlyCommissionReportInput(
+                user_id=user.id,
+                team_id=user.team.id,
+                categoria_id=body.categoria_id,
+                mes=body.mes,
+                ano=body.ano,
+                porcentagem_comissao=body.porcentagem_comissao,
+            )
+        )
+        return CreateCommissionReportResponse(job_id=result.job_id)
+    except DomainError as e:
+        detail = str(getattr(e, "detail", e))
+        status_code = 404 if "categoria" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Fila de processamento indisponivel")
+
+
+@router.get("/relatorios/jobs/{job_id}", response_model=CommissionReportJobStatusResponse)
+async def get_commission_report_job_status(
+    job_id: UUID,
+    user: FinanceiroUser,
+    use_case: CommissionReportJobStatusUseCaseDep,
+):
+    try:
+        result = await use_case.execute(
+            GetCommissionReportJobStatusInput(
+                team_id=user.team.id,
+                job_id=job_id,
+            )
+        )
+        return CommissionReportJobStatusResponse(
+            status=result.status,
+            file_url=result.file_url,
+            error_message=result.error_message,
+        )
+    except DomainError as e:
+        raise HTTPException(status_code=404, detail=str(getattr(e, "detail", e)))
 
 
 def _pag_response(p) -> PagamentoResponse:

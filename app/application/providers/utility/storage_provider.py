@@ -44,6 +44,16 @@ class StorageProvider(ABC):
         pass
 
     @abstractmethod
+    async def upload_bytes(
+        self,
+        bucket: str,
+        path: str,
+        content: bytes,
+        content_type: str,
+    ) -> StoredFileMetadata:
+        pass
+
+    @abstractmethod
     async def delete_file(
             self,
             bucket: str,

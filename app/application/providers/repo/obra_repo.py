@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 from app.domain.entities.obra import Obra, Status, Diaria, Item, ItemAttachment, Image, MuralPost, MuralAttachment, CategoriaObra
 from datetime import datetime
+from app.application.providers.utility.excel_report_builder import CommissionReportRow
 
 
 class ObraRepository(ABC):
@@ -35,6 +36,16 @@ class ObraRepository(ABC):
 
     @abstractmethod
     async def save(self, obra: Obra) -> Obra:
+        pass
+
+    @abstractmethod
+    async def list_monthly_commission_eligible(
+        self,
+        team_id: UUID,
+        categoria_id: UUID,
+        period_start: datetime,
+        period_end: datetime,
+    ) -> list[CommissionReportRow]:
         pass
 
 

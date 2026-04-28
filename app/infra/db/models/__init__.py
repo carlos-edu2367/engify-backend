@@ -12,6 +12,7 @@ from app.infra.db.models.financeiro_model import (
     MovimentacaoModel, PagamentoAgendadoModel, MovimentacaoAttachmentModel
 )
 from app.infra.db.models.notificacao_model import NotificacaoModel
+from app.infra.db.models.report_job_model import ReportJobModel
 
 __all__ = [
     "Base",
@@ -32,4 +33,5 @@ __all__ = [
     "PagamentoAgendadoModel",
     "MovimentacaoAttachmentModel",
     "NotificacaoModel",
+    "ReportJobModel",
 ]

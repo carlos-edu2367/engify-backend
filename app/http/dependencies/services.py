@@ -37,6 +37,12 @@ from app.infra.db.repositories.financeiro_repository import (
     MovimentacaoAttachmentRepositoryImpl
 )
 from app.infra.db.repositories.notificacao_repository import NotificacaoRepositoryImpl
+from app.infra.db.repositories.report_job_repository import ReportJobRepositoryImpl
+from app.application.use_cases.generate_monthly_commission_report import (
+    GenerateMonthlyCommissionReportUseCase,
+    GetCommissionReportJobStatusUseCase,
+)
+from app.infra.jobs.queue import ArqCommissionReportQueue
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +90,7 @@ Session = Annotated[AsyncSession, Depends(get_session)]
 
 _hash_provider = Argon2HashProvider()
 _storage_provider = S3StorageProvider()
+_report_queue = ArqCommissionReportQueue()
 
 
 def get_hash_provider() -> Argon2HashProvider:
@@ -219,6 +226,30 @@ async def get_recebimento_service(session: Session) -> RecebimentoService:
     )
 
 
+async def get_generate_commission_report_use_case(
+    session: Session,
+) -> GenerateMonthlyCommissionReportUseCase:
+    return GenerateMonthlyCommissionReportUseCase(
+        report_job_repo=ReportJobRepositoryImpl(session),
+        categoria_repo=CategoriaObraRepositoryImpl(session),
+        job_queue=_report_queue,
+        uow=SQLAlchemyUOW(session),
+    )
+
+
+async def get_commission_report_job_status_use_case(
+    session: Session,
+) -> GetCommissionReportJobStatusUseCase:
+    from app.core.config import settings
+
+    return GetCommissionReportJobStatusUseCase(
+        report_job_repo=ReportJobRepositoryImpl(session),
+        storage_provider=_storage_provider,
+        bucket_name=settings.storage_bucket_name,
+        download_expires_in=settings.storage_download_expires_in,
+    )
+
+
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 RecoveryServiceDep = Annotated[RecoveryPasswordService, Depends(get_recovery_service)]
 TeamServiceDep = Annotated[TeamService, Depends(get_team_service)]
@@ -234,3 +265,9 @@ CategoriaObraServiceDep = Annotated[CategoriaObraService, Depends(get_categoria_
 RecebimentoServiceDep = Annotated[RecebimentoService, Depends(get_recebimento_service)]
 NotificacaoServiceDep = Annotated[NotificacaoService, Depends(get_notificacao_service)]
 StorageProviderDep = Annotated[S3StorageProvider, Depends(get_storage_provider)]
+GenerateCommissionReportUseCaseDep = Annotated[
+    GenerateMonthlyCommissionReportUseCase, Depends(get_generate_commission_report_use_case)
+]
+CommissionReportJobStatusUseCaseDep = Annotated[
+    GetCommissionReportJobStatusUseCase, Depends(get_commission_report_job_status_use_case)
+]

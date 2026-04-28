@@ -8,12 +8,15 @@ from app.application.providers.repo.obra_repo import (
     ObraRepository, DiaryRepository, ItemRepository, ItemAttachmentRepository,
     ImageRepository, CategoriaObraRepository,
 )
+from app.application.providers.utility.excel_report_builder import CommissionReportRow
 from app.domain.entities.obra import Obra, Status, Item, Diaria, ItemAttachment, Image, CategoriaObra
 from app.domain.errors import DomainError
 from app.infra.db.models.obra_model import (
     ObraModel, ItemModel, DiaryModel, ItemAttachmentModel, ImageModel, CategoriaObraModel,
 )
 from app.infra.db.models.team_model import DiaristModel
+from app.infra.db.models.financeiro_model import MovimentacaoModel
+from app.domain.entities.financeiro import MovimentacaoTypes
 
 
 class ObraRepositoryImpl(ObraRepository):
@@ -119,6 +122,59 @@ class ObraRepositoryImpl(ObraRepository):
             model.update_from_domain(obra)
         await self._session.flush()
         return model.to_domain()
+
+    async def list_monthly_commission_eligible(
+        self,
+        team_id: UUID,
+        categoria_id: UUID,
+        period_start: datetime,
+        period_end: datetime,
+    ) -> list[CommissionReportRow]:
+        latest_receipt_subquery = (
+            select(
+                MovimentacaoModel.obra_id.label("obra_id"),
+                func.max(MovimentacaoModel.data_movimentacao).label("ultimo_recebimento"),
+            )
+            .where(
+                MovimentacaoModel.team_id == team_id,
+                MovimentacaoModel.type == MovimentacaoTypes.ENTRADA.value,
+                MovimentacaoModel.is_deleted == False,  # noqa: E712
+                MovimentacaoModel.obra_id.is_not(None),
+            )
+            .group_by(MovimentacaoModel.obra_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                ObraModel.id,
+                ObraModel.title,
+                ObraModel.valor_amount,
+                latest_receipt_subquery.c.ultimo_recebimento,
+            )
+            .join(latest_receipt_subquery, latest_receipt_subquery.c.obra_id == ObraModel.id)
+            .where(
+                ObraModel.team_id == team_id,
+                ObraModel.categoria_id == categoria_id,
+                ObraModel.is_deleted == False,  # noqa: E712
+                ObraModel.valor_amount.is_not(None),
+                ObraModel.valor_amount > 0,
+                ObraModel.total_recebido >= ObraModel.valor_amount,
+                latest_receipt_subquery.c.ultimo_recebimento >= period_start,
+                latest_receipt_subquery.c.ultimo_recebimento < period_end,
+            )
+            .order_by(latest_receipt_subquery.c.ultimo_recebimento.asc(), ObraModel.title.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [
+            CommissionReportRow(
+                obra_id=row.id,
+                titulo=row.title,
+                valor_total=row.valor_amount,
+                ultimo_recebimento=row.ultimo_recebimento,
+            )
+            for row in result.all()
+        ]
 
 
 class CategoriaObraRepositoryImpl(CategoriaObraRepository):
