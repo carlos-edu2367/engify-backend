@@ -64,6 +64,10 @@ def users_list_key(team_id: UUID) -> str:
     return f"{team_id}:users:list"
 
 
+def rh_geofences_key(team_id: UUID, funcionario_id: UUID) -> str:
+    return f"rh:geofences:{team_id}:{funcionario_id}"
+
+
 # Padrões para invalidação (SCAN + DEL)
 def team_pattern(team_id: UUID) -> str:
     """Invalida TUDO de um tenant."""
@@ -92,6 +96,10 @@ def movimentacoes_pattern(team_id: UUID) -> str:
 
 def pagamentos_pattern(team_id: UUID) -> str:
     return f"{team_id}:pagamentos:*"
+
+
+def rh_geofences_pattern(team_id: UUID, funcionario_id: UUID) -> str:
+    return f"rh:geofences:{team_id}:{funcionario_id}*"
 
 
 def revoked_token_key(jti: str) -> str:

@@ -27,6 +27,13 @@ from app.application.services.obra_service import (
 )
 from app.application.services.notificacao_service import NotificacaoService
 from app.application.services.financeiro_service import FinanceiroService
+from app.application.services.rh_audit_service import RhAuditService
+from app.application.services.rh_dashboard_service import RhDashboardService
+from app.application.services.rh_funcionario_service import RhFuncionarioService
+from app.application.services.rh_ponto_service import RhLocalPontoService, RhPontoService
+from app.application.services.rh_folha_service import RhFolhaService
+from app.application.services.rh_solicitacoes_service import RhSolicitacoesService
+from app.infra.cache.rh_geofence_cache import RedisRhGeofenceCache
 from app.infra.db.repositories.obra_repository import (
     ObraRepositoryImpl, ItemRepositoryImpl, DiaryRepositoryImpl,
     ItemAttachmentRepositoryImpl, ImageRepositoryImpl, CategoriaObraRepositoryImpl,
@@ -35,6 +42,20 @@ from app.infra.db.repositories.mural_repository import MuralRepositoryImpl
 from app.infra.db.repositories.financeiro_repository import (
     MovimentacaoRepositoryImpl, PagamentoAgendadoRepositoryImpl,
     MovimentacaoAttachmentRepositoryImpl
+)
+from app.infra.db.repositories.rh_repository import (
+    FuncionarioRepositoryImpl,
+    HorarioTrabalhoRepositoryImpl,
+    LocalPontoRepositoryImpl,
+    RegistroPontoRepositoryImpl,
+    RhAuditLogRepositoryImpl,
+    RhIdempotencyKeyRepositoryImpl,
+    AjustePontoRepositoryImpl,
+    AtestadoRepositoryImpl,
+    FeriasRepositoryImpl,
+    TipoAtestadoRepositoryImpl,
+    HoleriteRepositoryImpl,
+    RhSalarioHistoricoRepositoryImpl,
 )
 from app.infra.db.repositories.notificacao_repository import NotificacaoRepositoryImpl
 from app.infra.db.repositories.report_job_repository import ReportJobRepositoryImpl
@@ -91,6 +112,7 @@ Session = Annotated[AsyncSession, Depends(get_session)]
 _hash_provider = Argon2HashProvider()
 _storage_provider = S3StorageProvider()
 _report_queue = ArqCommissionReportQueue()
+_rh_geofence_cache = RedisRhGeofenceCache()
 
 
 def get_hash_provider() -> Argon2HashProvider:
@@ -179,6 +201,88 @@ async def get_financeiro_service(session: Session) -> FinanceiroService:
     )
 
 
+async def get_rh_audit_service(session: Session) -> RhAuditService:
+    return RhAuditService(
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+
+async def get_rh_funcionario_service(session: Session) -> RhFuncionarioService:
+    return RhFuncionarioService(
+        funcionario_repo=FuncionarioRepositoryImpl(session),
+        horario_repo=HorarioTrabalhoRepositoryImpl(session),
+        user_repo=UserRepositoryImpl(session),
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        salario_historico_repo=RhSalarioHistoricoRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+
+async def get_rh_local_ponto_service(session: Session) -> RhLocalPontoService:
+    return RhLocalPontoService(
+        funcionario_repo=FuncionarioRepositoryImpl(session),
+        local_ponto_repo=LocalPontoRepositoryImpl(session),
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        geofence_cache=_rh_geofence_cache,
+        uow=SQLAlchemyUOW(session),
+    )
+
+
+async def get_rh_ponto_service(session: Session) -> RhPontoService:
+    return RhPontoService(
+        funcionario_repo=FuncionarioRepositoryImpl(session),
+        local_ponto_repo=LocalPontoRepositoryImpl(session),
+        registro_ponto_repo=RegistroPontoRepositoryImpl(session),
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        geofence_cache=_rh_geofence_cache,
+        idempotency_repo=RhIdempotencyKeyRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+
+async def get_rh_solicitacoes_service(session: Session) -> RhSolicitacoesService:
+    return RhSolicitacoesService(
+        funcionario_repo=FuncionarioRepositoryImpl(session),
+        ferias_repo=FeriasRepositoryImpl(session),
+        ajuste_repo=AjustePontoRepositoryImpl(session),
+        registro_ponto_repo=RegistroPontoRepositoryImpl(session),
+        tipo_atestado_repo=TipoAtestadoRepositoryImpl(session),
+        atestado_repo=AtestadoRepositoryImpl(session),
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+
+async def get_rh_folha_service(session: Session) -> RhFolhaService:
+    return RhFolhaService(
+        funcionario_repo=FuncionarioRepositoryImpl(session),
+        horario_repo=HorarioTrabalhoRepositoryImpl(session),
+        registro_ponto_repo=RegistroPontoRepositoryImpl(session),
+        ferias_repo=FeriasRepositoryImpl(session),
+        tipo_atestado_repo=TipoAtestadoRepositoryImpl(session),
+        atestado_repo=AtestadoRepositoryImpl(session),
+        holerite_repo=HoleriteRepositoryImpl(session),
+        pagamento_repo=PagamentoAgendadoRepositoryImpl(session),
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        idempotency_repo=RhIdempotencyKeyRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+
+async def get_rh_dashboard_service(session: Session) -> RhDashboardService:
+    return RhDashboardService(
+        funcionario_repo=FuncionarioRepositoryImpl(session),
+        ajuste_repo=AjustePontoRepositoryImpl(session),
+        ferias_repo=FeriasRepositoryImpl(session),
+        atestado_repo=AtestadoRepositoryImpl(session),
+        registro_ponto_repo=RegistroPontoRepositoryImpl(session),
+        holerite_repo=HoleriteRepositoryImpl(session),
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+
 async def get_item_attachment_service(session: Session) -> ItemAttachmentService:
     return ItemAttachmentService(
         attachment_repo=ItemAttachmentRepositoryImpl(session),
@@ -258,6 +362,13 @@ ObraServiceDep = Annotated[ObraService, Depends(get_obra_service)]
 ItemServiceDep = Annotated[ItemService, Depends(get_item_service)]
 DiaryServiceDep = Annotated[DiaryService, Depends(get_diary_service)]
 FinanceiroServiceDep = Annotated[FinanceiroService, Depends(get_financeiro_service)]
+RhAuditServiceDep = Annotated[RhAuditService, Depends(get_rh_audit_service)]
+RhFuncionarioServiceDep = Annotated[RhFuncionarioService, Depends(get_rh_funcionario_service)]
+RhLocalPontoServiceDep = Annotated[RhLocalPontoService, Depends(get_rh_local_ponto_service)]
+RhPontoServiceDep = Annotated[RhPontoService, Depends(get_rh_ponto_service)]
+RhSolicitacoesServiceDep = Annotated[RhSolicitacoesService, Depends(get_rh_solicitacoes_service)]
+RhFolhaServiceDep = Annotated[RhFolhaService, Depends(get_rh_folha_service)]
+RhDashboardServiceDep = Annotated[RhDashboardService, Depends(get_rh_dashboard_service)]
 ItemAttachmentServiceDep = Annotated[ItemAttachmentService, Depends(get_item_attachment_service)]
 ObraImageServiceDep = Annotated[ObraImageService, Depends(get_obra_image_service)]
 MuralServiceDep = Annotated[MuralService, Depends(get_mural_service)]

@@ -24,6 +24,11 @@ class CategoriaObraModel(Base, TimestampMixin):
     descricao: Mapped[str | None] = mapped_column(String(500), nullable=True)
     cor: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
 
     obras: Mapped[list["ObraModel"]] = relationship(
         back_populates="categoria", lazy="raise"
@@ -123,6 +128,9 @@ class ObraModel(Base, TimestampMixin):
         Index("idx_obras_team_status", "team_id", "status"),
         # Ordenação por data de criação
         Index("idx_obras_team_created", "team_id", "created_date"),
+        Index("idx_obras_categoria_id", "categoria_id"),
+        Index("idx_obras_team_categoria_deleted", "team_id", "categoria_id", "is_deleted"),
+        Index("idx_obras_team_total_recebido", "team_id", "total_recebido"),
     )
 
     def to_domain(self) -> Obra:

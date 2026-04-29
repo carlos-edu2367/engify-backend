@@ -14,6 +14,7 @@ class Roles(Enum):
     FINANCEIRO = "financeiro"
     CLIENTE = "cliente"
     SUPER_ADMIN = "super_admin"
+    FUNCIONARIO = "funcionario"
 
 
 class User():

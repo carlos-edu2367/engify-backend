@@ -18,15 +18,23 @@ async def lifespan(app: FastAPI):
     logger.info("startup: redis conectado")
 
     from app.infra.scheduler.deadline_checker import deadline_checker_loop
+    from app.infra.scheduler.rh_atestado_expiration import rh_atestado_expiration_loop
     deadline_task = asyncio.create_task(deadline_checker_loop())
+    rh_atestado_task = asyncio.create_task(rh_atestado_expiration_loop())
     logger.info("startup: deadline_checker iniciado")
+    logger.info("startup: rh_atestado_expiration iniciado")
 
     yield
 
     logger.info("shutdown: liberando recursos")
     deadline_task.cancel()
+    rh_atestado_task.cancel()
     try:
         await deadline_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await rh_atestado_task
     except asyncio.CancelledError:
         pass
 

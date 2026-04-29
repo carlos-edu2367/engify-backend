@@ -30,6 +30,11 @@ class NotificacaoModel(Base, TimestampMixin):
         PG_UUID(as_uuid=True), nullable=True
     )
     lida: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
 
     __table_args__ = (
         Index("idx_notificacoes_user_lida", "user_id", "lida"),

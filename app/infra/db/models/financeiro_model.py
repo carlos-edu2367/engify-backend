@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, DateTime, Numeric, Boolean, ForeignKey, Index, Text
+from sqlalchemy import String, DateTime, Numeric, Boolean, ForeignKey, Index, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infra.db.models.base import Base, TimestampMixin
@@ -64,6 +64,20 @@ class MovimentacaoModel(Base, TimestampMixin):
         # Movimentações de uma obra específica (nullable, só indexa quando preenchido)
         Index("idx_movimentacoes_obra", "obra_id"),
         Index("idx_movimentacoes_team_deleted", "team_id", "is_deleted"),
+        Index(
+            "idx_movimentacoes_recebimentos_obra_data",
+            "team_id",
+            "obra_id",
+            "type",
+            "is_deleted",
+            "data_movimentacao",
+        ),
+        Index(
+            "idx_movimentacoes_lote_info",
+            "lote_info",
+            postgresql_using="gin",
+            postgresql_where=text("lote_info IS NOT NULL"),
+        ),
     )
 
     def update_from_domain(self, m: Movimentacao) -> None:
