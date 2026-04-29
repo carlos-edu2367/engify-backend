@@ -632,7 +632,7 @@ def test_create_tipo_atestado_route_returns_201_for_admin():
     assert response.json()["nome"] == "Medico"
 
 
-def test_create_atestado_route_does_not_expose_file_path():
+def test_create_atestado_route_rejects_manual_file_path():
     employee = _make_user(Roles.FUNCIONARIO)
     funcionario = _make_funcionario(employee.team.id)
     tipo = _make_tipo_atestado(employee.team.id)
@@ -654,9 +654,7 @@ def test_create_atestado_route_does_not_expose_file_path():
         },
     )
 
-    assert response.status_code == 201
-    assert "file_path" not in response.json()
-    assert response.json()["has_file"] is True
+    assert response.status_code == 422
 
 
 def test_get_atestado_download_url_route_returns_signed_url():

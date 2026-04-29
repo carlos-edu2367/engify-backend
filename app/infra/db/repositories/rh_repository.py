@@ -2,7 +2,7 @@ from uuid import UUID, uuid4
 
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -752,19 +752,48 @@ class TabelaProgressivaRepositoryImpl(_SoftDeleteRepository, TabelaProgressivaRe
         return model.to_domain()
 
     async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[TabelaProgressiva]:
-        stmt = (
-            select(TabelaProgressivaModel)
-            .options(selectinload(TabelaProgressivaModel.faixas))
-            .where(
-                TabelaProgressivaModel.team_id == team_id,
-                TabelaProgressivaModel.is_deleted == False,  # noqa: E712
-            )
-            .order_by(TabelaProgressivaModel.created_at.desc())
-            .limit(limit)
-            .offset((page - 1) * limit)
-        )
+        stmt = self._build_filters(select(TabelaProgressivaModel), team_id)
+        stmt = stmt.order_by(TabelaProgressivaModel.created_at.desc()).limit(limit).offset((page - 1) * limit)
         result = await self._session.execute(stmt)
         return [model.to_domain() for model in result.scalars().all()]
+
+    async def list_by_filters(self, team_id: UUID, page: int, limit: int, **filters) -> list[TabelaProgressiva]:
+        stmt = self._build_filters(select(TabelaProgressivaModel), team_id, **filters)
+        stmt = stmt.order_by(TabelaProgressivaModel.created_at.desc()).limit(limit).offset((page - 1) * limit)
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def count_by_filters(self, team_id: UUID, **filters) -> int:
+        stmt = self._build_filters(select(func.count()).select_from(TabelaProgressivaModel), team_id, load_faixas=False, **filters)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def is_used_by_active_rule(self, team_id: UUID, tabela_id: UUID) -> bool:
+        stmt = select(func.count()).select_from(RegraEncargoModel).where(
+            RegraEncargoModel.team_id == team_id,
+            RegraEncargoModel.tabela_progressiva_id == tabela_id,
+            RegraEncargoModel.status == StatusRegraEncargo.ATIVA.value,
+            RegraEncargoModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one()) > 0
+
+    def _build_filters(self, stmt, team_id: UUID, load_faixas: bool = True, **filters):
+        if load_faixas:
+            stmt = stmt.options(selectinload(TabelaProgressivaModel.faixas))
+        stmt = stmt.where(
+            TabelaProgressivaModel.team_id == team_id,
+            TabelaProgressivaModel.is_deleted == False,  # noqa: E712
+        )
+        if filters.get("search"):
+            pattern = f"%{filters['search'].strip()}%"
+            stmt = stmt.where(or_(TabelaProgressivaModel.codigo.ilike(pattern), TabelaProgressivaModel.nome.ilike(pattern)))
+        if filters.get("codigo"):
+            stmt = stmt.where(TabelaProgressivaModel.codigo == filters["codigo"])
+        if filters.get("status"):
+            status = filters["status"]
+            stmt = stmt.where(TabelaProgressivaModel.status == (status.value if hasattr(status, "value") else str(status)))
+        return stmt
 
     async def save(self, tabela: TabelaProgressiva) -> TabelaProgressiva:
         stmt = (
@@ -899,22 +928,74 @@ class RegraEncargoRepositoryImpl(_SoftDeleteRepository, RegraEncargoRepository):
         return [model.to_domain() for model in result.scalars().all()]
 
     async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[RegraEncargo]:
+        stmt = self._build_filters(select(RegraEncargoModel), team_id)
+        stmt = stmt.order_by(RegraEncargoModel.created_at.desc()).limit(limit).offset((page - 1) * limit)
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def list_by_filters(self, team_id: UUID, page: int, limit: int, **filters) -> list[RegraEncargo]:
+        stmt = self._build_filters(select(RegraEncargoModel), team_id, **filters)
+        stmt = stmt.order_by(RegraEncargoModel.created_at.desc()).limit(limit).offset((page - 1) * limit)
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def count_by_filters(self, team_id: UUID, **filters) -> int:
+        stmt = self._build_filters(select(func.count()).select_from(RegraEncargoModel), team_id, load_relationships=False, **filters)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def has_active_conflict(
+        self,
+        team_id: UUID,
+        regra_grupo_id: UUID,
+        codigo: str,
+        vigencia_inicio,
+        vigencia_fim,
+        aplicabilidades: list,
+        exclude_id: UUID | None = None,
+    ) -> bool:
+        open_end = datetime.max.replace(tzinfo=getattr(vigencia_inicio, "tzinfo", None))
         stmt = (
             select(RegraEncargoModel)
-            .options(
+            .options(selectinload(RegraEncargoModel.aplicabilidades))
+            .where(
+                RegraEncargoModel.team_id == team_id,
+                RegraEncargoModel.regra_grupo_id == regra_grupo_id,
+                RegraEncargoModel.codigo == codigo,
+                RegraEncargoModel.status == StatusRegraEncargo.ATIVA.value,
+                RegraEncargoModel.is_deleted == False,  # noqa: E712
+                RegraEncargoModel.vigencia_inicio <= (vigencia_fim or open_end),
+                or_(RegraEncargoModel.vigencia_fim.is_(None), RegraEncargoModel.vigencia_fim >= vigencia_inicio),
+            )
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(RegraEncargoModel.id != exclude_id)
+        result = await self._session.execute(stmt)
+        requested = {(item.escopo.value if hasattr(item.escopo, "value") else str(item.escopo), item.valor) for item in aplicabilidades}
+        for model in result.scalars().all():
+            existing = {(item.escopo, item.valor) for item in model.aplicabilidades}
+            if existing == requested:
+                return True
+        return False
+
+    def _build_filters(self, stmt, team_id: UUID, load_relationships: bool = True, **filters):
+        if load_relationships:
+            stmt = stmt.options(
                 selectinload(RegraEncargoModel.aplicabilidades),
                 selectinload(RegraEncargoModel.tabela_progressiva).selectinload(TabelaProgressivaModel.faixas),
             )
-            .where(
-                RegraEncargoModel.team_id == team_id,
-                RegraEncargoModel.is_deleted == False,  # noqa: E712
-            )
-            .order_by(RegraEncargoModel.created_at.desc())
-            .limit(limit)
-            .offset((page - 1) * limit)
+        stmt = stmt.where(
+            RegraEncargoModel.team_id == team_id,
+            RegraEncargoModel.is_deleted == False,  # noqa: E712
         )
-        result = await self._session.execute(stmt)
-        return [model.to_domain() for model in result.scalars().all()]
+        if filters.get("search"):
+            pattern = f"%{filters['search'].strip()}%"
+            stmt = stmt.where(or_(RegraEncargoModel.codigo.ilike(pattern), RegraEncargoModel.nome.ilike(pattern)))
+        for field in ("codigo", "status", "tipo_calculo", "natureza", "base_calculo"):
+            if filters.get(field) is not None:
+                value = filters[field]
+                stmt = stmt.where(getattr(RegraEncargoModel, field) == (value.value if hasattr(value, "value") else str(value)))
+        return stmt
 
     async def save(self, regra: RegraEncargo) -> RegraEncargo:
         stmt = (
@@ -1281,6 +1362,22 @@ class RhFolhaJobRepositoryImpl(RhFolhaJobRepository):
         if model is None:
             raise DomainError("Job de folha nao encontrado")
         return model.to_domain()
+
+    async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[RhFolhaJob]:
+        stmt = (
+            select(RhFolhaJobModel)
+            .where(RhFolhaJobModel.team_id == team_id)
+            .order_by(RhFolhaJobModel.created_at.desc())
+            .limit(limit)
+            .offset((page - 1) * limit)
+        )
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def count_by_team(self, team_id: UUID) -> int:
+        stmt = select(func.count()).select_from(RhFolhaJobModel).where(RhFolhaJobModel.team_id == team_id)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
 
 
 class RhSalarioHistoricoRepositoryImpl(RhSalarioHistoricoRepository):

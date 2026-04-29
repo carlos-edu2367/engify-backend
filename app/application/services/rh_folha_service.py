@@ -464,6 +464,30 @@ class RhFolhaService:
             raise DomainError("Holerite nao encontrado")
         return holerite
 
+    async def listar_itens_holerite(self, current_user: User, holerite_id: UUID) -> list[HoleriteItem]:
+        holerite = await self._obter_holerite_autorizado(current_user, holerite_id)
+        if self.holerite_item_repo is None:
+            return []
+        return await self.holerite_item_repo.list_by_holerite(holerite.team_id, holerite.id)
+
+    async def obter_snapshot_item(self, current_user: User, holerite_id: UUID, item_id: UUID) -> dict:
+        holerite = await self._obter_holerite_autorizado(current_user, holerite_id)
+        if self.holerite_item_repo is None:
+            raise DomainError("Itens de holerite nao configurados")
+        itens = await self.holerite_item_repo.list_by_holerite(holerite.team_id, holerite.id)
+        item = next((candidate for candidate in itens if candidate.id == item_id), None)
+        if item is None:
+            raise DomainError("Item de holerite nao encontrado")
+        can_view_technical = current_user.role in {Roles.ADMIN, Roles.FINANCEIRO}
+        snapshot = {
+            "item_id": str(item.id),
+            "codigo": item.codigo,
+            "descricao": item.descricao,
+            "snapshot_regra": item.snapshot_regra,
+            "snapshot_calculo": item.snapshot_calculo,
+        }
+        return snapshot if can_view_technical else self._redact_snapshot(snapshot)
+
     async def criar_job_geracao_folha(
         self,
         current_user: User,
@@ -500,10 +524,68 @@ class RhFolhaService:
             raise DomainError("Repositorio de job de folha nao configurado")
         return await self.folha_job_repo.get_by_id(current_user.team.id, job_id)
 
+    async def listar_jobs_geracao_folha(self, current_user: User, page: int, limit: int):
+        self._ensure_rh_admin(current_user)
+        if self.folha_job_repo is None:
+            raise DomainError("Repositorio de job de folha nao configurado")
+        items = await self.folha_job_repo.list_by_team(current_user.team.id, page, limit)
+        total = await self.folha_job_repo.count_by_team(current_user.team.id)
+        return items, total
+
+    async def cancelar_job_geracao_folha(self, current_user: User, job_id: UUID) -> RhFolhaJob:
+        self._ensure_rh_admin(current_user)
+        if self.folha_job_repo is None:
+            raise DomainError("Repositorio de job de folha nao configurado")
+        job = await self.folha_job_repo.get_by_id(current_user.team.id, job_id)
+        job.cancel()
+        saved = await self.folha_job_repo.save(job)
+        await self._record_audit(
+            current_user=current_user,
+            entity_id=saved.id,
+            entity_type="rh_folha_job",
+            action="rh.folha.job.cancelled",
+            after=self._folha_job_snapshot(saved),
+        )
+        await self.uow.commit()
+        return saved
+
+    async def retry_falhas_job_geracao_folha(self, current_user: User, job_id: UUID) -> RhFolhaJob:
+        self._ensure_rh_admin(current_user)
+        if self.folha_job_repo is None or self.folha_queue is None:
+            raise DomainError("Fila de folha nao configurada")
+        job = await self.folha_job_repo.get_by_id(current_user.team.id, job_id)
+        funcionario_ids = [
+            UUID(item["funcionario_id"])
+            for item in job.error_summary
+            if isinstance(item, dict) and item.get("funcionario_id")
+        ]
+        if not funcionario_ids:
+            raise DomainError("Job nao possui falhas de funcionario para retentativa")
+        retry_job = RhFolhaJob(
+            team_id=current_user.team.id,
+            mes=job.mes,
+            ano=job.ano,
+            requested_by_user_id=current_user.id,
+            funcionario_ids=funcionario_ids,
+        )
+        saved = await self.folha_job_repo.save(retry_job)
+        await self.folha_queue.enqueue_generate_folha(saved.id)
+        await self._record_audit(
+            current_user=current_user,
+            entity_id=saved.id,
+            entity_type="rh_folha_job",
+            action="rh.folha.job.retry_failures_created",
+            after=self._folha_job_snapshot(saved),
+        )
+        await self.uow.commit()
+        return saved
+
     async def processar_job_geracao_folha(self, job_id: UUID) -> RhFolhaJob:
         if self.folha_job_repo is None:
             raise DomainError("Repositorio de job de folha nao configurado")
         job = await self.folha_job_repo.get_by_id_unscoped(job_id)
+        if job.status == RhFolhaJobStatus.CANCELADO:
+            return job
         funcionarios = await self._load_funcionarios_for_job(job.team_id, job.funcionario_ids)
         job.mark_processing(len(funcionarios))
         await self.folha_job_repo.save(job)
@@ -680,6 +762,23 @@ class RhFolhaService:
     def _ensure_funcionario(self, current_user: User) -> None:
         if current_user.role != Roles.FUNCIONARIO:
             raise DomainError("Acesso restrito a funcionarios")
+
+    async def _obter_holerite_autorizado(self, current_user: User, holerite_id: UUID) -> Holerite:
+        if current_user.role in {Roles.ADMIN, Roles.FINANCEIRO}:
+            return await self.holerite_repo.get_by_id(holerite_id, current_user.team.id)
+        if current_user.role != Roles.FUNCIONARIO:
+            raise DomainError("Acesso restrito ao RH")
+        return await self.obter_meu_holerite(holerite_id, current_user)
+
+    def _redact_snapshot(self, snapshot: dict) -> dict:
+        redacted = {}
+        for key, value in snapshot.items():
+            lowered = key.lower()
+            if "snapshot" in lowered:
+                redacted[key] = "***"
+            else:
+                redacted[key] = value
+        return redacted
 
     async def _record_audit(
         self,

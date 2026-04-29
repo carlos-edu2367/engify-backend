@@ -32,6 +32,7 @@ from app.application.services.rh_dashboard_service import RhDashboardService
 from app.application.services.rh_funcionario_service import RhFuncionarioService
 from app.application.services.rh_ponto_service import RhLocalPontoService, RhPontoService
 from app.application.services.rh_folha_service import RhFolhaService
+from app.application.services.rh_encargo_service import RhEncargoService
 from app.application.services.rh_solicitacoes_service import RhSolicitacoesService
 from app.infra.cache.rh_geofence_cache import RedisRhGeofenceCache
 from app.infra.cache.rh_encargo_cache import NullRhEncargoCache
@@ -60,6 +61,7 @@ from app.infra.db.repositories.rh_repository import (
     HoleriteRepositoryImpl,
     RhFolhaJobRepositoryImpl,
     RhSalarioHistoricoRepositoryImpl,
+    TabelaProgressivaRepositoryImpl,
 )
 from app.infra.db.repositories.notificacao_repository import NotificacaoRepositoryImpl
 from app.infra.db.repositories.report_job_repository import ReportJobRepositoryImpl
@@ -282,6 +284,16 @@ async def get_rh_folha_service(session: Session) -> RhFolhaService:
     )
 
 
+async def get_rh_encargo_service(session: Session) -> RhEncargoService:
+    return RhEncargoService(
+        regra_repo=RegraEncargoRepositoryImpl(session),
+        tabela_repo=TabelaProgressivaRepositoryImpl(session),
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+        encargo_cache=_rh_encargo_cache,
+    )
+
+
 async def get_rh_dashboard_service(session: Session) -> RhDashboardService:
     return RhDashboardService(
         funcionario_repo=FuncionarioRepositoryImpl(session),
@@ -380,6 +392,7 @@ RhLocalPontoServiceDep = Annotated[RhLocalPontoService, Depends(get_rh_local_pon
 RhPontoServiceDep = Annotated[RhPontoService, Depends(get_rh_ponto_service)]
 RhSolicitacoesServiceDep = Annotated[RhSolicitacoesService, Depends(get_rh_solicitacoes_service)]
 RhFolhaServiceDep = Annotated[RhFolhaService, Depends(get_rh_folha_service)]
+RhEncargoServiceDep = Annotated[RhEncargoService, Depends(get_rh_encargo_service)]
 RhDashboardServiceDep = Annotated[RhDashboardService, Depends(get_rh_dashboard_service)]
 ItemAttachmentServiceDep = Annotated[ItemAttachmentService, Depends(get_item_attachment_service)]
 ObraImageServiceDep = Annotated[ObraImageService, Depends(get_obra_image_service)]

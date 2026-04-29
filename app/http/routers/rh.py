@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -26,11 +26,12 @@ from app.application.dtos.rh import (
     UpdateTipoAtestadoDTO,
 )
 from app.application.services.rh_ponto_service import RequestContext, hash_ip
-from app.domain.entities.rh import AjustePonto, Atestado, Ferias, Funcionario, Holerite, HorarioTrabalho, LocalPonto, RegistroPonto, RhFolhaJob, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoAtestado
+from app.application.providers.utility.storage_provider import DirectUploadRequest
+from app.domain.entities.rh import AjustePonto, Atestado, FaixaEncargo, Ferias, Funcionario, Holerite, HoleriteItem, HorarioTrabalho, LocalPonto, RegistroPonto, RegraEncargo, RhFolhaJob, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, StatusRegraEncargo, TabelaProgressiva, TipoAtestado
 from app.domain.errors import DomainError
 from app.http.dependencies.auth import CurrentUser, FuncionarioUser, RHAdminUser
 from app.http.dependencies.pagination import Pagination
-from app.http.dependencies.services import RhDashboardServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
+from app.http.dependencies.services import RhDashboardServiceDep, RhEncargoServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.schemas.rh import (
     RhFuncionarioCreateRequest,
@@ -49,9 +50,12 @@ from app.http.schemas.rh import (
     RhAjustePontoCreateRequest,
     RhAjustePontoResponse,
     RhAtestadoCreateRequest,
+    RhAtestadoConfirmarUploadRequest,
     RhAtestadoEntregarRequest,
     RhAtestadoDownloadUrlResponse,
     RhAtestadoResponse,
+    RhAtestadoUploadUrlRequest,
+    RhAtestadoUploadUrlResponse,
     RhAuditLogResponse,
     RhDashboardSummaryResponse,
     RhFecharFolhaRequest,
@@ -60,10 +64,24 @@ from app.http.schemas.rh import (
     RhFolhaGerarRequest,
     RhFolhaJobCreateRequest,
     RhFolhaJobResponse,
+    RhHoleriteItemResponse,
+    RhHoleriteSnapshotResponse,
     RhHoleriteAjustesRequest,
     RhHoleriteResponse,
     RhMeResumoResponse,
     RhMotivoRequest,
+    RhPontoDiaDetalheResponse,
+    RhRegraEncargoCreateRequest,
+    RhRegraEncargoListItem,
+    RhRegraEncargoNovaVersaoRequest,
+    RhRegraEncargoResponse,
+    RhRegraEncargoUpdateRequest,
+    RhTabelaProgressivaCreateRequest,
+    RhTabelaProgressivaFaixasRequest,
+    RhTabelaProgressivaResponse,
+    RhTabelaProgressivaUpdateRequest,
+    RhAplicabilidadeResponse,
+    RhFaixaEncargoResponse,
     RhTipoAtestadoCreateRequest,
     RhTipoAtestadoResponse,
     RhTipoAtestadoUpdateRequest,
@@ -339,7 +357,7 @@ def _to_atestado_response(atestado: Atestado) -> RhAtestadoResponse:
     )
 
 
-def _to_holerite_response(holerite: Holerite) -> RhHoleriteResponse:
+def _to_holerite_response(holerite: Holerite, include_hash: bool = True) -> RhHoleriteResponse:
     return RhHoleriteResponse(
         id=holerite.id,
         funcionario_id=holerite.funcionario_id,
@@ -353,6 +371,13 @@ def _to_holerite_response(holerite: Holerite) -> RhHoleriteResponse:
         valor_liquido=holerite.valor_liquido.amount,
         status=holerite.status,
         pagamento_agendado_id=holerite.pagamento_agendado_id,
+        valor_bruto=holerite.valor_bruto.amount,
+        total_proventos=holerite.total_proventos.amount,
+        total_descontos=holerite.total_descontos.amount,
+        total_informativos=holerite.total_informativos.amount,
+        calculation_version=holerite.calculation_version,
+        calculation_hash=holerite.calculation_hash if include_hash else None,
+        calculated_at=holerite.calculated_at,
     )
 
 
@@ -369,6 +394,83 @@ def _to_folha_job_response(job: RhFolhaJob) -> RhFolhaJobResponse:
         started_at=job.started_at,
         finished_at=job.finished_at,
         created_at=job.created_at,
+    )
+
+
+def _to_aplicabilidade_response(item) -> RhAplicabilidadeResponse:
+    return RhAplicabilidadeResponse(id=getattr(item, "id", None), escopo=item.escopo, valor=item.valor)
+
+
+def _to_regra_encargo_response(regra: RegraEncargo) -> RhRegraEncargoResponse:
+    return RhRegraEncargoResponse(
+        id=regra.id,
+        regra_grupo_id=regra.regra_grupo_id,
+        codigo=regra.codigo,
+        nome=regra.nome,
+        descricao=regra.descricao,
+        tipo_calculo=regra.tipo_calculo,
+        natureza=regra.natureza,
+        base_calculo=regra.base_calculo,
+        prioridade=regra.prioridade,
+        status=regra.status,
+        vigencia_inicio=regra.vigencia_inicio,
+        vigencia_fim=regra.vigencia_fim,
+        valor_fixo=regra.valor_fixo.amount if regra.valor_fixo else None,
+        percentual=regra.percentual,
+        tabela_progressiva_id=regra.tabela_progressiva_id,
+        tabela_progressiva_nome=regra.tabela_progressiva.nome if regra.tabela_progressiva else None,
+        teto=regra.teto.amount if regra.teto else None,
+        piso=regra.piso.amount if regra.piso else None,
+        arredondamento=regra.arredondamento,
+        incide_no_liquido=regra.incide_no_liquido,
+        aplicabilidades=[_to_aplicabilidade_response(item) for item in regra.aplicabilidades],
+    )
+
+
+def _to_faixa_response(faixa: FaixaEncargo) -> RhFaixaEncargoResponse:
+    return RhFaixaEncargoResponse(
+        id=faixa.id,
+        ordem=faixa.ordem,
+        valor_inicial=faixa.valor_inicial.amount,
+        valor_final=faixa.valor_final.amount if faixa.valor_final else None,
+        aliquota=faixa.aliquota,
+        deducao=faixa.deducao.amount,
+        calculo_marginal=faixa.calculo_marginal,
+    )
+
+
+def _to_tabela_progressiva_response(tabela: TabelaProgressiva) -> RhTabelaProgressivaResponse:
+    return RhTabelaProgressivaResponse(
+        id=tabela.id,
+        codigo=tabela.codigo,
+        nome=tabela.nome,
+        descricao=tabela.descricao,
+        status=tabela.status,
+        vigencia_inicio=tabela.vigencia_inicio,
+        vigencia_fim=tabela.vigencia_fim,
+        faixas=[_to_faixa_response(item) for item in tabela.faixas],
+    )
+
+
+def _to_holerite_item_response(item: HoleriteItem) -> RhHoleriteItemResponse:
+    snapshot = item.snapshot_regra or {}
+    return RhHoleriteItemResponse(
+        id=item.id,
+        holerite_id=item.holerite_id,
+        funcionario_id=item.funcionario_id,
+        tipo=item.tipo,
+        origem=item.origem,
+        codigo=item.codigo,
+        descricao=item.descricao,
+        natureza=item.natureza,
+        ordem=item.ordem,
+        base=item.base.amount,
+        valor=item.valor.amount,
+        regra_encargo_id=item.regra_encargo_id,
+        regra_grupo_id=item.regra_grupo_id,
+        regra_nome=snapshot.get("nome") if isinstance(snapshot, dict) else None,
+        regra_versao=snapshot.get("version") or snapshot.get("vigencia_inicio") if isinstance(snapshot, dict) else None,
+        is_automatico=item.is_automatico,
     )
 
 
@@ -412,7 +514,7 @@ def _map_rh_error(exc: DomainError) -> HTTPException:
         return HTTPException(status_code=400, detail=detail)
     if "duplicada" in lowered:
         return HTTPException(status_code=409, detail=detail)
-    if "rascunho" in lowered or "fechado" in lowered:
+    if "conflito" in lowered or "rascunho" in lowered or "fechado" in lowered or "ativa" in lowered:
         return HTTPException(status_code=409, detail=detail)
     if (
         "motivo do ajuste manual" in lowered
@@ -486,6 +588,165 @@ async def list_audit_logs(
         limit=pagination.limit,
         total=total,
     )
+
+
+@router.get("/encargos/regras", response_model=PaginatedResponse[RhRegraEncargoListItem])
+async def list_regras_encargo(
+    user: RHAdminUser,
+    pagination: Pagination,
+    svc: RhEncargoServiceDep,
+    search: str | None = Query(default=None),
+    codigo: str | None = Query(default=None),
+    status: StatusRegraEncargo | None = Query(default=None),
+):
+    try:
+        items, total = await svc.listar_regras(user, pagination.page, pagination.limit, search=search, codigo=codigo, status=status)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return PaginatedResponse.build(
+        items=[_to_regra_encargo_response(item) for item in items],
+        page=pagination.page,
+        limit=pagination.limit,
+        total=total,
+    )
+
+
+@router.post("/encargos/regras", response_model=RhRegraEncargoResponse, status_code=201)
+async def create_regra_encargo(body: RhRegraEncargoCreateRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        regra = await svc.criar_regra(user, body)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_regra_encargo_response(regra)
+
+
+@router.get("/encargos/regras/{regra_id}", response_model=RhRegraEncargoResponse)
+async def get_regra_encargo(regra_id: UUID, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        regra = await svc.obter_regra(user, regra_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_regra_encargo_response(regra)
+
+
+@router.patch("/encargos/regras/{regra_id}", response_model=RhRegraEncargoResponse)
+async def update_regra_encargo(regra_id: UUID, body: RhRegraEncargoUpdateRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        regra = await svc.atualizar_regra(user, regra_id, body)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_regra_encargo_response(regra)
+
+
+@router.post("/encargos/regras/{regra_id}/nova-versao", response_model=RhRegraEncargoResponse, status_code=201)
+async def criar_nova_versao_regra(regra_id: UUID, body: RhRegraEncargoNovaVersaoRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        regra = await svc.criar_nova_versao(user, regra_id, body)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_regra_encargo_response(regra)
+
+
+@router.post("/encargos/regras/{regra_id}/ativar", response_model=RhRegraEncargoResponse)
+async def ativar_regra_encargo(regra_id: UUID, body: RhMotivoRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        regra = await svc.ativar_regra(user, regra_id, body.motivo)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_regra_encargo_response(regra)
+
+
+@router.post("/encargos/regras/{regra_id}/inativar", response_model=RhRegraEncargoResponse)
+async def inativar_regra_encargo(regra_id: UUID, body: RhMotivoRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        regra = await svc.inativar_regra(user, regra_id, body.motivo)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_regra_encargo_response(regra)
+
+
+@router.post("/encargos/regras/{regra_id}/arquivar", response_model=RhRegraEncargoResponse)
+async def arquivar_regra_encargo(regra_id: UUID, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        regra = await svc.arquivar_regra(user, regra_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_regra_encargo_response(regra)
+
+
+@router.get("/encargos/tabelas-progressivas", response_model=PaginatedResponse[RhTabelaProgressivaResponse])
+async def list_tabelas_progressivas(
+    user: RHAdminUser,
+    pagination: Pagination,
+    svc: RhEncargoServiceDep,
+    search: str | None = Query(default=None),
+    codigo: str | None = Query(default=None),
+    status: StatusRegraEncargo | None = Query(default=None),
+):
+    try:
+        items, total = await svc.listar_tabelas_progressivas(user, pagination.page, pagination.limit, search=search, codigo=codigo, status=status)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return PaginatedResponse.build(
+        items=[_to_tabela_progressiva_response(item) for item in items],
+        page=pagination.page,
+        limit=pagination.limit,
+        total=total,
+    )
+
+
+@router.post("/encargos/tabelas-progressivas", response_model=RhTabelaProgressivaResponse, status_code=201)
+async def create_tabela_progressiva(body: RhTabelaProgressivaCreateRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        tabela = await svc.criar_tabela_progressiva(user, body)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_tabela_progressiva_response(tabela)
+
+
+@router.get("/encargos/tabelas-progressivas/{tabela_id}", response_model=RhTabelaProgressivaResponse)
+async def get_tabela_progressiva(tabela_id: UUID, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        tabela = await svc.obter_tabela_progressiva(user, tabela_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_tabela_progressiva_response(tabela)
+
+
+@router.patch("/encargos/tabelas-progressivas/{tabela_id}", response_model=RhTabelaProgressivaResponse)
+async def update_tabela_progressiva(tabela_id: UUID, body: RhTabelaProgressivaUpdateRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        tabela = await svc.atualizar_tabela_progressiva(user, tabela_id, body)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_tabela_progressiva_response(tabela)
+
+
+@router.put("/encargos/tabelas-progressivas/{tabela_id}/faixas", response_model=RhTabelaProgressivaResponse)
+async def replace_faixas_tabela_progressiva(tabela_id: UUID, body: RhTabelaProgressivaFaixasRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        tabela = await svc.substituir_faixas_tabela(user, tabela_id, body.faixas)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_tabela_progressiva_response(tabela)
+
+
+@router.post("/encargos/tabelas-progressivas/{tabela_id}/ativar", response_model=RhTabelaProgressivaResponse)
+async def ativar_tabela_progressiva(tabela_id: UUID, body: RhMotivoRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        tabela = await svc.ativar_tabela_progressiva(user, tabela_id, body.motivo)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_tabela_progressiva_response(tabela)
+
+
+@router.post("/encargos/tabelas-progressivas/{tabela_id}/inativar", response_model=RhTabelaProgressivaResponse)
+async def inativar_tabela_progressiva(tabela_id: UUID, body: RhMotivoRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        tabela = await svc.inativar_tabela_progressiva(user, tabela_id, body.motivo)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_tabela_progressiva_response(tabela)
 
 
 @router.get("/funcionarios/{funcionario_id}/locais-ponto", response_model=PaginatedResponse[RhLocalPontoResponse])
@@ -600,6 +861,67 @@ async def list_pontos(
         limit=pagination.limit,
         total=total,
     )
+
+
+@router.get("/ponto/dias", response_model=PaginatedResponse[RhRegistroPontoListItem])
+async def list_ponto_dias(
+    user: RHAdminUser,
+    pagination: Pagination,
+    svc: RhPontoServiceDep,
+    funcionario_id: UUID | None = Query(default=None),
+    start: datetime | None = Query(default=None),
+    end: datetime | None = Query(default=None),
+    status: StatusPonto | None = Query(default=None),
+):
+    try:
+        items, total = await svc.listar_dias_ponto(user, pagination.page, pagination.limit, funcionario_id=funcionario_id, start=start, end=end, status=status)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return PaginatedResponse.build(
+        items=[_to_registro_item(item) for item in items],
+        page=pagination.page,
+        limit=pagination.limit,
+        total=total,
+    )
+
+
+@router.get("/ponto/dias/{funcionario_id}/{data}", response_model=RhPontoDiaDetalheResponse)
+async def get_ponto_dia(funcionario_id: UUID, data: date, user: RHAdminUser, svc: RhPontoServiceDep):
+    try:
+        detail = await svc.obter_dia_ponto(user, funcionario_id, data)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    funcionario = detail["funcionario"]
+    return RhPontoDiaDetalheResponse(
+        funcionario_id=funcionario.id,
+        funcionario_nome=funcionario.nome,
+        funcionario_cpf_mascarado=_mask_cpf(funcionario.cpf.value),
+        funcionario_cargo=funcionario.cargo,
+        status_dia=detail["status_dia"],
+        registros=[_to_registro_item(item) for item in detail["registros"]],
+        locais_autorizados=[_to_local_response(item) for item in detail["locais_autorizados"]],
+        ajustes_relacionados=detail["ajustes_relacionados"],
+        impacto_estimado=detail["impacto_estimado"],
+        auditoria_resumida=detail["auditoria_resumida"],
+    )
+
+
+@router.get("/ponto/registros/{registro_id}")
+async def get_ponto_registro(registro_id: UUID, user: RHAdminUser, svc: RhPontoServiceDep):
+    try:
+        detail = await svc.obter_registro_ponto(user, registro_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    funcionario = detail["funcionario"]
+    registro = detail["registro"]
+    return {
+        "registro": _to_registro_item(registro).model_dump(),
+        "funcionario_nome": funcionario.nome,
+        "funcionario_cpf_mascarado": _mask_cpf(funcionario.cpf.value),
+        "funcionario_cargo": funcionario.cargo,
+        "local_ponto_nome": detail["local_ponto"].nome if detail["local_ponto"] else None,
+        "auditoria_resumida": detail["auditoria_resumida"],
+    }
 
 
 @router.get("/me/ponto", response_model=PaginatedResponse[RhRegistroPontoListItem])
@@ -841,6 +1163,42 @@ async def deliver_atestado(atestado_id: UUID, body: RhAtestadoEntregarRequest, u
     return _to_atestado_response(atestado)
 
 
+@router.post("/atestados/{atestado_id}/upload-url", response_model=RhAtestadoUploadUrlResponse)
+async def create_atestado_upload_url(
+    atestado_id: UUID,
+    body: RhAtestadoUploadUrlRequest,
+    user: CurrentUser,
+    svc: RhSolicitacoesServiceDep,
+    storage: StorageProviderDep,
+):
+    try:
+        upload = await svc.preparar_upload_atestado(atestado_id, user, body.file_name, body.content_type, body.size_bytes)
+        direct = await storage.create_direct_upload(
+            DirectUploadRequest(
+                bucket=settings.storage_bucket_name,
+                path=upload["path"],
+                content_type=upload["content_type"],
+            )
+        )
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return RhAtestadoUploadUrlResponse(upload_url=direct.upload_url, path=direct.path, headers=direct.headers)
+
+
+@router.post("/atestados/{atestado_id}/confirmar-upload", response_model=RhAtestadoResponse)
+async def confirmar_atestado_upload(
+    atestado_id: UUID,
+    body: RhAtestadoConfirmarUploadRequest,
+    user: RHAdminUser,
+    svc: RhSolicitacoesServiceDep,
+):
+    try:
+        atestado = await svc.confirmar_upload_atestado(atestado_id, user, body.path, body.content_type, body.size_bytes)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_atestado_response(atestado)
+
+
 @router.post("/atestados/{atestado_id}/rejeitar", response_model=RhAtestadoResponse)
 async def reject_atestado(atestado_id: UUID, body: RhMotivoRequest, user: RHAdminUser, svc: RhSolicitacoesServiceDep):
     try:
@@ -898,6 +1256,20 @@ async def criar_job_folha(
     return _to_folha_job_response(job)
 
 
+@router.get("/folha/jobs", response_model=PaginatedResponse[RhFolhaJobResponse])
+async def listar_jobs_folha(user: RHAdminUser, pagination: Pagination, svc: RhFolhaServiceDep):
+    try:
+        items, total = await svc.listar_jobs_geracao_folha(user, pagination.page, pagination.limit)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return PaginatedResponse.build(
+        items=[_to_folha_job_response(item) for item in items],
+        page=pagination.page,
+        limit=pagination.limit,
+        total=total,
+    )
+
+
 @router.get("/folha/jobs/{job_id}", response_model=RhFolhaJobResponse)
 async def obter_job_folha(
     job_id: UUID,
@@ -906,6 +1278,24 @@ async def obter_job_folha(
 ):
     try:
         job = await svc.obter_job_geracao_folha(user, job_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_folha_job_response(job)
+
+
+@router.post("/folha/jobs/{job_id}/cancelar", response_model=RhFolhaJobResponse)
+async def cancelar_job_folha(job_id: UUID, user: RHAdminUser, svc: RhFolhaServiceDep):
+    try:
+        job = await svc.cancelar_job_geracao_folha(user, job_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_folha_job_response(job)
+
+
+@router.post("/folha/jobs/{job_id}/retry-falhas", response_model=RhFolhaJobResponse, status_code=202)
+async def retry_falhas_job_folha(job_id: UUID, user: RHAdminUser, svc: RhFolhaServiceDep):
+    try:
+        job = await svc.retry_falhas_job_geracao_folha(user, job_id)
     except DomainError as exc:
         raise _map_rh_error(exc)
     return _to_folha_job_response(job)
@@ -940,6 +1330,24 @@ async def get_holerite(holerite_id: UUID, user: RHAdminUser, svc: RhFolhaService
     except DomainError as exc:
         raise _map_rh_error(exc)
     return _to_holerite_response(holerite)
+
+
+@router.get("/holerites/{holerite_id}/itens", response_model=list[RhHoleriteItemResponse])
+async def list_holerite_itens(holerite_id: UUID, user: RHAdminUser, svc: RhFolhaServiceDep):
+    try:
+        itens = await svc.listar_itens_holerite(user, holerite_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return [_to_holerite_item_response(item) for item in itens]
+
+
+@router.get("/holerites/{holerite_id}/itens/{item_id}/snapshot", response_model=RhHoleriteSnapshotResponse)
+async def get_holerite_item_snapshot(holerite_id: UUID, item_id: UUID, user: RHAdminUser, svc: RhFolhaServiceDep):
+    try:
+        snapshot = await svc.obter_snapshot_item(user, holerite_id, item_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return RhHoleriteSnapshotResponse(**snapshot)
 
 
 @router.patch("/holerites/{holerite_id}/ajustes-manuais", response_model=RhHoleriteResponse)
@@ -993,7 +1401,7 @@ async def list_meus_holerites(
     except DomainError as exc:
         raise _map_rh_error(exc)
     return PaginatedResponse.build(
-        items=[_to_holerite_response(item) for item in items],
+        items=[_to_holerite_response(item, include_hash=False) for item in items],
         page=pagination.page,
         limit=pagination.limit,
         total=total,
@@ -1006,4 +1414,13 @@ async def get_meu_holerite(holerite_id: UUID, user: FuncionarioUser, svc: RhFolh
         holerite = await svc.obter_meu_holerite(holerite_id, user)
     except DomainError as exc:
         raise _map_rh_error(exc)
-    return _to_holerite_response(holerite)
+    return _to_holerite_response(holerite, include_hash=False)
+
+
+@router.get("/me/holerites/{holerite_id}/itens", response_model=list[RhHoleriteItemResponse])
+async def list_meu_holerite_itens(holerite_id: UUID, user: FuncionarioUser, svc: RhFolhaServiceDep):
+    try:
+        itens = await svc.listar_itens_holerite(user, holerite_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return [_to_holerite_item_response(item) for item in itens]

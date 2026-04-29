@@ -889,6 +889,7 @@ class RhFolhaJobStatus(Enum):
     CONCLUIDO = "concluido"
     CONCLUIDO_COM_FALHAS = "concluido_com_falhas"
     FALHOU = "falhou"
+    CANCELADO = "cancelado"
 
 
 class RhFolhaJob:
@@ -962,6 +963,12 @@ class RhFolhaJob:
         self.status = RhFolhaJobStatus.FALHOU
         self.finished_at = datetime.now(timezone.utc)
         self.error_summary.append({"erro": error})
+
+    def cancel(self) -> None:
+        if self.status not in {RhFolhaJobStatus.PENDENTE, RhFolhaJobStatus.PROCESSANDO}:
+            raise DomainError("Job de folha nao pode ser cancelado neste status")
+        self.status = RhFolhaJobStatus.CANCELADO
+        self.finished_at = datetime.now(timezone.utc)
 
 
 class RhSalarioHistorico:

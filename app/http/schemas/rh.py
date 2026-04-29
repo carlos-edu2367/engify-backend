@@ -4,7 +4,22 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.entities.rh import RhFolhaJobStatus, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoPonto
+from app.domain.entities.rh import (
+    BaseCalculoEncargo,
+    EscopoAplicabilidade,
+    HoleriteItemNatureza,
+    HoleriteItemTipo,
+    NaturezaEncargo,
+    RhFolhaJobStatus,
+    StatusAjuste,
+    StatusAtestado,
+    StatusFerias,
+    StatusHolerite,
+    StatusPonto,
+    StatusRegraEncargo,
+    TipoPonto,
+    TipoRegraEncargo,
+)
 
 
 class RhIntervaloHorarioRequest(BaseModel):
@@ -175,6 +190,8 @@ class RhAjustePontoResponse(BaseModel):
 
 
 class RhMotivoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     motivo: str
 
 
@@ -203,15 +220,40 @@ class RhTipoAtestadoResponse(BaseModel):
 
 
 class RhAtestadoCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     funcionario_id: UUID | None = None
     tipo_atestado_id: UUID
     data_inicio: datetime
     data_fim: datetime
-    file_path: str | None = None
 
 
 class RhAtestadoEntregarRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     file_path: str | None = None
+
+
+class RhAtestadoUploadUrlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_name: str
+    content_type: str
+    size_bytes: int
+
+
+class RhAtestadoUploadUrlResponse(BaseModel):
+    upload_url: str
+    path: str
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class RhAtestadoConfirmarUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    content_type: str
+    size_bytes: int
 
 
 class RhAtestadoResponse(BaseModel):
@@ -255,6 +297,13 @@ class RhHoleriteResponse(BaseModel):
     valor_liquido: Decimal
     status: StatusHolerite
     pagamento_agendado_id: UUID | None = None
+    valor_bruto: Decimal = Decimal("0.00")
+    total_proventos: Decimal = Decimal("0.00")
+    total_descontos: Decimal = Decimal("0.00")
+    total_informativos: Decimal = Decimal("0.00")
+    calculation_version: str | None = None
+    calculation_hash: str | None = None
+    calculated_at: datetime | None = None
 
 
 class RhFecharFolhaRequest(BaseModel):
@@ -281,6 +330,193 @@ class RhFolhaJobResponse(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime
+
+
+class RhAplicabilidadeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    escopo: EscopoAplicabilidade
+    valor: str | None = None
+
+
+class RhAplicabilidadeResponse(BaseModel):
+    id: UUID | None = None
+    escopo: EscopoAplicabilidade
+    valor: str | None = None
+
+
+class RhRegraEncargoCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str
+    nome: str
+    tipo_calculo: TipoRegraEncargo
+    natureza: NaturezaEncargo
+    base_calculo: BaseCalculoEncargo
+    prioridade: int = 100
+    descricao: str | None = None
+    vigencia_inicio: datetime | None = None
+    vigencia_fim: datetime | None = None
+    valor_fixo: Decimal | None = None
+    percentual: Decimal | None = None
+    tabela_progressiva_id: UUID | None = None
+    teto: Decimal | None = None
+    piso: Decimal | None = None
+    arredondamento: str = "ROUND_HALF_UP"
+    incide_no_liquido: bool = True
+    aplicabilidades: list[RhAplicabilidadeRequest] = Field(default_factory=list)
+
+
+class RhRegraEncargoUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str | None = None
+    nome: str | None = None
+    tipo_calculo: TipoRegraEncargo | None = None
+    natureza: NaturezaEncargo | None = None
+    base_calculo: BaseCalculoEncargo | None = None
+    prioridade: int | None = None
+    descricao: str | None = None
+    vigencia_inicio: datetime | None = None
+    vigencia_fim: datetime | None = None
+    valor_fixo: Decimal | None = None
+    percentual: Decimal | None = None
+    tabela_progressiva_id: UUID | None = None
+    teto: Decimal | None = None
+    piso: Decimal | None = None
+    arredondamento: str | None = None
+    incide_no_liquido: bool | None = None
+    aplicabilidades: list[RhAplicabilidadeRequest] | None = None
+
+
+class RhRegraEncargoNovaVersaoRequest(RhRegraEncargoUpdateRequest):
+    pass
+
+
+class RhRegraEncargoResponse(BaseModel):
+    id: UUID
+    regra_grupo_id: UUID
+    codigo: str
+    nome: str
+    descricao: str | None = None
+    tipo_calculo: TipoRegraEncargo
+    natureza: NaturezaEncargo
+    base_calculo: BaseCalculoEncargo
+    prioridade: int
+    status: StatusRegraEncargo
+    vigencia_inicio: datetime | None = None
+    vigencia_fim: datetime | None = None
+    valor_fixo: Decimal | None = None
+    percentual: Decimal | None = None
+    tabela_progressiva_id: UUID | None = None
+    tabela_progressiva_nome: str | None = None
+    teto: Decimal | None = None
+    piso: Decimal | None = None
+    arredondamento: str
+    incide_no_liquido: bool
+    aplicabilidades: list[RhAplicabilidadeResponse] = Field(default_factory=list)
+
+
+class RhRegraEncargoListItem(RhRegraEncargoResponse):
+    pass
+
+
+class RhFaixaEncargoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ordem: int
+    valor_inicial: Decimal
+    valor_final: Decimal | None = None
+    aliquota: Decimal
+    deducao: Decimal = Decimal("0.00")
+    calculo_marginal: bool = False
+
+
+class RhFaixaEncargoResponse(BaseModel):
+    id: UUID | None = None
+    ordem: int
+    valor_inicial: Decimal
+    valor_final: Decimal | None = None
+    aliquota: Decimal
+    deducao: Decimal
+    calculo_marginal: bool
+
+
+class RhTabelaProgressivaCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str
+    nome: str
+    descricao: str | None = None
+    vigencia_inicio: datetime | None = None
+    vigencia_fim: datetime | None = None
+
+
+class RhTabelaProgressivaUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str | None = None
+    nome: str | None = None
+    descricao: str | None = None
+    vigencia_inicio: datetime | None = None
+    vigencia_fim: datetime | None = None
+
+
+class RhTabelaProgressivaFaixasRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    faixas: list[RhFaixaEncargoRequest]
+
+
+class RhTabelaProgressivaResponse(BaseModel):
+    id: UUID
+    codigo: str
+    nome: str
+    descricao: str | None = None
+    status: StatusRegraEncargo
+    vigencia_inicio: datetime | None = None
+    vigencia_fim: datetime | None = None
+    faixas: list[RhFaixaEncargoResponse] = Field(default_factory=list)
+
+
+class RhHoleriteItemResponse(BaseModel):
+    id: UUID
+    holerite_id: UUID
+    funcionario_id: UUID
+    tipo: HoleriteItemTipo
+    origem: str
+    codigo: str
+    descricao: str
+    natureza: HoleriteItemNatureza
+    ordem: int
+    base: Decimal
+    valor: Decimal
+    regra_encargo_id: UUID | None = None
+    regra_grupo_id: UUID | None = None
+    regra_nome: str | None = None
+    regra_versao: str | None = None
+    is_automatico: bool
+
+
+class RhHoleriteSnapshotResponse(BaseModel):
+    item_id: UUID | str
+    codigo: str
+    descricao: str
+    snapshot_regra: dict | str | None = None
+    snapshot_calculo: dict | str | None = None
+
+
+class RhPontoDiaDetalheResponse(BaseModel):
+    funcionario_id: UUID
+    funcionario_nome: str
+    funcionario_cpf_mascarado: str
+    funcionario_cargo: str
+    status_dia: str
+    registros: list[RhRegistroPontoListItem] = Field(default_factory=list)
+    locais_autorizados: list[RhLocalPontoResponse] = Field(default_factory=list)
+    ajustes_relacionados: list[dict] = Field(default_factory=list)
+    impacto_estimado: dict
+    auditoria_resumida: list[dict] = Field(default_factory=list)
 
 
 class RhDashboardSummaryResponse(BaseModel):

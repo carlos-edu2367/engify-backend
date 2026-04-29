@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -297,6 +297,41 @@ class RhPontoService:
         )
         return items, total
 
+    async def listar_dias_ponto(self, current_user: User, page: int, limit: int, funcionario_id=None, start=None, end=None, status=None):
+        return await self.list_pontos(current_user, page, limit, funcionario_id=funcionario_id, start=start, end=end, status=status)
+
+    async def obter_dia_ponto(self, current_user: User, funcionario_id: UUID, data: date) -> dict:
+        if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
+            raise DomainError("Acesso restrito ao RH")
+        funcionario = await self.funcionario_repo.get_by_id(funcionario_id, current_user.team.id)
+        day_start = datetime.combine(data, time.min, tzinfo=timezone.utc)
+        day_end = datetime.combine(data, time.max, tzinfo=timezone.utc)
+        registros = await self.registro_ponto_repo.list_by_funcionario_day(current_user.team.id, funcionario.id, day_start, day_end)
+        locais = await self.local_ponto_repo.list_by_funcionario(current_user.team.id, funcionario.id)
+        status_dia = self._status_dia(registros)
+        return {
+            "funcionario": funcionario,
+            "registros": registros,
+            "status_dia": status_dia,
+            "locais_autorizados": locais,
+            "ajustes_relacionados": [],
+            "impacto_estimado": self._impacto_estimado(registros),
+            "auditoria_resumida": [],
+        }
+
+    async def obter_registro_ponto(self, current_user: User, registro_id: UUID) -> dict:
+        if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
+            raise DomainError("Acesso restrito ao RH")
+        registro = await self.registro_ponto_repo.get_by_id(registro_id, current_user.team.id)
+        funcionario = await self.funcionario_repo.get_by_id(registro.funcionario_id, current_user.team.id)
+        local = await self.local_ponto_repo.get_by_id(registro.local_ponto_id, current_user.team.id) if registro.local_ponto_id else None
+        return {
+            "registro": registro,
+            "funcionario": funcionario,
+            "local_ponto": local,
+            "auditoria_resumida": [],
+        }
+
     def _ensure_funcionario(self, current_user: User) -> None:
         if current_user.role != Roles.FUNCIONARIO:
             raise DomainError("Acesso restrito a funcionarios")
@@ -334,6 +369,23 @@ class RhPontoService:
         if last_on_day is None:
             return tipo == TipoPonto.SAIDA
         return last_on_day.tipo == tipo
+
+    def _status_dia(self, registros: list[RegistroPonto]) -> str:
+        if not registros:
+            return "sem_registros"
+        if any(item.status == StatusPonto.NEGADO for item in registros):
+            return "com_negacao"
+        if any(item.status == StatusPonto.INCONSISTENTE for item in registros):
+            return "inconsistente"
+        if len([item for item in registros if item.status in {StatusPonto.VALIDADO, StatusPonto.AJUSTADO}]) % 2:
+            return "incompleto"
+        return "validado"
+
+    def _impacto_estimado(self, registros: list[RegistroPonto]) -> dict:
+        return {
+            "horas_extras_estimadas": "0.00",
+            "faltas_estimadas": "0.00" if registros else "1.00",
+        }
 
     async def _record_audit(self, current_user: User, registro: RegistroPonto, request_context: RequestContext) -> None:
         if registro.status == StatusPonto.NEGADO:

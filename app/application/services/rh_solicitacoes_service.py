@@ -1,5 +1,7 @@
 from datetime import datetime, time, timedelta, timezone
+from pathlib import PurePosixPath
 from uuid import UUID
+from uuid import uuid4
 
 from app.application.dtos.rh import (
     AjustePontoFiltersDTO,
@@ -279,7 +281,7 @@ class RhSolicitacoesService:
             tipo_atestado_id=dto.tipo_atestado_id,
             data_inicio=self._as_utc(dto.data_inicio),
             data_fim=self._as_utc(dto.data_fim),
-            file_path=dto.file_path,
+            file_path=None,
         )
         saved = await self.atestado_repo.save(atestado)
         await self._record_audit(current_user, "atestado", saved.id, "rh.atestado.created", after=self._atestado_snapshot(saved))
@@ -333,10 +335,35 @@ class RhSolicitacoesService:
         atestado = await self.atestado_repo.get_by_id(atestado_id, current_user.team.id)
         before = self._atestado_snapshot(atestado)
         if file_path is not None:
-            atestado.file_path = file_path
+            atestado.file_path = self._validate_atestado_storage_path(current_user.team.id, atestado.id, file_path)
         atestado.entregar()
         saved = await self.atestado_repo.save(atestado)
         await self._record_audit(current_user, "atestado", saved.id, "rh.atestado.delivered", before=before, after=self._atestado_snapshot(saved))
+        await self.uow.commit()
+        return saved
+
+    async def preparar_upload_atestado(self, atestado_id: UUID, current_user: User, file_name: str, content_type: str, size_bytes: int) -> dict:
+        atestado = await self.atestado_repo.get_by_id(atestado_id, current_user.team.id)
+        if current_user.role == Roles.FUNCIONARIO:
+            funcionario = await self._get_current_funcionario(current_user)
+            if atestado.funcionario_id != funcionario.id:
+                raise DomainError("Atestado nao encontrado")
+        else:
+            self._ensure_rh_admin(current_user)
+        extension = self._validate_atestado_upload_metadata(file_name, content_type, size_bytes)
+        path = f"rh/atestados/{current_user.team.id}/{atestado.id}/{uuid4()}{extension}"
+        return {"path": path, "content_type": content_type, "size_bytes": size_bytes}
+
+    async def confirmar_upload_atestado(self, atestado_id: UUID, current_user: User, file_path: str, content_type: str, size_bytes: int) -> Atestado:
+        self._ensure_rh_admin(current_user)
+        atestado = await self.atestado_repo.get_by_id(atestado_id, current_user.team.id)
+        self._validate_atestado_upload_metadata(file_path, content_type, size_bytes)
+        before = self._atestado_snapshot(atestado)
+        atestado.file_path = self._validate_atestado_storage_path(current_user.team.id, atestado.id, file_path)
+        if atestado.status.name == "AGUARDANDO_ENTREGA":
+            atestado.entregar()
+        saved = await self.atestado_repo.save(atestado)
+        await self._record_audit(current_user, "atestado", saved.id, "rh.atestado.upload_confirmed", before=before, after=self._atestado_snapshot(saved))
         await self.uow.commit()
         return saved
 
@@ -485,3 +512,32 @@ class RhSolicitacoesService:
             "status": atestado.status.value,
             "has_file": bool(atestado.file_path),
         }
+
+    def _validate_atestado_upload_metadata(self, file_name: str, content_type: str, size_bytes: int) -> str:
+        allowed_types = {
+            "application/pdf": ".pdf",
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+        }
+        if content_type not in allowed_types:
+            raise DomainError("Tipo de arquivo de atestado nao permitido")
+        if size_bytes <= 0 or size_bytes > 10 * 1024 * 1024:
+            raise DomainError("Tamanho do arquivo de atestado invalido")
+        extension = PurePosixPath(file_name).suffix.lower()
+        if extension not in {".pdf", ".jpg", ".jpeg", ".png"}:
+            raise DomainError("Extensao do arquivo de atestado nao permitida")
+        if content_type == "application/pdf" and extension != ".pdf":
+            raise DomainError("Extensao incompativel com content-type")
+        if content_type == "image/png" and extension != ".png":
+            raise DomainError("Extensao incompativel com content-type")
+        if content_type == "image/jpeg" and extension not in {".jpg", ".jpeg"}:
+            raise DomainError("Extensao incompativel com content-type")
+        return ".jpg" if extension == ".jpeg" else extension
+
+    def _validate_atestado_storage_path(self, team_id: UUID, atestado_id: UUID, file_path: str) -> str:
+        normalized = PurePosixPath(file_path)
+        path = normalized.as_posix()
+        expected_prefix = f"rh/atestados/{team_id}/{atestado_id}/"
+        if path.startswith("/") or ".." in normalized.parts or not path.startswith(expected_prefix):
+            raise DomainError("Path de atestado invalido")
+        return path

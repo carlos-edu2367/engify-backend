@@ -294,6 +294,24 @@ class RegraEncargoRepository(ABC):
     async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[RegraEncargo]:
         pass
 
+    async def list_by_filters(self, team_id: UUID, page: int, limit: int, **filters) -> list[RegraEncargo]:
+        pass
+
+    async def count_by_filters(self, team_id: UUID, **filters) -> int:
+        pass
+
+    async def has_active_conflict(
+        self,
+        team_id: UUID,
+        regra_grupo_id: UUID,
+        codigo: str,
+        vigencia_inicio,
+        vigencia_fim,
+        aplicabilidades: list,
+        exclude_id: UUID | None = None,
+    ) -> bool:
+        pass
+
     @abstractmethod
     async def save(self, regra: RegraEncargo) -> RegraEncargo:
         pass
@@ -306,6 +324,15 @@ class TabelaProgressivaRepository(ABC):
 
     @abstractmethod
     async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[TabelaProgressiva]:
+        pass
+
+    async def list_by_filters(self, team_id: UUID, page: int, limit: int, **filters) -> list[TabelaProgressiva]:
+        pass
+
+    async def count_by_filters(self, team_id: UUID, **filters) -> int:
+        pass
+
+    async def is_used_by_active_rule(self, team_id: UUID, tabela_id: UUID) -> bool:
         pass
 
     @abstractmethod
@@ -426,4 +453,12 @@ class RhFolhaJobRepository(ABC):
 
     @abstractmethod
     async def get_by_id_unscoped(self, job_id: UUID) -> RhFolhaJob:
+        pass
+
+    @abstractmethod
+    async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[RhFolhaJob]:
+        pass
+
+    @abstractmethod
+    async def count_by_team(self, team_id: UUID) -> int:
         pass
