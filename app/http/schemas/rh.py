@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.entities.rh import StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoPonto
+from app.domain.entities.rh import RhFolhaJobStatus, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoPonto
 
 
 class RhIntervaloHorarioRequest(BaseModel):
@@ -261,6 +261,26 @@ class RhFecharFolhaRequest(BaseModel):
     mes: int
     ano: int
     funcionario_ids: list[UUID] | None = None
+
+
+class RhFolhaJobCreateRequest(BaseModel):
+    mes: int
+    ano: int
+    funcionario_ids: list[UUID] | None = None
+
+
+class RhFolhaJobResponse(BaseModel):
+    id: UUID
+    mes: int
+    ano: int
+    status: RhFolhaJobStatus
+    total_funcionarios: int
+    processados: int
+    falhas: int
+    error_summary: list[dict] = Field(default_factory=list)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
 
 
 class RhDashboardSummaryResponse(BaseModel):

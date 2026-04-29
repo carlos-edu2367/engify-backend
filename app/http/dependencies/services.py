@@ -34,6 +34,7 @@ from app.application.services.rh_ponto_service import RhLocalPontoService, RhPon
 from app.application.services.rh_folha_service import RhFolhaService
 from app.application.services.rh_solicitacoes_service import RhSolicitacoesService
 from app.infra.cache.rh_geofence_cache import RedisRhGeofenceCache
+from app.infra.cache.rh_encargo_cache import NullRhEncargoCache
 from app.infra.db.repositories.obra_repository import (
     ObraRepositoryImpl, ItemRepositoryImpl, DiaryRepositoryImpl,
     ItemAttachmentRepositoryImpl, ImageRepositoryImpl, CategoriaObraRepositoryImpl,
@@ -45,6 +46,7 @@ from app.infra.db.repositories.financeiro_repository import (
 )
 from app.infra.db.repositories.rh_repository import (
     FuncionarioRepositoryImpl,
+    RegraEncargoRepositoryImpl,
     HorarioTrabalhoRepositoryImpl,
     LocalPontoRepositoryImpl,
     RegistroPontoRepositoryImpl,
@@ -53,8 +55,10 @@ from app.infra.db.repositories.rh_repository import (
     AjustePontoRepositoryImpl,
     AtestadoRepositoryImpl,
     FeriasRepositoryImpl,
+    HoleriteItemRepositoryImpl,
     TipoAtestadoRepositoryImpl,
     HoleriteRepositoryImpl,
+    RhFolhaJobRepositoryImpl,
     RhSalarioHistoricoRepositoryImpl,
 )
 from app.infra.db.repositories.notificacao_repository import NotificacaoRepositoryImpl
@@ -64,6 +68,7 @@ from app.application.use_cases.generate_monthly_commission_report import (
     GetCommissionReportJobStatusUseCase,
 )
 from app.infra.jobs.queue import ArqCommissionReportQueue
+from app.infra.jobs.rh_queue import ArqRhFolhaQueue
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +118,8 @@ _hash_provider = Argon2HashProvider()
 _storage_provider = S3StorageProvider()
 _report_queue = ArqCommissionReportQueue()
 _rh_geofence_cache = RedisRhGeofenceCache()
+_rh_folha_queue = ArqRhFolhaQueue()
+_rh_encargo_cache = NullRhEncargoCache()
 
 
 def get_hash_provider() -> Argon2HashProvider:
@@ -263,10 +270,15 @@ async def get_rh_folha_service(session: Session) -> RhFolhaService:
         tipo_atestado_repo=TipoAtestadoRepositoryImpl(session),
         atestado_repo=AtestadoRepositoryImpl(session),
         holerite_repo=HoleriteRepositoryImpl(session),
+        holerite_item_repo=HoleriteItemRepositoryImpl(session),
+        regra_encargo_repo=RegraEncargoRepositoryImpl(session),
         pagamento_repo=PagamentoAgendadoRepositoryImpl(session),
         audit_repo=RhAuditLogRepositoryImpl(session),
         idempotency_repo=RhIdempotencyKeyRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
+        folha_job_repo=RhFolhaJobRepositoryImpl(session),
+        folha_queue=_rh_folha_queue,
+        encargo_cache=_rh_encargo_cache,
     )
 
 

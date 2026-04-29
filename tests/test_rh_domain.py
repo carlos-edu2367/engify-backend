@@ -334,3 +334,106 @@ def test_delete_marks_entities_as_deleted():
 
     assert funcionario.is_deleted is True
     assert horario.is_deleted is True
+
+
+def test_regra_encargo_fixa_exige_valor_fixo():
+    from app.domain.entities.rh import BaseCalculoEncargo, NaturezaEncargo, RegraEncargo, StatusRegraEncargo, TipoRegraEncargo
+
+    with pytest.raises(Exception):
+        RegraEncargo(
+            team_id=uuid4(),
+            codigo="VA",
+            nome="Vale Alimentacao",
+            tipo_calculo=TipoRegraEncargo.VALOR_FIXO,
+            natureza=NaturezaEncargo.PROVENTO,
+            base_calculo=BaseCalculoEncargo.VALOR_REFERENCIA_MANUAL,
+            prioridade=100,
+            status=StatusRegraEncargo.RASCUNHO,
+        )
+
+
+def test_regra_encargo_ativa_exige_vigencia_inicio():
+    from app.domain.entities.rh import BaseCalculoEncargo, NaturezaEncargo, RegraEncargo, StatusRegraEncargo, TipoRegraEncargo
+
+    with pytest.raises(Exception):
+        RegraEncargo(
+            team_id=uuid4(),
+            codigo="VT",
+            nome="Vale Transporte",
+            tipo_calculo=TipoRegraEncargo.PERCENTUAL_SIMPLES,
+            natureza=NaturezaEncargo.DESCONTO,
+            base_calculo=BaseCalculoEncargo.SALARIO_BASE,
+            prioridade=200,
+            percentual=Decimal("6.00"),
+            status=StatusRegraEncargo.ATIVA,
+        )
+
+
+def test_tabela_progressiva_ativa_exige_faixas():
+    from app.domain.entities.rh import StatusRegraEncargo, TabelaProgressiva
+
+    with pytest.raises(Exception):
+        TabelaProgressiva(
+            team_id=uuid4(),
+            codigo="INSS_2026",
+            nome="INSS 2026",
+            status=StatusRegraEncargo.ATIVA,
+            vigencia_inicio=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            faixas=[],
+        )
+
+
+def test_tabela_progressiva_rejeita_faixas_sobrepostas():
+    from app.domain.entities.rh import FaixaEncargo, StatusRegraEncargo, TabelaProgressiva
+
+    with pytest.raises(Exception):
+        TabelaProgressiva(
+            team_id=uuid4(),
+            codigo="INSS_2026",
+            nome="INSS 2026",
+            status=StatusRegraEncargo.ATIVA,
+            vigencia_inicio=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            faixas=[
+                FaixaEncargo(
+                    team_id=uuid4(),
+                    ordem=1,
+                    valor_inicial=Money(Decimal("0.00")),
+                    valor_final=Money(Decimal("2000.00")),
+                    aliquota=Decimal("10.00"),
+                ),
+                FaixaEncargo(
+                    team_id=uuid4(),
+                    ordem=2,
+                    valor_inicial=Money(Decimal("1500.00")),
+                    valor_final=Money(Decimal("3000.00")),
+                    aliquota=Decimal("15.00"),
+                ),
+            ],
+        )
+
+
+def test_holerite_item_copia_snapshots_para_evitar_mutacao_externa():
+    from app.domain.entities.rh import HoleriteItem, HoleriteItemNatureza, HoleriteItemTipo
+
+    regra_snapshot = {"codigo": "VT", "percentual": "6.00"}
+    calculo_snapshot = {"base": "2200.00"}
+    item = HoleriteItem(
+        team_id=uuid4(),
+        holerite_id=uuid4(),
+        funcionario_id=uuid4(),
+        tipo=HoleriteItemTipo.ENCARGO_AUTOMATICO,
+        origem="regra",
+        codigo="VT",
+        descricao="Vale Transporte",
+        natureza=HoleriteItemNatureza.DESCONTO,
+        ordem=100,
+        valor=Money(Decimal("132.00")),
+        snapshot_regra=regra_snapshot,
+        snapshot_calculo=calculo_snapshot,
+    )
+
+    regra_snapshot["codigo"] = "ALTERADO"
+    calculo_snapshot["base"] = "9999.99"
+
+    assert item.snapshot_regra["codigo"] == "VT"
+    assert item.snapshot_calculo["base"] == "2200.00"

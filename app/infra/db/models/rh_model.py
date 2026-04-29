@@ -10,22 +10,36 @@ from app.domain.entities.money import Money
 from app.domain.entities.rh import (
     AjustePonto,
     Atestado,
+    BaseCalculoEncargo,
+    EscopoAplicabilidade,
+    FaixaEncargo,
     Ferias,
     Funcionario,
     Holerite,
+    HoleriteItem,
+    HoleriteItemNatureza,
+    HoleriteItemTipo,
     HorarioTrabalho,
     IntervaloHorario,
     LocalPonto,
+    NaturezaEncargo,
+    RegraEncargo,
+    RegraEncargoAplicabilidade,
     RegistroPonto,
     RhAuditLog,
+    RhFolhaJob,
+    RhFolhaJobStatus,
     RhIdempotencyKey,
     RhSalarioHistorico,
     StatusAjuste,
     StatusAtestado,
     StatusFerias,
     StatusHolerite,
+    StatusRegraEncargo,
     StatusPonto,
+    TabelaProgressiva,
     TipoAtestado,
+    TipoRegraEncargo,
     TipoPonto,
     TurnoHorario,
 )
@@ -564,6 +578,179 @@ class AtestadoModel(Base, TimestampMixin):
         self.is_deleted = atestado.is_deleted
 
 
+class TabelaProgressivaModel(Base, TimestampMixin):
+    __tablename__ = "rh_tabelas_progressivas"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(80), nullable=False)
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    vigencia_inicio: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    vigencia_fim: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=StatusRegraEncargo.RASCUNHO.value)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    faixas: Mapped[list["FaixaEncargoModel"]] = relationship(back_populates="tabela", lazy="raise", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_rh_tabelas_progressivas_team_status_vigencia", "team_id", "status", "vigencia_inicio", "vigencia_fim"),
+        Index("idx_rh_tabelas_progressivas_team_codigo", "team_id", "codigo"),
+    )
+
+    def to_domain(self) -> TabelaProgressiva:
+        tabela = object.__new__(TabelaProgressiva)
+        tabela.id = self.id
+        tabela.team_id = self.team_id
+        tabela.codigo = self.codigo
+        tabela.nome = self.nome
+        tabela.descricao = self.descricao
+        tabela.vigencia_inicio = self.vigencia_inicio
+        tabela.vigencia_fim = self.vigencia_fim
+        tabela.status = StatusRegraEncargo(self.status)
+        tabela.created_by_user_id = self.created_by_user_id
+        tabela.approved_by_user_id = self.approved_by_user_id
+        tabela.faixas = [faixa.to_domain() for faixa in sorted(self.faixas, key=lambda item: item.ordem)]
+        tabela.is_deleted = self.is_deleted
+        return tabela
+
+
+class FaixaEncargoModel(Base):
+    __tablename__ = "rh_faixas_encargo"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    tabela_progressiva_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_tabelas_progressivas.id", ondelete="CASCADE"), nullable=False)
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False)
+    valor_inicial_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    valor_inicial_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    valor_final_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    valor_final_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    aliquota: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    deducao_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False, default=Decimal("0"))
+    deducao_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    calculo_marginal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    tabela: Mapped["TabelaProgressivaModel"] = relationship(back_populates="faixas", lazy="raise")
+
+    __table_args__ = (
+        Index("idx_rh_faixas_encargo_tabela_ordem", "tabela_progressiva_id", "ordem"),
+        Index("idx_rh_faixas_encargo_team_tabela", "team_id", "tabela_progressiva_id"),
+    )
+
+    def to_domain(self) -> FaixaEncargo:
+        faixa = object.__new__(FaixaEncargo)
+        faixa.id = self.id
+        faixa.team_id = self.team_id
+        faixa.valor_inicial = Money(self.valor_inicial_amount, self.valor_inicial_currency)
+        faixa.valor_final = Money(self.valor_final_amount, self.valor_final_currency) if self.valor_final_amount is not None else None
+        faixa.aliquota = self.aliquota
+        faixa.deducao = Money(self.deducao_amount, self.deducao_currency)
+        faixa.ordem = self.ordem
+        faixa.calculo_marginal = self.calculo_marginal
+        return faixa
+
+
+class RegraEncargoModel(Base, TimestampMixin):
+    __tablename__ = "rh_regras_encargo"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    regra_grupo_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(80), nullable=False)
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    tipo_calculo: Mapped[str] = mapped_column(String(30), nullable=False)
+    natureza: Mapped[str] = mapped_column(String(20), nullable=False)
+    base_calculo: Mapped[str] = mapped_column(String(40), nullable=False)
+    prioridade: Mapped[int] = mapped_column(Integer, nullable=False)
+    vigencia_inicio: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    vigencia_fim: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=StatusRegraEncargo.RASCUNHO.value)
+    valor_fixo_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    valor_fixo_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    percentual: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    tabela_progressiva_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_tabelas_progressivas.id", ondelete="RESTRICT"), nullable=True)
+    teto_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    teto_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    piso_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    piso_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    arredondamento: Mapped[str] = mapped_column(String(40), nullable=False, default="ROUND_HALF_UP")
+    incide_no_liquido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    aplicabilidades: Mapped[list["RegraEncargoAplicabilidadeModel"]] = relationship(back_populates="regra", lazy="raise", cascade="all, delete-orphan")
+    tabela_progressiva: Mapped["TabelaProgressivaModel | None"] = relationship(lazy="raise")
+
+    __table_args__ = (
+        Index("idx_rh_regras_encargo_team_status_vigencia", "team_id", "status", "vigencia_inicio", "vigencia_fim"),
+        Index("idx_rh_regras_encargo_team_codigo_status", "team_id", "codigo", "status"),
+        Index("idx_rh_regras_encargo_team_grupo_vigencia", "team_id", "regra_grupo_id", "vigencia_inicio", "vigencia_fim"),
+    )
+
+    def to_domain(self) -> RegraEncargo:
+        regra = object.__new__(RegraEncargo)
+        regra.id = self.id
+        regra.regra_grupo_id = self.regra_grupo_id
+        regra.team_id = self.team_id
+        regra.codigo = self.codigo
+        regra.nome = self.nome
+        regra.descricao = self.descricao
+        regra.tipo_calculo = TipoRegraEncargo(self.tipo_calculo)
+        regra.natureza = NaturezaEncargo(self.natureza)
+        regra.base_calculo = BaseCalculoEncargo(self.base_calculo)
+        regra.prioridade = self.prioridade
+        regra.vigencia_inicio = self.vigencia_inicio
+        regra.vigencia_fim = self.vigencia_fim
+        regra.status = StatusRegraEncargo(self.status)
+        regra.valor_fixo = Money(self.valor_fixo_amount, self.valor_fixo_currency) if self.valor_fixo_amount is not None else None
+        regra.percentual = self.percentual
+        regra.tabela_progressiva_id = self.tabela_progressiva_id
+        regra.tabela_progressiva = self.tabela_progressiva.to_domain() if self.tabela_progressiva is not None else None
+        regra.teto = Money(self.teto_amount, self.teto_currency) if self.teto_amount is not None else None
+        regra.piso = Money(self.piso_amount, self.piso_currency) if self.piso_amount is not None else None
+        regra.arredondamento = self.arredondamento
+        regra.incide_no_liquido = self.incide_no_liquido
+        regra.is_system = self.is_system
+        regra.created_by_user_id = self.created_by_user_id
+        regra.updated_by_user_id = self.updated_by_user_id
+        regra.approved_by_user_id = self.approved_by_user_id
+        regra.aplicabilidades = [item.to_domain() for item in self.aplicabilidades]
+        regra.is_deleted = self.is_deleted
+        return regra
+
+
+class RegraEncargoAplicabilidadeModel(Base):
+    __tablename__ = "rh_regra_encargo_aplicabilidades"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    regra_encargo_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_regras_encargo.id", ondelete="CASCADE"), nullable=False)
+    escopo: Mapped[str] = mapped_column(String(40), nullable=False)
+    valor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    regra: Mapped["RegraEncargoModel"] = relationship(back_populates="aplicabilidades", lazy="raise")
+
+    __table_args__ = (
+        Index("idx_rh_regra_aplicabilidades_team_regra", "team_id", "regra_encargo_id"),
+        Index("idx_rh_regra_aplicabilidades_team_escopo_valor", "team_id", "escopo", "valor"),
+    )
+
+    def to_domain(self) -> RegraEncargoAplicabilidade:
+        aplicabilidade = object.__new__(RegraEncargoAplicabilidade)
+        aplicabilidade.id = self.id
+        aplicabilidade.team_id = self.team_id
+        aplicabilidade.escopo = EscopoAplicabilidade(self.escopo)
+        aplicabilidade.valor = self.valor
+        return aplicabilidade
+
+
 class HoleriteModel(Base, TimestampMixin):
     __tablename__ = "rh_holerites"
 
@@ -582,10 +769,22 @@ class HoleriteModel(Base, TimestampMixin):
     acrescimos_manuais_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
     descontos_manuais_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
     descontos_manuais_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    valor_bruto_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False, default=Decimal("0"))
+    valor_bruto_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    total_proventos_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False, default=Decimal("0"))
+    total_proventos_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    total_descontos_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False, default=Decimal("0"))
+    total_descontos_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    total_informativos_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False, default=Decimal("0"))
+    total_informativos_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
     valor_liquido_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
     valor_liquido_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=StatusHolerite.RASCUNHO.value)
     pagamento_agendado_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("pagamentos_agendados.id", ondelete="SET NULL"), nullable=True)
+    calculation_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    calculation_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    calculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    calculated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
@@ -613,9 +812,17 @@ class HoleriteModel(Base, TimestampMixin):
         holerite.descontos_falta = Money(self.descontos_falta_amount, self.descontos_falta_currency)
         holerite.acrescimos_manuais = Money(self.acrescimos_manuais_amount, self.acrescimos_manuais_currency)
         holerite.descontos_manuais = Money(self.descontos_manuais_amount, self.descontos_manuais_currency)
+        holerite.valor_bruto = Money(self.valor_bruto_amount, self.valor_bruto_currency)
+        holerite.total_proventos = Money(self.total_proventos_amount, self.total_proventos_currency)
+        holerite.total_descontos = Money(self.total_descontos_amount, self.total_descontos_currency)
+        holerite.total_informativos = Money(self.total_informativos_amount, self.total_informativos_currency)
         holerite.valor_liquido = Money(self.valor_liquido_amount, self.valor_liquido_currency)
         holerite.status = StatusHolerite(self.status)
         holerite.pagamento_agendado_id = self.pagamento_agendado_id
+        holerite.calculation_version = self.calculation_version
+        holerite.calculation_hash = self.calculation_hash
+        holerite.calculated_at = self.calculated_at
+        holerite.calculated_by_user_id = self.calculated_by_user_id
         holerite.is_deleted = self.is_deleted
         return holerite
 
@@ -637,10 +844,22 @@ class HoleriteModel(Base, TimestampMixin):
             acrescimos_manuais_currency=holerite.acrescimos_manuais.currency,
             descontos_manuais_amount=holerite.descontos_manuais.amount,
             descontos_manuais_currency=holerite.descontos_manuais.currency,
+            valor_bruto_amount=holerite.valor_bruto.amount,
+            valor_bruto_currency=holerite.valor_bruto.currency,
+            total_proventos_amount=holerite.total_proventos.amount,
+            total_proventos_currency=holerite.total_proventos.currency,
+            total_descontos_amount=holerite.total_descontos.amount,
+            total_descontos_currency=holerite.total_descontos.currency,
+            total_informativos_amount=holerite.total_informativos.amount,
+            total_informativos_currency=holerite.total_informativos.currency,
             valor_liquido_amount=holerite.valor_liquido.amount,
             valor_liquido_currency=holerite.valor_liquido.currency,
             status=holerite.status.value,
             pagamento_agendado_id=holerite.pagamento_agendado_id,
+            calculation_version=holerite.calculation_version,
+            calculation_hash=holerite.calculation_hash,
+            calculated_at=holerite.calculated_at,
+            calculated_by_user_id=holerite.calculated_by_user_id,
             is_deleted=holerite.is_deleted,
         )
 
@@ -657,11 +876,100 @@ class HoleriteModel(Base, TimestampMixin):
         self.acrescimos_manuais_currency = holerite.acrescimos_manuais.currency
         self.descontos_manuais_amount = holerite.descontos_manuais.amount
         self.descontos_manuais_currency = holerite.descontos_manuais.currency
+        self.valor_bruto_amount = holerite.valor_bruto.amount
+        self.valor_bruto_currency = holerite.valor_bruto.currency
+        self.total_proventos_amount = holerite.total_proventos.amount
+        self.total_proventos_currency = holerite.total_proventos.currency
+        self.total_descontos_amount = holerite.total_descontos.amount
+        self.total_descontos_currency = holerite.total_descontos.currency
+        self.total_informativos_amount = holerite.total_informativos.amount
+        self.total_informativos_currency = holerite.total_informativos.currency
         self.valor_liquido_amount = holerite.valor_liquido.amount
         self.valor_liquido_currency = holerite.valor_liquido.currency
         self.status = holerite.status.value
         self.pagamento_agendado_id = holerite.pagamento_agendado_id
+        self.calculation_version = holerite.calculation_version
+        self.calculation_hash = holerite.calculation_hash
+        self.calculated_at = holerite.calculated_at
+        self.calculated_by_user_id = holerite.calculated_by_user_id
         self.is_deleted = holerite.is_deleted
+
+
+class HoleriteItemModel(Base, TimestampMixin):
+    __tablename__ = "rh_holerite_itens"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    holerite_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_holerites.id", ondelete="CASCADE"), nullable=False)
+    funcionario_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_funcionarios.id", ondelete="CASCADE"), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(40), nullable=False)
+    origem: Mapped[str] = mapped_column(String(30), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(80), nullable=False)
+    descricao: Mapped[str] = mapped_column(String(255), nullable=False)
+    natureza: Mapped[str] = mapped_column(String(20), nullable=False)
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False, default=Decimal("0"))
+    base_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    valor_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    valor_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    regra_encargo_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_regras_encargo.id", ondelete="SET NULL"), nullable=True)
+    regra_grupo_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    snapshot_regra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    snapshot_calculo: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    is_automatico: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        Index("idx_rh_holerite_itens_team_holerite_ordem", "team_id", "holerite_id", "ordem"),
+        Index("idx_rh_holerite_itens_team_func_comp", "team_id", "funcionario_id", "created_at"),
+        Index("idx_rh_holerite_itens_team_regra", "team_id", "regra_encargo_id"),
+    )
+
+    def to_domain(self) -> HoleriteItem:
+        item = object.__new__(HoleriteItem)
+        item.id = self.id
+        item.team_id = self.team_id
+        item.holerite_id = self.holerite_id
+        item.funcionario_id = self.funcionario_id
+        item.tipo = HoleriteItemTipo(self.tipo)
+        item.origem = self.origem
+        item.codigo = self.codigo
+        item.descricao = self.descricao
+        item.natureza = HoleriteItemNatureza(self.natureza)
+        item.ordem = self.ordem
+        item.base = Money(self.base_amount, self.base_currency)
+        item.valor = Money(self.valor_amount, self.valor_currency)
+        item.regra_encargo_id = self.regra_encargo_id
+        item.regra_grupo_id = self.regra_grupo_id
+        item.snapshot_regra = self.snapshot_regra
+        item.snapshot_calculo = self.snapshot_calculo
+        item.is_automatico = self.is_automatico
+        item.created_at = self.created_at
+        return item
+
+    @classmethod
+    def from_domain(cls, item: HoleriteItem) -> "HoleriteItemModel":
+        return cls(
+            id=item.id or uuid.uuid4(),
+            team_id=item.team_id,
+            holerite_id=item.holerite_id,
+            funcionario_id=item.funcionario_id,
+            tipo=item.tipo.value,
+            origem=item.origem,
+            codigo=item.codigo,
+            descricao=item.descricao,
+            natureza=item.natureza.value,
+            ordem=item.ordem,
+            base_amount=item.base.amount,
+            base_currency=item.base.currency,
+            valor_amount=item.valor.amount,
+            valor_currency=item.valor.currency,
+            regra_encargo_id=item.regra_encargo_id,
+            regra_grupo_id=item.regra_grupo_id,
+            snapshot_regra=item.snapshot_regra,
+            snapshot_calculo=item.snapshot_calculo,
+            is_automatico=item.is_automatico,
+            created_at=item.created_at,
+        )
 
 
 class RhAuditLogModel(Base):
@@ -756,6 +1064,79 @@ class RhIdempotencyKeyModel(Base):
             key=idempotency_key.key,
             created_at=idempotency_key.created_at,
         )
+
+
+class RhFolhaJobModel(Base):
+    __tablename__ = "rh_folha_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    mes: Mapped[int] = mapped_column(Integer, nullable=False)
+    ano: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default=RhFolhaJobStatus.PENDENTE.value)
+    funcionario_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    total_funcionarios: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processados: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    falhas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_summary: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_rh_folha_jobs_team_status_created", "team_id", "status", "created_at"),
+    )
+
+    def to_domain(self) -> RhFolhaJob:
+        return RhFolhaJob(
+            id=self.id,
+            team_id=self.team_id,
+            mes=self.mes,
+            ano=self.ano,
+            requested_by_user_id=self.requested_by_user_id,
+            funcionario_ids=[uuid.UUID(item) for item in self.funcionario_ids] if self.funcionario_ids else None,
+            total_funcionarios=self.total_funcionarios,
+            processados=self.processados,
+            falhas=self.falhas,
+            status=RhFolhaJobStatus(self.status),
+            error_summary=self.error_summary or [],
+            started_at=self.started_at,
+            finished_at=self.finished_at,
+            created_at=self.created_at,
+        )
+
+    @classmethod
+    def from_domain(cls, job: RhFolhaJob) -> "RhFolhaJobModel":
+        return cls(
+            id=job.id or uuid.uuid4(),
+            team_id=job.team_id,
+            requested_by_user_id=job.requested_by_user_id,
+            mes=job.mes,
+            ano=job.ano,
+            status=job.status.value,
+            funcionario_ids=[str(item) for item in job.funcionario_ids] if job.funcionario_ids else None,
+            total_funcionarios=job.total_funcionarios,
+            processados=job.processados,
+            falhas=job.falhas,
+            error_summary=job.error_summary,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            created_at=job.created_at,
+        )
+
+    def update_from_domain(self, job: RhFolhaJob) -> None:
+        self.requested_by_user_id = job.requested_by_user_id
+        self.mes = job.mes
+        self.ano = job.ano
+        self.status = job.status.value
+        self.funcionario_ids = [str(item) for item in job.funcionario_ids] if job.funcionario_ids else None
+        self.total_funcionarios = job.total_funcionarios
+        self.processados = job.processados
+        self.falhas = job.falhas
+        self.error_summary = job.error_summary
+        self.started_at = job.started_at
+        self.finished_at = job.finished_at
 
 
 class RhSalarioHistoricoModel(Base):

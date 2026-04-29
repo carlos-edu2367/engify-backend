@@ -10,27 +10,36 @@ from sqlalchemy.orm import selectinload
 from app.application.providers.repo.rh_repo import (
     AjustePontoRepository,
     AtestadoRepository,
+    FaixaEncargoRepository,
     FeriasRepository,
     FuncionarioRepository,
     HoleriteRepository,
+    HoleriteItemRepository,
     HorarioTrabalhoRepository,
     LocalPontoRepository,
+    RegraEncargoRepository,
     RegistroPontoRepository,
     RhAuditLogRepository,
+    RhFolhaJobRepository,
     RhIdempotencyKeyRepository,
     RhSalarioHistoricoRepository,
+    TabelaProgressivaRepository,
     TipoAtestadoRepository,
 )
 from app.domain.entities.rh import (
     AjustePonto,
     Atestado,
+    FaixaEncargo,
     Ferias,
     Funcionario,
     Holerite,
+    HoleriteItem,
     HorarioTrabalho,
     LocalPonto,
+    RegraEncargo,
     RegistroPonto,
     RhAuditLog,
+    RhFolhaJob,
     RhIdempotencyKey,
     RhSalarioHistorico,
     StatusPonto,
@@ -38,23 +47,31 @@ from app.domain.entities.rh import (
     StatusAtestado,
     StatusFerias,
     StatusHolerite,
+    StatusRegraEncargo,
+    TabelaProgressiva,
     TipoAtestado,
 )
 from app.domain.errors import DomainError
 from app.infra.db.models.rh_model import (
     AjustePontoModel,
     AtestadoModel,
+    FaixaEncargoModel,
     FeriasModel,
     FuncionarioModel,
     HoleriteModel,
+    HoleriteItemModel,
     HorarioTrabalhoModel,
     HorarioIntervaloModel,
     HorarioTurnoModel,
     LocalPontoModel,
+    RegraEncargoAplicabilidadeModel,
+    RegraEncargoModel,
     RegistroPontoModel,
     RhAuditLogModel,
+    RhFolhaJobModel,
     RhIdempotencyKeyModel,
     RhSalarioHistoricoModel,
+    TabelaProgressivaModel,
     TipoAtestadoModel,
 )
 
@@ -717,6 +734,277 @@ class AtestadoRepositoryImpl(_SoftDeleteRepository, AtestadoRepository):
         return stmt
 
 
+class TabelaProgressivaRepositoryImpl(_SoftDeleteRepository, TabelaProgressivaRepository):
+    async def get_by_id(self, id: UUID, team_id: UUID) -> TabelaProgressiva:
+        stmt = (
+            select(TabelaProgressivaModel)
+            .options(selectinload(TabelaProgressivaModel.faixas))
+            .where(
+                TabelaProgressivaModel.id == id,
+                TabelaProgressivaModel.team_id == team_id,
+                TabelaProgressivaModel.is_deleted == False,  # noqa: E712
+            )
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model:
+            raise DomainError("Tabela progressiva nao encontrada")
+        return model.to_domain()
+
+    async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[TabelaProgressiva]:
+        stmt = (
+            select(TabelaProgressivaModel)
+            .options(selectinload(TabelaProgressivaModel.faixas))
+            .where(
+                TabelaProgressivaModel.team_id == team_id,
+                TabelaProgressivaModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(TabelaProgressivaModel.created_at.desc())
+            .limit(limit)
+            .offset((page - 1) * limit)
+        )
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def save(self, tabela: TabelaProgressiva) -> TabelaProgressiva:
+        stmt = (
+            select(TabelaProgressivaModel)
+            .options(selectinload(TabelaProgressivaModel.faixas))
+            .where(TabelaProgressivaModel.id == tabela.id, TabelaProgressivaModel.team_id == tabela.team_id)
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model is None:
+            model = TabelaProgressivaModel(
+                id=tabela.id,
+                team_id=tabela.team_id,
+                codigo=tabela.codigo,
+                nome=tabela.nome,
+                descricao=tabela.descricao,
+                vigencia_inicio=tabela.vigencia_inicio,
+                vigencia_fim=tabela.vigencia_fim,
+                status=tabela.status.value,
+                created_by_user_id=tabela.created_by_user_id,
+                approved_by_user_id=tabela.approved_by_user_id,
+                is_deleted=tabela.is_deleted,
+            )
+            self._session.add(model)
+            await self._session.flush()
+        else:
+            model.codigo = tabela.codigo
+            model.nome = tabela.nome
+            model.descricao = tabela.descricao
+            model.vigencia_inicio = tabela.vigencia_inicio
+            model.vigencia_fim = tabela.vigencia_fim
+            model.status = tabela.status.value
+            model.created_by_user_id = tabela.created_by_user_id
+            model.approved_by_user_id = tabela.approved_by_user_id
+            model.is_deleted = tabela.is_deleted
+            for faixa_model in list(model.faixas):
+                await self._session.delete(faixa_model)
+            await self._session.flush()
+
+        for faixa in tabela.faixas:
+            self._session.add(
+                FaixaEncargoModel(
+                    id=faixa.id,
+                    team_id=faixa.team_id,
+                    tabela_progressiva_id=model.id,
+                    ordem=faixa.ordem,
+                    valor_inicial_amount=faixa.valor_inicial.amount,
+                    valor_inicial_currency=faixa.valor_inicial.currency,
+                    valor_final_amount=faixa.valor_final.amount if faixa.valor_final else None,
+                    valor_final_currency=faixa.valor_final.currency if faixa.valor_final else None,
+                    aliquota=faixa.aliquota,
+                    deducao_amount=faixa.deducao.amount,
+                    deducao_currency=faixa.deducao.currency,
+                    calculo_marginal=faixa.calculo_marginal,
+                )
+            )
+        await self._session.flush()
+        return await self.get_by_id(model.id, tabela.team_id)
+
+
+class FaixaEncargoRepositoryImpl(FaixaEncargoRepository):
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def replace_by_tabela(self, team_id: UUID, tabela_id: UUID, faixas: list[FaixaEncargo]) -> list[FaixaEncargo]:
+        stmt = select(FaixaEncargoModel).where(
+            FaixaEncargoModel.team_id == team_id,
+            FaixaEncargoModel.tabela_progressiva_id == tabela_id,
+        )
+        result = await self._session.execute(stmt)
+        for model in result.scalars().all():
+            await self._session.delete(model)
+        await self._session.flush()
+        for faixa in faixas:
+            self._session.add(
+                FaixaEncargoModel(
+                    id=faixa.id,
+                    team_id=faixa.team_id,
+                    tabela_progressiva_id=tabela_id,
+                    ordem=faixa.ordem,
+                    valor_inicial_amount=faixa.valor_inicial.amount,
+                    valor_inicial_currency=faixa.valor_inicial.currency,
+                    valor_final_amount=faixa.valor_final.amount if faixa.valor_final else None,
+                    valor_final_currency=faixa.valor_final.currency if faixa.valor_final else None,
+                    aliquota=faixa.aliquota,
+                    deducao_amount=faixa.deducao.amount,
+                    deducao_currency=faixa.deducao.currency,
+                    calculo_marginal=faixa.calculo_marginal,
+                )
+            )
+        await self._session.flush()
+        return faixas
+
+
+class RegraEncargoRepositoryImpl(_SoftDeleteRepository, RegraEncargoRepository):
+    async def get_by_id(self, id: UUID, team_id: UUID) -> RegraEncargo:
+        stmt = (
+            select(RegraEncargoModel)
+            .options(
+                selectinload(RegraEncargoModel.aplicabilidades),
+                selectinload(RegraEncargoModel.tabela_progressiva).selectinload(TabelaProgressivaModel.faixas),
+            )
+            .where(
+                RegraEncargoModel.id == id,
+                RegraEncargoModel.team_id == team_id,
+                RegraEncargoModel.is_deleted == False,  # noqa: E712
+            )
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model:
+            raise DomainError("Regra de encargo nao encontrada")
+        return model.to_domain()
+
+    async def list_active_by_competencia(self, team_id: UUID, competencia) -> list[RegraEncargo]:
+        stmt = (
+            select(RegraEncargoModel)
+            .options(
+                selectinload(RegraEncargoModel.aplicabilidades),
+                selectinload(RegraEncargoModel.tabela_progressiva).selectinload(TabelaProgressivaModel.faixas),
+            )
+            .where(
+                RegraEncargoModel.team_id == team_id,
+                RegraEncargoModel.status == StatusRegraEncargo.ATIVA.value,
+                RegraEncargoModel.is_deleted == False,  # noqa: E712
+                RegraEncargoModel.vigencia_inicio <= competencia,
+                or_(RegraEncargoModel.vigencia_fim.is_(None), RegraEncargoModel.vigencia_fim >= competencia),
+            )
+            .order_by(RegraEncargoModel.prioridade.asc(), RegraEncargoModel.codigo.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[RegraEncargo]:
+        stmt = (
+            select(RegraEncargoModel)
+            .options(
+                selectinload(RegraEncargoModel.aplicabilidades),
+                selectinload(RegraEncargoModel.tabela_progressiva).selectinload(TabelaProgressivaModel.faixas),
+            )
+            .where(
+                RegraEncargoModel.team_id == team_id,
+                RegraEncargoModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(RegraEncargoModel.created_at.desc())
+            .limit(limit)
+            .offset((page - 1) * limit)
+        )
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def save(self, regra: RegraEncargo) -> RegraEncargo:
+        stmt = (
+            select(RegraEncargoModel)
+            .options(
+                selectinload(RegraEncargoModel.aplicabilidades),
+                selectinload(RegraEncargoModel.tabela_progressiva).selectinload(TabelaProgressivaModel.faixas),
+            )
+            .where(RegraEncargoModel.id == regra.id, RegraEncargoModel.team_id == regra.team_id)
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model is None:
+            model = RegraEncargoModel(
+                id=regra.id,
+                regra_grupo_id=regra.regra_grupo_id,
+                team_id=regra.team_id,
+                codigo=regra.codigo,
+                nome=regra.nome,
+                descricao=regra.descricao,
+                tipo_calculo=regra.tipo_calculo.value,
+                natureza=regra.natureza.value,
+                base_calculo=regra.base_calculo.value,
+                prioridade=regra.prioridade,
+                vigencia_inicio=regra.vigencia_inicio,
+                vigencia_fim=regra.vigencia_fim,
+                status=regra.status.value,
+                valor_fixo_amount=regra.valor_fixo.amount if regra.valor_fixo else None,
+                valor_fixo_currency=regra.valor_fixo.currency if regra.valor_fixo else None,
+                percentual=regra.percentual,
+                tabela_progressiva_id=regra.tabela_progressiva_id,
+                teto_amount=regra.teto.amount if regra.teto else None,
+                teto_currency=regra.teto.currency if regra.teto else None,
+                piso_amount=regra.piso.amount if regra.piso else None,
+                piso_currency=regra.piso.currency if regra.piso else None,
+                arredondamento=regra.arredondamento,
+                incide_no_liquido=regra.incide_no_liquido,
+                is_system=regra.is_system,
+                created_by_user_id=regra.created_by_user_id,
+                updated_by_user_id=regra.updated_by_user_id,
+                approved_by_user_id=regra.approved_by_user_id,
+                is_deleted=regra.is_deleted,
+            )
+            self._session.add(model)
+            await self._session.flush()
+        else:
+            model.regra_grupo_id = regra.regra_grupo_id
+            model.codigo = regra.codigo
+            model.nome = regra.nome
+            model.descricao = regra.descricao
+            model.tipo_calculo = regra.tipo_calculo.value
+            model.natureza = regra.natureza.value
+            model.base_calculo = regra.base_calculo.value
+            model.prioridade = regra.prioridade
+            model.vigencia_inicio = regra.vigencia_inicio
+            model.vigencia_fim = regra.vigencia_fim
+            model.status = regra.status.value
+            model.valor_fixo_amount = regra.valor_fixo.amount if regra.valor_fixo else None
+            model.valor_fixo_currency = regra.valor_fixo.currency if regra.valor_fixo else None
+            model.percentual = regra.percentual
+            model.tabela_progressiva_id = regra.tabela_progressiva_id
+            model.teto_amount = regra.teto.amount if regra.teto else None
+            model.teto_currency = regra.teto.currency if regra.teto else None
+            model.piso_amount = regra.piso.amount if regra.piso else None
+            model.piso_currency = regra.piso.currency if regra.piso else None
+            model.arredondamento = regra.arredondamento
+            model.incide_no_liquido = regra.incide_no_liquido
+            model.is_system = regra.is_system
+            model.created_by_user_id = regra.created_by_user_id
+            model.updated_by_user_id = regra.updated_by_user_id
+            model.approved_by_user_id = regra.approved_by_user_id
+            model.is_deleted = regra.is_deleted
+            for aplic_model in list(model.aplicabilidades):
+                await self._session.delete(aplic_model)
+            await self._session.flush()
+
+        for aplicabilidade in regra.aplicabilidades:
+            self._session.add(
+                RegraEncargoAplicabilidadeModel(
+                    id=aplicabilidade.id,
+                    team_id=aplicabilidade.team_id,
+                    regra_encargo_id=model.id,
+                    escopo=aplicabilidade.escopo.value,
+                    valor=aplicabilidade.valor,
+                )
+            )
+        await self._session.flush()
+        return await self.get_by_id(model.id, regra.team_id)
+
+
 class HoleriteRepositoryImpl(_SoftDeleteRepository, HoleriteRepository):
     async def get_by_id(self, id: UUID, team_id: UUID) -> Holerite:
         return (await self._get_by_id(HoleriteModel, id, team_id, "Holerite nao encontrado")).to_domain()
@@ -851,6 +1139,44 @@ class HoleriteRepositoryImpl(_SoftDeleteRepository, HoleriteRepository):
         return await self._save(holerite, HoleriteModel, "Holerite nao encontrado para atualizacao")
 
 
+class HoleriteItemRepositoryImpl(HoleriteItemRepository):
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def list_by_holerite(self, team_id: UUID, holerite_id: UUID) -> list[HoleriteItem]:
+        stmt = (
+            select(HoleriteItemModel)
+            .where(
+                HoleriteItemModel.team_id == team_id,
+                HoleriteItemModel.holerite_id == holerite_id,
+            )
+            .order_by(HoleriteItemModel.ordem.asc(), HoleriteItemModel.created_at.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def replace_automaticos(self, team_id: UUID, holerite_id: UUID, items: list[HoleriteItem]) -> list[HoleriteItem]:
+        stmt = select(HoleriteItemModel).where(
+            HoleriteItemModel.team_id == team_id,
+            HoleriteItemModel.holerite_id == holerite_id,
+            HoleriteItemModel.is_automatico == True,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        for model in result.scalars().all():
+            await self._session.delete(model)
+        await self._session.flush()
+        for item in items:
+            self._session.add(HoleriteItemModel.from_domain(item))
+        await self._session.flush()
+        return await self.list_by_holerite(team_id, holerite_id)
+
+    async def save(self, item: HoleriteItem) -> HoleriteItem:
+        model = HoleriteItemModel.from_domain(item)
+        self._session.add(model)
+        await self._session.flush()
+        return model.to_domain()
+
+
 class RhAuditLogRepositoryImpl(RhAuditLogRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -919,6 +1245,42 @@ class RhIdempotencyKeyRepositoryImpl(RhIdempotencyKeyRepository):
             return False
         except IntegrityError:
             return True
+
+
+class RhFolhaJobRepositoryImpl(RhFolhaJobRepository):
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def save(self, job: RhFolhaJob) -> RhFolhaJob:
+        stmt = select(RhFolhaJobModel).where(RhFolhaJobModel.id == job.id)
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model is None:
+            model = RhFolhaJobModel.from_domain(job)
+            self._session.add(model)
+        else:
+            model.update_from_domain(job)
+        await self._session.flush()
+        return model.to_domain()
+
+    async def get_by_id(self, team_id: UUID, job_id: UUID) -> RhFolhaJob:
+        stmt = select(RhFolhaJobModel).where(
+            RhFolhaJobModel.id == job_id,
+            RhFolhaJobModel.team_id == team_id,
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model is None:
+            raise DomainError("Job de folha nao encontrado")
+        return model.to_domain()
+
+    async def get_by_id_unscoped(self, job_id: UUID) -> RhFolhaJob:
+        stmt = select(RhFolhaJobModel).where(RhFolhaJobModel.id == job_id)
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model is None:
+            raise DomainError("Job de folha nao encontrado")
+        return model.to_domain()
 
 
 class RhSalarioHistoricoRepositoryImpl(RhSalarioHistoricoRepository):

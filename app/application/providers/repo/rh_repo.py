@@ -4,15 +4,20 @@ from uuid import UUID
 from app.domain.entities.rh import (
     AjustePonto,
     Atestado,
+    FaixaEncargo,
     Ferias,
     Funcionario,
     Holerite,
+    HoleriteItem,
     HorarioTrabalho,
     LocalPonto,
+    RegraEncargo,
     RegistroPonto,
     RhAuditLog,
+    RhFolhaJob,
     RhIdempotencyKey,
     RhSalarioHistorico,
+    TabelaProgressiva,
     TipoAtestado,
 )
 
@@ -276,6 +281,44 @@ class AtestadoRepository(ABC):
         pass
 
 
+class RegraEncargoRepository(ABC):
+    @abstractmethod
+    async def get_by_id(self, id: UUID, team_id: UUID) -> RegraEncargo:
+        pass
+
+    @abstractmethod
+    async def list_active_by_competencia(self, team_id: UUID, competencia) -> list[RegraEncargo]:
+        pass
+
+    @abstractmethod
+    async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[RegraEncargo]:
+        pass
+
+    @abstractmethod
+    async def save(self, regra: RegraEncargo) -> RegraEncargo:
+        pass
+
+
+class TabelaProgressivaRepository(ABC):
+    @abstractmethod
+    async def get_by_id(self, id: UUID, team_id: UUID) -> TabelaProgressiva:
+        pass
+
+    @abstractmethod
+    async def list_by_team(self, team_id: UUID, page: int, limit: int) -> list[TabelaProgressiva]:
+        pass
+
+    @abstractmethod
+    async def save(self, tabela: TabelaProgressiva) -> TabelaProgressiva:
+        pass
+
+
+class FaixaEncargoRepository(ABC):
+    @abstractmethod
+    async def replace_by_tabela(self, team_id: UUID, tabela_id: UUID, faixas: list[FaixaEncargo]) -> list[FaixaEncargo]:
+        pass
+
+
 class HoleriteRepository(ABC):
     @abstractmethod
     async def get_by_id(self, id: UUID, team_id: UUID) -> Holerite:
@@ -334,6 +377,20 @@ class HoleriteRepository(ABC):
         pass
 
 
+class HoleriteItemRepository(ABC):
+    @abstractmethod
+    async def list_by_holerite(self, team_id: UUID, holerite_id: UUID) -> list[HoleriteItem]:
+        pass
+
+    @abstractmethod
+    async def replace_automaticos(self, team_id: UUID, holerite_id: UUID, items: list[HoleriteItem]) -> list[HoleriteItem]:
+        pass
+
+    @abstractmethod
+    async def save(self, item: HoleriteItem) -> HoleriteItem:
+        pass
+
+
 class RhAuditLogRepository(ABC):
     @abstractmethod
     async def save(self, audit_log: RhAuditLog) -> RhAuditLog:
@@ -355,4 +412,18 @@ class RhIdempotencyKeyRepository(ABC):
 
     @abstractmethod
     async def exists_or_create(self, team_id: UUID, scope: str, key: str) -> bool:
+        pass
+
+
+class RhFolhaJobRepository(ABC):
+    @abstractmethod
+    async def save(self, job: RhFolhaJob) -> RhFolhaJob:
+        pass
+
+    @abstractmethod
+    async def get_by_id(self, team_id: UUID, job_id: UUID) -> RhFolhaJob:
+        pass
+
+    @abstractmethod
+    async def get_by_id_unscoped(self, job_id: UUID) -> RhFolhaJob:
         pass

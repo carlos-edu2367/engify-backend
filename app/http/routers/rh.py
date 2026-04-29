@@ -26,7 +26,7 @@ from app.application.dtos.rh import (
     UpdateTipoAtestadoDTO,
 )
 from app.application.services.rh_ponto_service import RequestContext, hash_ip
-from app.domain.entities.rh import AjustePonto, Atestado, Ferias, Funcionario, Holerite, HorarioTrabalho, LocalPonto, RegistroPonto, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoAtestado
+from app.domain.entities.rh import AjustePonto, Atestado, Ferias, Funcionario, Holerite, HorarioTrabalho, LocalPonto, RegistroPonto, RhFolhaJob, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoAtestado
 from app.domain.errors import DomainError
 from app.http.dependencies.auth import CurrentUser, FuncionarioUser, RHAdminUser
 from app.http.dependencies.pagination import Pagination
@@ -58,6 +58,8 @@ from app.http.schemas.rh import (
     RhFeriasCreateRequest,
     RhFeriasResponse,
     RhFolhaGerarRequest,
+    RhFolhaJobCreateRequest,
+    RhFolhaJobResponse,
     RhHoleriteAjustesRequest,
     RhHoleriteResponse,
     RhMeResumoResponse,
@@ -351,6 +353,22 @@ def _to_holerite_response(holerite: Holerite) -> RhHoleriteResponse:
         valor_liquido=holerite.valor_liquido.amount,
         status=holerite.status,
         pagamento_agendado_id=holerite.pagamento_agendado_id,
+    )
+
+
+def _to_folha_job_response(job: RhFolhaJob) -> RhFolhaJobResponse:
+    return RhFolhaJobResponse(
+        id=job.id,
+        mes=job.mes,
+        ano=job.ano,
+        status=job.status,
+        total_funcionarios=job.total_funcionarios,
+        processados=job.processados,
+        falhas=job.falhas,
+        error_summary=job.error_summary,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        created_at=job.created_at,
     )
 
 
@@ -865,6 +883,32 @@ async def gerar_folha(
     except DomainError as exc:
         raise _map_rh_error(exc)
     return [_to_holerite_response(item) for item in items]
+
+
+@router.post("/folha/jobs", response_model=RhFolhaJobResponse, status_code=202)
+async def criar_job_folha(
+    body: RhFolhaJobCreateRequest,
+    user: RHAdminUser,
+    svc: RhFolhaServiceDep,
+):
+    try:
+        job = await svc.criar_job_geracao_folha(user, body.mes, body.ano, funcionario_ids=body.funcionario_ids)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_folha_job_response(job)
+
+
+@router.get("/folha/jobs/{job_id}", response_model=RhFolhaJobResponse)
+async def obter_job_folha(
+    job_id: UUID,
+    user: RHAdminUser,
+    svc: RhFolhaServiceDep,
+):
+    try:
+        job = await svc.obter_job_geracao_folha(user, job_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_folha_job_response(job)
 
 
 @router.get("/folha", response_model=PaginatedResponse[RhHoleriteResponse])

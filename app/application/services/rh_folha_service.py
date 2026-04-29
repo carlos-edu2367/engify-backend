@@ -4,6 +4,8 @@ from calendar import monthrange
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+import hashlib
+import json
 from uuid import UUID
 
 from app.application.providers.repo.financeiro_repo import PagamentoAgendadoRepository
@@ -11,31 +13,44 @@ from app.application.providers.repo.rh_repo import (
     AtestadoRepository,
     FuncionarioRepository,
     HoleriteRepository,
+    HoleriteItemRepository,
     HorarioTrabalhoRepository,
+    RegraEncargoRepository,
     RegistroPontoRepository,
     RhAuditLogRepository,
+    RhFolhaJobRepository,
     RhIdempotencyKeyRepository,
     TipoAtestadoRepository,
     FeriasRepository,
 )
+from app.application.providers.utility.rh_encargo_cache import RhEncargoCachePort
+from app.application.providers.utility.rh_folha_queue import RhFolhaQueuePort
 from app.application.providers.uow import UOWProvider
 from app.domain.entities.financeiro import MovClass, PagamentoAgendado
 from app.domain.entities.money import Money
 from app.domain.entities.rh import (
     Atestado,
+    FolhaCalculationContext,
     Ferias,
     Funcionario,
+    HoleriteItem,
+    HoleriteItemNatureza,
+    HoleriteItemTipo,
     Holerite,
     HorarioTrabalho,
     RegistroPonto,
     RhAuditLog,
+    RhFolhaJob,
+    RhFolhaJobStatus,
     StatusAtestado,
     StatusFerias,
     StatusHolerite,
+    StatusRegraEncargo,
     StatusPonto,
     TipoPonto,
     TurnoHorario,
 )
+from app.domain.services.rh_folha_calculation_engine import FolhaCalculationEngine
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
@@ -50,10 +65,16 @@ class RhFolhaService:
         tipo_atestado_repo: TipoAtestadoRepository,
         atestado_repo: AtestadoRepository,
         holerite_repo: HoleriteRepository,
+        holerite_item_repo: HoleriteItemRepository | None,
+        regra_encargo_repo: RegraEncargoRepository | None,
         pagamento_repo: PagamentoAgendadoRepository,
         audit_repo: RhAuditLogRepository,
         idempotency_repo: RhIdempotencyKeyRepository | None,
         uow: UOWProvider,
+        calculation_engine: FolhaCalculationEngine | None = None,
+        folha_job_repo: RhFolhaJobRepository | None = None,
+        folha_queue: RhFolhaQueuePort | None = None,
+        encargo_cache: RhEncargoCachePort | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.horario_repo = horario_repo
@@ -62,10 +83,16 @@ class RhFolhaService:
         self.tipo_atestado_repo = tipo_atestado_repo
         self.atestado_repo = atestado_repo
         self.holerite_repo = holerite_repo
+        self.holerite_item_repo = holerite_item_repo
+        self.regra_encargo_repo = regra_encargo_repo
         self.pagamento_repo = pagamento_repo
         self.audit_repo = audit_repo
         self.idempotency_repo = idempotency_repo
         self.uow = uow
+        self.calculation_engine = calculation_engine or FolhaCalculationEngine()
+        self.folha_job_repo = folha_job_repo
+        self.folha_queue = folha_queue
+        self.encargo_cache = encargo_cache
 
     async def gerar_rascunho_folha(
         self,
@@ -99,6 +126,7 @@ class RhFolhaService:
         abono_por_atestado = await self._build_atestado_abono_map(atestados)
         registros_por_funcionario = self._group_by_funcionario(registros)
         ferias_por_funcionario = self._group_by_funcionario(ferias_items)
+        regras_ativas = await self._load_regras_ativas(team_id, mes, ano)
         holerites: list[Holerite] = []
 
         for funcionario in funcionarios:
@@ -120,12 +148,13 @@ class RhFolhaService:
             descontos = existing.descontos_manuais if existing else Money(Decimal("0.00"))
 
             if existing:
+                if existing.status == StatusHolerite.FECHADO:
+                    raise DomainError("Holerite fechado nao pode ser recalculado automaticamente")
                 existing.salario_base = funcionario.salario_base
                 existing.horas_extras = horas_extras
                 existing.descontos_falta = descontos_falta
                 existing.acrescimos_manuais = acrescimos
                 existing.descontos_manuais = descontos
-                existing.status = StatusHolerite.RASCUNHO
                 existing.recalcular_valor_liquido()
                 saved = await self.holerite_repo.save(existing)
             else:
@@ -141,8 +170,11 @@ class RhFolhaService:
                         acrescimos_manuais=acrescimos,
                         descontos_manuais=descontos,
                         valor_liquido=funcionario.salario_base,
+                        calculation_version="encargos-v2",
                     )
                 )
+            await self._sync_holerite_items(saved, regras_ativas)
+            saved = await self.holerite_repo.save(saved)
             await self._record_audit(
                 current_user=current_user,
                 entity_id=saved.id,
@@ -154,6 +186,126 @@ class RhFolhaService:
 
         await self.uow.commit()
         return holerites
+
+    async def _load_regras_ativas(self, team_id: UUID, mes: int, ano: int):
+        if self.regra_encargo_repo is None:
+            return []
+        if self.encargo_cache is not None:
+            cached = await self.encargo_cache.get_active_rules(team_id, ano, mes)
+            if cached is not None:
+                return cached
+        competencia = self._competencia_bounds(mes, ano)[1]
+        regras = await self.regra_encargo_repo.list_active_by_competencia(team_id, competencia)
+        if self.encargo_cache is not None:
+            await self.encargo_cache.set_active_rules(team_id, ano, mes, regras)
+        return regras
+
+    async def _sync_holerite_items(self, holerite: Holerite, regras_ativas: list | None = None) -> None:
+        if self.holerite_item_repo is None:
+            return
+        itens_base = self._build_holerite_items(holerite)
+        context = self._build_calculation_context(holerite, itens_base)
+        regras = list(regras_ativas or [])
+        result = self.calculation_engine.apply(context, regras)
+        await self.holerite_item_repo.replace_automaticos(holerite.team_id, holerite.id, result.itens)
+        holerite.atualizar_totais_por_itens(result.itens)
+        holerite.calculation_hash = self._build_calculation_hash(holerite, regras, result.itens)
+        holerite.calculation_version = "encargos-v2"
+        holerite.calculated_at = datetime.now(timezone.utc)
+
+    def _build_holerite_items(self, holerite: Holerite) -> list[HoleriteItem]:
+        itens = [
+            HoleriteItem(
+                team_id=holerite.team_id,
+                holerite_id=holerite.id,
+                funcionario_id=holerite.funcionario_id,
+                tipo=HoleriteItemTipo.SALARIO_BASE,
+                origem="sistema",
+                codigo="SALARIO_BASE",
+                descricao="Salario Base",
+                natureza=HoleriteItemNatureza.PROVENTO,
+                ordem=100,
+                base=holerite.salario_base,
+                valor=holerite.salario_base,
+            ),
+            HoleriteItem(
+                team_id=holerite.team_id,
+                holerite_id=holerite.id,
+                funcionario_id=holerite.funcionario_id,
+                tipo=HoleriteItemTipo.HORA_EXTRA,
+                origem="sistema",
+                codigo="HORA_EXTRA",
+                descricao="Horas Extras",
+                natureza=HoleriteItemNatureza.PROVENTO,
+                ordem=200,
+                base=holerite.horas_extras,
+                valor=holerite.horas_extras,
+            ),
+            HoleriteItem(
+                team_id=holerite.team_id,
+                holerite_id=holerite.id,
+                funcionario_id=holerite.funcionario_id,
+                tipo=HoleriteItemTipo.FALTA,
+                origem="sistema",
+                codigo="FALTA",
+                descricao="Desconto por Faltas",
+                natureza=HoleriteItemNatureza.DESCONTO,
+                ordem=300,
+                base=holerite.descontos_falta,
+                valor=holerite.descontos_falta,
+            ),
+        ]
+        if holerite.acrescimos_manuais.amount != Decimal("0.00"):
+            itens.append(
+                HoleriteItem(
+                    team_id=holerite.team_id,
+                    holerite_id=holerite.id,
+                    funcionario_id=holerite.funcionario_id,
+                    tipo=HoleriteItemTipo.AJUSTE_MANUAL,
+                    origem="manual",
+                    codigo="ACRESCIMO_MANUAL",
+                    descricao="Acrescimo Manual",
+                    natureza=HoleriteItemNatureza.PROVENTO,
+                    ordem=400,
+                    base=holerite.acrescimos_manuais,
+                    valor=holerite.acrescimos_manuais,
+                )
+            )
+        if holerite.descontos_manuais.amount != Decimal("0.00"):
+            itens.append(
+                HoleriteItem(
+                    team_id=holerite.team_id,
+                    holerite_id=holerite.id,
+                    funcionario_id=holerite.funcionario_id,
+                    tipo=HoleriteItemTipo.AJUSTE_MANUAL,
+                    origem="manual",
+                    codigo="DESCONTO_MANUAL",
+                    descricao="Desconto Manual",
+                    natureza=HoleriteItemNatureza.DESCONTO,
+                    ordem=500,
+                    base=holerite.descontos_manuais,
+                    valor=holerite.descontos_manuais,
+                )
+            )
+        return itens
+
+    def _build_calculation_context(self, holerite: Holerite, itens_base: list[HoleriteItem]) -> FolhaCalculationContext:
+        return FolhaCalculationContext(
+            team_id=holerite.team_id,
+            holerite_id=holerite.id,
+            funcionario_id=holerite.funcionario_id,
+            competencia_mes=holerite.mes_referencia,
+            competencia_ano=holerite.ano_referencia,
+            salario_base=holerite.salario_base,
+            horas_extras=holerite.horas_extras,
+            descontos_falta=holerite.descontos_falta,
+            acrescimos_manuais=holerite.acrescimos_manuais,
+            descontos_manuais=holerite.descontos_manuais,
+            bruto_antes_encargos=holerite.salario_base + holerite.horas_extras + holerite.acrescimos_manuais - holerite.descontos_falta,
+            bruto_antes_irrf=holerite.salario_base + holerite.horas_extras + holerite.acrescimos_manuais - holerite.descontos_falta,
+            liquido_parcial=holerite.valor_liquido,
+            itens=itens_base,
+        )
 
     async def listar_holerites(
         self,
@@ -202,6 +354,7 @@ class RhFolhaService:
         holerite = await self.holerite_repo.get_by_id(holerite_id, current_user.team.id)
         before = self._holerite_snapshot(holerite)
         holerite.atualizar_ajustes_manuais(Money(acrescimos), Money(descontos))
+        await self._sync_holerite_items(holerite, await self._load_regras_ativas(current_user.team.id, holerite.mes_referencia, holerite.ano_referencia))
         saved = await self.holerite_repo.save(holerite)
         await self._record_audit(
             current_user=current_user,
@@ -311,6 +464,75 @@ class RhFolhaService:
             raise DomainError("Holerite nao encontrado")
         return holerite
 
+    async def criar_job_geracao_folha(
+        self,
+        current_user: User,
+        mes: int,
+        ano: int,
+        funcionario_ids: list[UUID] | None = None,
+    ) -> RhFolhaJob:
+        self._ensure_rh_admin(current_user)
+        self._validate_competencia(mes, ano)
+        if self.folha_job_repo is None or self.folha_queue is None:
+            raise DomainError("Fila de folha nao configurada")
+        job = RhFolhaJob(
+            team_id=current_user.team.id,
+            mes=mes,
+            ano=ano,
+            requested_by_user_id=current_user.id,
+            funcionario_ids=funcionario_ids,
+        )
+        saved = await self.folha_job_repo.save(job)
+        await self.folha_queue.enqueue_generate_folha(saved.id)
+        await self._record_audit(
+            current_user=current_user,
+            entity_id=saved.id,
+            entity_type="rh_folha_job",
+            action="rh.folha.job.created",
+            after=self._folha_job_snapshot(saved),
+        )
+        await self.uow.commit()
+        return saved
+
+    async def obter_job_geracao_folha(self, current_user: User, job_id: UUID) -> RhFolhaJob:
+        self._ensure_rh_admin(current_user)
+        if self.folha_job_repo is None:
+            raise DomainError("Repositorio de job de folha nao configurado")
+        return await self.folha_job_repo.get_by_id(current_user.team.id, job_id)
+
+    async def processar_job_geracao_folha(self, job_id: UUID) -> RhFolhaJob:
+        if self.folha_job_repo is None:
+            raise DomainError("Repositorio de job de folha nao configurado")
+        job = await self.folha_job_repo.get_by_id_unscoped(job_id)
+        funcionarios = await self._load_funcionarios_for_job(job.team_id, job.funcionario_ids)
+        job.mark_processing(len(funcionarios))
+        await self.folha_job_repo.save(job)
+
+        try:
+            for funcionario in funcionarios:
+                current_user = self._build_system_user(job.team_id, job.requested_by_user_id)
+                try:
+                    await self.gerar_rascunho_folha(
+                        current_user=current_user,
+                        mes=job.mes,
+                        ano=job.ano,
+                        funcionario_id=funcionario.id,
+                    )
+                    job.register_success()
+                except Exception as exc:
+                    job.register_failure(funcionario.id, str(exc))
+                await self.folha_job_repo.save(job)
+            job.mark_completed()
+        except Exception as exc:
+            job.mark_failed(str(exc))
+            await self.folha_job_repo.save(job)
+            await self.uow.commit()
+            raise
+
+        await self.folha_job_repo.save(job)
+        await self.uow.commit()
+        return job
+
     async def _load_funcionarios(self, team_id: UUID, funcionario_id: UUID | None) -> list[Funcionario]:
         if funcionario_id is not None:
             return [await self.funcionario_repo.get_by_id(funcionario_id, team_id)]
@@ -324,6 +546,11 @@ class RhFolhaService:
             items.extend(batch)
             offset += limit
         return items
+
+    async def _load_funcionarios_for_job(self, team_id: UUID, funcionario_ids: list[UUID] | None) -> list[Funcionario]:
+        if funcionario_ids:
+            return [await self.funcionario_repo.get_by_id(funcionario_id, team_id) for funcionario_id in funcionario_ids]
+        return await self._load_funcionarios(team_id, None)
 
     async def _build_atestado_abono_map(self, atestados: list[Atestado]) -> dict[UUID, set[date]]:
         grouped: dict[UUID, set[date]] = defaultdict(set)
@@ -488,7 +715,69 @@ class RhFolhaService:
             "descontos_falta": str(holerite.descontos_falta.amount),
             "acrescimos_manuais": str(holerite.acrescimos_manuais.amount),
             "descontos_manuais": str(holerite.descontos_manuais.amount),
+            "calculation_hash": holerite.calculation_hash,
+            "calculation_version": holerite.calculation_version,
             "valor_liquido": str(holerite.valor_liquido.amount),
             "status": holerite.status.value,
             "pagamento_agendado_id": str(holerite.pagamento_agendado_id) if holerite.pagamento_agendado_id else None,
         }
+
+    def _folha_job_snapshot(self, job: RhFolhaJob) -> dict:
+        return {
+            "mes": job.mes,
+            "ano": job.ano,
+            "status": job.status.value,
+            "total_funcionarios": job.total_funcionarios,
+            "processados": job.processados,
+            "falhas": job.falhas,
+            "funcionario_ids": [str(item) for item in job.funcionario_ids] if job.funcionario_ids else None,
+            "error_summary": job.error_summary,
+        }
+
+    def _build_system_user(self, team_id: UUID, requested_by_user_id: UUID | None) -> User:
+        team = type("TeamRef", (), {"id": team_id})()
+        user = object.__new__(User)
+        user.id = requested_by_user_id or UUID("00000000-0000-0000-0000-000000000001")
+        user.nome = "Payroll Worker"
+        user.email = "worker@engify.local"
+        user.senha_hash = ""
+        user.role = Roles.ADMIN
+        user.team = team
+        user.cpf = None
+        return user
+
+    def _build_calculation_hash(self, holerite: Holerite, regras, itens: list[HoleriteItem]) -> str:
+        payload = {
+            "holerite": {
+                "funcionario_id": str(holerite.funcionario_id),
+                "mes": holerite.mes_referencia,
+                "ano": holerite.ano_referencia,
+                "salario_base": str(holerite.salario_base.amount),
+                "horas_extras": str(holerite.horas_extras.amount),
+                "descontos_falta": str(holerite.descontos_falta.amount),
+                "acrescimos_manuais": str(holerite.acrescimos_manuais.amount),
+                "descontos_manuais": str(holerite.descontos_manuais.amount),
+            },
+            "regras": [
+                {
+                    "id": str(regra.id),
+                    "codigo": regra.codigo,
+                    "prioridade": regra.prioridade,
+                    "vigencia_inicio": regra.vigencia_inicio.isoformat() if regra.vigencia_inicio else None,
+                    "vigencia_fim": regra.vigencia_fim.isoformat() if regra.vigencia_fim else None,
+                    "status": regra.status.value if regra.status == StatusRegraEncargo.ATIVA else regra.status.value,
+                }
+                for regra in sorted(regras, key=lambda item: (item.prioridade, item.codigo))
+            ],
+            "itens": [
+                {
+                    "codigo": item.codigo,
+                    "natureza": item.natureza.value,
+                    "valor": str(item.valor.amount),
+                    "base": str(item.base.amount),
+                }
+                for item in itens
+            ],
+        }
+        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
