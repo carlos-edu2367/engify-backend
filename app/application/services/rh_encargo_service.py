@@ -6,6 +6,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from app.application.providers.repo.rh_repo import (
+    BeneficioRepository,
     RegraEncargoRepository,
     RhAuditLogRepository,
     TabelaProgressivaRepository,
@@ -15,12 +16,14 @@ from app.application.providers.utility.rh_encargo_cache import RhEncargoCachePor
 from app.domain.entities.money import Money
 from app.domain.entities.rh import (
     BaseCalculoEncargo,
+    Beneficio,
     EscopoAplicabilidade,
     FaixaEncargo,
     NaturezaEncargo,
     RegraEncargo,
     RegraEncargoAplicabilidade,
     RhAuditLog,
+    StatusBeneficio,
     StatusRegraEncargo,
     TabelaProgressiva,
     TipoRegraEncargo,
@@ -37,9 +40,11 @@ class RhEncargoService:
         audit_repo: RhAuditLogRepository,
         uow: UOWProvider,
         encargo_cache: RhEncargoCachePort | None = None,
+        beneficio_repo: BeneficioRepository | None = None,
     ) -> None:
         self.regra_repo = regra_repo
         self.tabela_repo = tabela_repo
+        self.beneficio_repo = beneficio_repo
         self.audit_repo = audit_repo
         self.uow = uow
         self.encargo_cache = encargo_cache
@@ -96,6 +101,7 @@ class RhEncargoService:
             raise DomainError("Somente regra em rascunho pode ser atualizada")
         before = self._regra_snapshot(regra)
         self._apply_regra_updates(regra, self._payload_dict(payload), current_user)
+        self._validate_regra(regra)
         saved = await self.regra_repo.save(regra)
         await self._record_audit(current_user, "regra_encargo", saved.id, "rh.regra_encargo.updated_draft", before=before, after=self._regra_snapshot(saved))
         await self.uow.commit()
@@ -147,6 +153,7 @@ class RhEncargoService:
             raise DomainError("Existe conflito de vigencia para esta regra e aplicabilidade")
         before = self._regra_snapshot(regra)
         regra.status = StatusRegraEncargo.ATIVA
+        self._validate_regra(regra)
         regra.approved_by_user_id = current_user.id
         regra.updated_by_user_id = current_user.id
         saved = await self.regra_repo.save(regra)
@@ -192,6 +199,72 @@ class RhEncargoService:
             return items, total
         items = await self.tabela_repo.list_by_team(current_user.team.id, page, limit)
         return items, len(items)
+
+    async def listar_beneficios(self, current_user: User, page: int, limit: int, **filters):
+        self._ensure_rh_read(current_user)
+        repo = self._ensure_beneficio_repo()
+        items = await repo.list_by_filters(current_user.team.id, page, limit, **filters)
+        total = await repo.count_by_filters(current_user.team.id, **filters)
+        return items, total
+
+    async def criar_beneficio(self, current_user: User, payload) -> Beneficio:
+        self._ensure_rh_admin(current_user)
+        repo = self._ensure_beneficio_repo()
+        data = self._payload_dict(payload)
+        await self._ensure_beneficio_nome_available(current_user.team.id, data["nome"])
+        beneficio = Beneficio(
+            team_id=current_user.team.id,
+            nome=data["nome"],
+            descricao=data.get("descricao"),
+            status=StatusBeneficio.ATIVO,
+            created_by_user_id=current_user.id,
+        )
+        saved = await repo.save(beneficio)
+        await self._record_audit(current_user, "beneficio", saved.id, "rh.beneficio.created", after=self._beneficio_snapshot(saved))
+        await self.uow.commit()
+        return saved
+
+    async def atualizar_beneficio(self, current_user: User, beneficio_id: UUID, payload) -> Beneficio:
+        self._ensure_rh_admin(current_user)
+        repo = self._ensure_beneficio_repo()
+        beneficio = await repo.get_by_id(beneficio_id, current_user.team.id)
+        before = self._beneficio_snapshot(beneficio)
+        data = self._payload_dict(payload)
+        novo_nome = data.get("nome")
+        if novo_nome is not None and novo_nome.strip().lower() != beneficio.nome.strip().lower():
+            await self._ensure_beneficio_nome_available(current_user.team.id, novo_nome)
+        beneficio.atualizar(nome=novo_nome, descricao=data.get("descricao"))
+        saved = await repo.save(beneficio)
+        await self._record_audit(current_user, "beneficio", saved.id, "rh.beneficio.updated", before=before, after=self._beneficio_snapshot(saved))
+        await self.uow.commit()
+        return saved
+
+    async def inativar_beneficio(self, current_user: User, beneficio_id: UUID, motivo: str) -> Beneficio:
+        self._ensure_rh_admin(current_user)
+        self._ensure_motivo(motivo, "Motivo para inativar beneficio e obrigatorio")
+        repo = self._ensure_beneficio_repo()
+        beneficio = await repo.get_by_id(beneficio_id, current_user.team.id)
+        before = self._beneficio_snapshot(beneficio)
+        beneficio.inativar()
+        saved = await repo.save(beneficio)
+        await self._record_audit(current_user, "beneficio", saved.id, "rh.beneficio.inactivated", before=before, after=self._beneficio_snapshot(saved), reason=motivo)
+        await self.uow.commit()
+        return saved
+
+    async def reativar_beneficio(self, current_user: User, beneficio_id: UUID, motivo: str) -> Beneficio:
+        self._ensure_rh_admin(current_user)
+        self._ensure_motivo(motivo, "Motivo para reativar beneficio e obrigatorio")
+        repo = self._ensure_beneficio_repo()
+        beneficio = await repo.get_by_id(beneficio_id, current_user.team.id)
+        existing = await repo.get_active_by_nome(current_user.team.id, beneficio.nome)
+        if existing is not None and existing.id != beneficio.id:
+            raise DomainError("Ja existe um beneficio ativo com este nome")
+        before = self._beneficio_snapshot(beneficio)
+        beneficio.reativar()
+        saved = await repo.save(beneficio)
+        await self._record_audit(current_user, "beneficio", saved.id, "rh.beneficio.reactivated", before=before, after=self._beneficio_snapshot(saved), reason=motivo)
+        await self.uow.commit()
+        return saved
 
     async def obter_tabela_progressiva(self, current_user: User, tabela_id: UUID) -> TabelaProgressiva:
         self._ensure_rh_admin(current_user)
@@ -246,6 +319,8 @@ class RhEncargoService:
         self._ensure_rh_admin(current_user)
         self._ensure_motivo(motivo, "Motivo para ativar tabela progressiva e obrigatorio")
         tabela = await self.tabela_repo.get_by_id(tabela_id, current_user.team.id)
+        if tabela.vigencia_inicio is None:
+            raise DomainError("Tabela progressiva ativa exige vigencia inicial")
         self._validate_faixas(tabela.faixas, allow_empty=False)
         before = self._tabela_snapshot(tabela)
         tabela.status = StatusRegraEncargo.ATIVA
@@ -271,6 +346,20 @@ class RhEncargoService:
     def _ensure_rh_admin(self, current_user: User) -> None:
         if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
             raise DomainError("Acesso restrito ao RH")
+
+    def _ensure_rh_read(self, current_user: User) -> None:
+        if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
+            raise DomainError("Acesso restrito ao RH")
+
+    def _ensure_beneficio_repo(self) -> BeneficioRepository:
+        if self.beneficio_repo is None:
+            raise DomainError("Recurso de beneficios indisponivel")
+        return self.beneficio_repo
+
+    async def _ensure_beneficio_nome_available(self, team_id: UUID, nome: str) -> None:
+        existing = await self._ensure_beneficio_repo().get_active_by_nome(team_id, nome)
+        if existing is not None:
+            raise DomainError("Ja existe um beneficio ativo com este nome")
 
     def _ensure_tabela_editavel(self, tabela: TabelaProgressiva) -> None:
         if tabela.status == StatusRegraEncargo.ATIVA:
@@ -368,6 +457,13 @@ class RhEncargoService:
         if start and end and end < start:
             raise DomainError("Vigencia final nao pode ser anterior a vigencia inicial")
 
+    def _validate_regra(self, regra: RegraEncargo) -> None:
+        self._validate_vigencia(regra.vigencia_inicio, regra.vigencia_fim)
+        if regra.prioridade < 0:
+            raise DomainError("Prioridade da regra nao pode ser negativa")
+        if regra.percentual is not None and Decimal(str(regra.percentual)) > Decimal("100.00"):
+            raise DomainError("Percentual da regra deve estar entre 0 e 100")
+
     async def _record_audit(self, current_user: User, entity_type: str, entity_id: UUID, action: str, before=None, after=None, reason: str | None = None) -> None:
         await self.audit_repo.save(
             RhAuditLog(
@@ -419,6 +515,14 @@ class RhEncargoService:
                 }
                 for faixa in tabela.faixas
             ],
+        }
+
+    def _beneficio_snapshot(self, beneficio: Beneficio) -> dict:
+        return {
+            "nome": beneficio.nome,
+            "descricao": beneficio.descricao,
+            "status": beneficio.status.value,
+            "is_deleted": beneficio.is_deleted,
         }
 
     def _mask_sensitive(self, payload):

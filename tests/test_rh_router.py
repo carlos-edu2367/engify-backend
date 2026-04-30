@@ -15,6 +15,7 @@ from app.domain.errors import DomainError
 from app.http.dependencies.auth import get_current_user
 from app.http.dependencies.services import (
     get_rh_dashboard_service,
+    get_rh_encargo_service,
     get_rh_funcionario_service,
     get_rh_local_ponto_service,
     get_rh_ponto_service,
@@ -115,6 +116,8 @@ class _FakePontoService:
     def __init__(self, registro=None, error=None) -> None:
         self.registro = registro
         self.error = error
+        self.funcionario = None
+        self.local = None
 
     async def registrar_ponto(self, dto, current_user, request_context):
         if self.error:
@@ -130,6 +133,20 @@ class _FakePontoService:
         if self.error:
             raise self.error
         return [self.registro], 1
+
+    async def obter_dia_ponto(self, current_user, funcionario_id, data):
+        if self.error:
+            raise self.error
+        return {
+            "funcionario": self.funcionario,
+            "registros": [self.registro],
+            "status": "validado",
+            "local_autorizado_nome": self.local.nome if self.local else None,
+            "locais_autorizados": [self.local] if self.local else [],
+            "ajustes_relacionados": [],
+            "impacto_estimado": {"horas_extras_estimadas": "0.00", "faltas_estimadas": "0.00"},
+            "auditoria_resumida": [],
+        }
 
 
 class _FakeSolicitacoesService:
@@ -287,6 +304,42 @@ class _FakeDashboardService:
         return self.audit_items, len(self.audit_items)
 
 
+class _FakeEncargoService:
+    def __init__(self, beneficio=None, error=None) -> None:
+        self.beneficio = beneficio
+        self.error = error
+
+    async def listar_beneficios(self, current_user, page, limit, **filters):
+        if self.error:
+            raise self.error
+        return [self.beneficio], 1
+
+    async def criar_beneficio(self, current_user, body):
+        if self.error:
+            raise self.error
+        return self.beneficio
+
+    async def atualizar_beneficio(self, current_user, beneficio_id, body):
+        if self.error:
+            raise self.error
+        return self.beneficio
+
+    async def inativar_beneficio(self, current_user, beneficio_id, motivo):
+        if self.error:
+            raise self.error
+        return self.beneficio
+
+    async def reativar_beneficio(self, current_user, beneficio_id, motivo):
+        if self.error:
+            raise self.error
+        return self.beneficio
+
+    async def criar_regra(self, current_user, body):
+        if self.error:
+            raise self.error
+        return None
+
+
 class _FakeStorageProvider:
     async def get_signed_download_url(self, bucket, path, expires_in=3600):
         return f"https://signed.example/{path}?expires_in={expires_in}"
@@ -389,6 +442,17 @@ def _make_holerite(team_id, funcionario_id):
     )
 
 
+def _make_beneficio(team_id):
+    from app.domain.entities.rh import Beneficio, StatusBeneficio
+
+    return Beneficio(
+        team_id=team_id,
+        nome="Vale transporte",
+        descricao="Credito mensal para deslocamento",
+        status=StatusBeneficio.ATIVO,
+    )
+
+
 def _build_client(
     user,
     service,
@@ -397,6 +461,7 @@ def _build_client(
     solicitacoes_service=None,
     folha_service=None,
     dashboard_service=None,
+    encargo_service=None,
     storage_provider=None,
 ):
     app = FastAPI()
@@ -410,6 +475,7 @@ def _build_client(
 
     app.dependency_overrides[get_rh_folha_service] = lambda: folha_service or _FakeFolhaService()
     app.dependency_overrides[get_rh_dashboard_service] = lambda: dashboard_service or _FakeDashboardService()
+    app.dependency_overrides[get_rh_encargo_service] = lambda: encargo_service or _FakeEncargoService()
     app.dependency_overrides[get_storage_provider] = lambda: storage_provider or _FakeStorageProvider()
     return TestClient(app)
 
@@ -435,6 +501,29 @@ def test_create_funcionario_route_returns_201_and_masked_cpf():
 
     assert response.status_code == 201
     assert response.json()["cpf_mascarado"] == "111.***.***-35"
+
+
+def test_get_funcionario_route_returns_safe_usuario_vinculado_object():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    funcionario.user_id = uuid4()
+    funcionario.usuario_vinculado = type(
+        "UsuarioVinculado",
+        (),
+        {"nome": "Ana Usuario", "email": "ana.usuario@example.com", "avatar_url": None},
+    )()
+    client = _build_client(admin, _FakeRhService(funcionario=funcionario))
+
+    response = client.get(f"/rh/funcionarios/{funcionario.id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user_id"] == str(funcionario.user_id)
+    assert payload["usuario_vinculado"] == {
+        "nome": "Ana Usuario",
+        "email": "ana.usuario@example.com",
+        "avatar_url": None,
+    }
 
 
 def test_create_funcionario_route_returns_403_for_funcionario_role():
@@ -504,6 +593,28 @@ def test_create_local_ponto_route_returns_201():
     assert response.json()["nome"] == "Obra Centro"
 
 
+def test_create_local_ponto_route_validates_coordinates_and_radius():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    client = _build_client(
+        admin,
+        _FakeRhService(funcionario=funcionario),
+        local_service=_FakeLocalPontoService(local=_make_local(admin.team.id, funcionario.id)),
+    )
+
+    response = client.post(
+        f"/rh/funcionarios/{funcionario.id}/locais-ponto",
+        json={
+            "nome": "Obra Centro",
+            "latitude": -91,
+            "longitude": -181,
+            "raio_metros": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_post_rh_ponto_route_returns_400_for_geofence_denial():
     employee = _make_user(Roles.FUNCIONARIO)
     client = _build_client(
@@ -553,6 +664,38 @@ def test_list_meu_ponto_route_accepts_period_and_status_filters():
 
     assert response.status_code == 200
     assert response.json()["items"][0]["status"] == "validado"
+
+
+def test_get_ponto_dia_route_returns_frontend_aligned_location_contract():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    local = _make_local(admin.team.id, funcionario.id)
+    registro = _make_registro(admin.team.id, funcionario.id)
+    registro.local_ponto_id = local.id
+    registro.gps_accuracy_meters = 9.5
+    registro.local_ponto_nome = local.nome
+    registro.fora_local_autorizado = False
+    ponto_service = _FakePontoService(registro=registro)
+    ponto_service.funcionario = funcionario
+    ponto_service.local = local
+    client = _build_client(
+        admin,
+        _FakeRhService(funcionario=funcionario),
+        ponto_service=ponto_service,
+    )
+
+    response = client.get(f"/rh/ponto/dias/{funcionario.id}/2026-04-28")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "validado"
+    assert payload["local_autorizado_nome"] == "Obra Centro"
+    assert payload["locais_autorizados"][0]["nome"] == "Obra Centro"
+    assert payload["registros"][0]["local_ponto_nome"] == "Obra Centro"
+    assert payload["registros"][0]["fora_local_autorizado"] is False
+    assert payload["registros"][0]["latitude"] == -16.6869
+    assert payload["registros"][0]["longitude"] == -49.2648
+    assert payload["registros"][0]["gps_accuracy_meters"] == 9.5
 
 
 def test_post_ferias_route_returns_200_for_funcionario():
@@ -834,3 +977,81 @@ def test_get_audit_logs_route_returns_403_for_funcionario():
     response = client.get("/rh/audit-logs")
 
     assert response.status_code == 403
+
+
+def test_beneficios_routes_support_admin_crud_contract():
+    admin = _make_user(Roles.ADMIN)
+    beneficio = _make_beneficio(admin.team.id)
+    client = _build_client(
+        admin,
+        _FakeRhService(funcionario=_make_funcionario(admin.team.id)),
+        encargo_service=_FakeEncargoService(beneficio=beneficio),
+    )
+
+    create_response = client.post(
+        "/rh/beneficios",
+        json={"nome": "Vale transporte", "descricao": "Credito mensal para deslocamento"},
+    )
+    list_response = client.get("/rh/beneficios")
+    patch_response = client.patch(f"/rh/beneficios/{beneficio.id}", json={"descricao": "Atualizado"})
+    inactive_response = client.post(f"/rh/beneficios/{beneficio.id}/inativar", json={"motivo": "Substituido"})
+    reactivate_response = client.post(f"/rh/beneficios/{beneficio.id}/reativar", json={"motivo": "Disponivel"})
+
+    assert create_response.status_code == 201
+    assert create_response.json()["nome"] == "Vale transporte"
+    assert create_response.json()["status"] == "ativo"
+    assert list_response.status_code == 200
+    assert list_response.json()["items"][0]["descricao"] == "Credito mensal para deslocamento"
+    assert patch_response.status_code == 200
+    assert inactive_response.status_code == 200
+    assert reactivate_response.status_code == 200
+
+
+def test_create_beneficio_route_requires_rh_admin():
+    employee = _make_user(Roles.FUNCIONARIO)
+    client = _build_client(
+        employee,
+        _FakeRhService(funcionario=_make_funcionario(employee.team.id)),
+        encargo_service=_FakeEncargoService(beneficio=_make_beneficio(employee.team.id)),
+    )
+
+    response = client.post("/rh/beneficios", json={"nome": "Vale refeicao"})
+
+    assert response.status_code == 403
+
+
+def test_create_regra_encargo_route_requires_admin_and_sanitizes_internal_errors():
+    employee = _make_user(Roles.FUNCIONARIO)
+    employee_client = _build_client(
+        employee,
+        _FakeRhService(funcionario=_make_funcionario(employee.team.id)),
+        encargo_service=_FakeEncargoService(),
+    )
+    payload = {
+        "codigo": "INSS",
+        "nome": "INSS",
+        "tipo_calculo": "percentual_simples",
+        "natureza": "desconto",
+        "base_calculo": "salario_base",
+        "prioridade": 100,
+        "percentual": "11.00",
+    }
+
+    forbidden = employee_client.post("/rh/encargos/regras", json=payload)
+
+    assert forbidden.status_code == 403
+
+    admin = _make_user(Roles.ADMIN)
+    admin_client = _build_client(
+        admin,
+        _FakeRhService(funcionario=_make_funcionario(admin.team.id)),
+        encargo_service=_FakeEncargoService(
+            error=DomainError('duplicate key violates unique constraint "uq_rh_regra"; SQL statement hidden')
+        ),
+    )
+
+    response = admin_client.post("/rh/encargos/regras", json=payload)
+
+    assert response.status_code == 400
+    assert "constraint" not in response.json()["detail"].lower()
+    assert "sql" not in response.json()["detail"].lower()

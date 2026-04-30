@@ -202,8 +202,8 @@ class LocalPonto:
             raise DomainError("Latitude invalida")
         if longitude < -180 or longitude > 180:
             raise DomainError("Longitude invalida")
-        if raio_metros <= 0:
-            raise DomainError("Raio deve ser positivo")
+        if raio_metros < 20 or raio_metros > 1000:
+            raise DomainError("Raio deve estar entre 20 e 1000 metros")
         self.id = id or uuid4()
         self.team_id = team_id
         self.funcionario_id = funcionario_id
@@ -451,6 +451,49 @@ class StatusRegraEncargo(Enum):
     ARQUIVADA = "arquivada"
 
 
+class StatusBeneficio(Enum):
+    ATIVO = "ativo"
+    INATIVO = "inativo"
+
+
+class Beneficio:
+    def __init__(
+        self,
+        team_id: UUID,
+        nome: str,
+        descricao: str | None = None,
+        status: StatusBeneficio = StatusBeneficio.ATIVO,
+        created_by_user_id: UUID | None = None,
+        id: UUID | None = None,
+    ) -> None:
+        if not nome.strip():
+            raise DomainError("Nome do beneficio e obrigatorio")
+        self.id = id or uuid4()
+        self.team_id = team_id
+        self.nome = nome.strip()
+        self.descricao = descricao.strip() if isinstance(descricao, str) and descricao.strip() else None
+        self.status = status
+        self.created_by_user_id = created_by_user_id
+        self.is_deleted = False
+
+    def atualizar(self, nome: str | None = None, descricao: str | None = None) -> None:
+        if nome is not None:
+            if not nome.strip():
+                raise DomainError("Nome do beneficio e obrigatorio")
+            self.nome = nome.strip()
+        if descricao is not None:
+            self.descricao = descricao.strip() or None
+
+    def inativar(self) -> None:
+        self.status = StatusBeneficio.INATIVO
+
+    def reativar(self) -> None:
+        self.status = StatusBeneficio.ATIVO
+
+    def delete(self) -> None:
+        self.is_deleted = True
+
+
 class HoleriteItemTipo(Enum):
     SALARIO_BASE = "salario_base"
     HORA_EXTRA = "hora_extra"
@@ -483,6 +526,8 @@ class FaixaEncargo:
             raise DomainError("Ordem da faixa deve ser positiva")
         if aliquota < 0:
             raise DomainError("Aliquota da faixa nao pode ser negativa")
+        if Decimal(str(aliquota)) > Decimal("100.00"):
+            raise DomainError("Aliquota da faixa deve estar entre 0 e 100")
         if valor_final is not None and valor_final.amount < valor_inicial.amount:
             raise DomainError("Valor final da faixa nao pode ser menor que o valor inicial")
         self.id = id or uuid4()
@@ -607,6 +652,8 @@ class RegraEncargo:
                 raise DomainError("Regra percentual exige percentual")
             if Decimal(str(percentual)) < 0:
                 raise DomainError("Percentual da regra nao pode ser negativo")
+            if Decimal(str(percentual)) > Decimal("100.00"):
+                raise DomainError("Percentual da regra deve estar entre 0 e 100")
         if tipo_calculo == TipoRegraEncargo.TABELA_PROGRESSIVA and tabela_progressiva_id is None:
             raise DomainError("Regra progressiva exige tabela progressiva")
         if status == StatusRegraEncargo.ATIVA and vigencia_inicio is None:

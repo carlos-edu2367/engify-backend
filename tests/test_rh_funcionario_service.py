@@ -112,12 +112,31 @@ class _FakeHorarioRepo:
 class _FakeUserRepo:
     def __init__(self, users=None) -> None:
         self.by_id = {user.id: user for user in users or []}
+        self.get_by_team_id_calls = 0
 
     async def get_by_id(self, id):
         user = self.by_id.get(id)
         if not user:
             raise DomainError("Usuario nao encontrado")
         return user
+
+    async def get_by_team_id(self, team_id):
+        self.get_by_team_id_calls += 1
+        return [
+            type(
+                "SimpleUserDisplay",
+                (),
+                {
+                    "user_id": user.id,
+                    "nome": user.nome,
+                    "email": user.email,
+                    "role": user.role,
+                    "avatar_url": getattr(user, "avatar_url", None),
+                },
+            )()
+            for user in self.by_id.values()
+            if user.team.id == team_id
+        ]
 
 
 class _FakeAuditRepo:
@@ -390,3 +409,72 @@ async def test_update_funcionario_salary_requires_reason_and_records_history():
     assert len(salario_historico_repo.items) == 1
     assert salario_historico_repo.items[0].salario_anterior.amount == Decimal("4500.00")
     assert salario_historico_repo.items[0].salario_novo.amount == Decimal("5000.00")
+
+
+@pytest.mark.asyncio
+async def test_list_funcionarios_enriches_usuario_vinculado_without_n_plus_one():
+    from app.application.services.rh_funcionario_service import RhFuncionarioService
+
+    current_user = _make_user(Roles.ADMIN)
+    linked_user = _make_user(Roles.FUNCIONARIO, team_id=current_user.team.id)
+    linked_user.nome = "Ana Usuario"
+    linked_user.email = "ana.usuario@example.com"
+    funcionario = Funcionario(
+        team_id=current_user.team.id,
+        nome="Ana Souza",
+        cpf=CPF("11144477735"),
+        cargo="Analista",
+        salario_base=Money(Decimal("4500.00")),
+        data_admissao=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        user_id=linked_user.id,
+    )
+    funcionario_repo = _FakeFuncionarioRepo()
+    await funcionario_repo.save(funcionario)
+    user_repo = _FakeUserRepo([linked_user])
+    service = RhFuncionarioService(
+        funcionario_repo=funcionario_repo,
+        horario_repo=_FakeHorarioRepo(),
+        user_repo=user_repo,
+        audit_repo=_FakeAuditRepo(),
+        salario_historico_repo=_FakeSalarioHistoricoRepo(),
+        uow=_FakeUow(),
+    )
+
+    items, total = await service.list_funcionarios(current_user, page=1, limit=20)
+
+    assert total == 1
+    assert user_repo.get_by_team_id_calls == 1
+    assert items[0].usuario_vinculado.nome == "Ana Usuario"
+    assert items[0].usuario_vinculado.email == "ana.usuario@example.com"
+
+
+@pytest.mark.asyncio
+async def test_get_funcionario_enriches_usuario_vinculado_only_same_team():
+    from app.application.services.rh_funcionario_service import RhFuncionarioService
+
+    current_user = _make_user(Roles.ADMIN)
+    linked_user = _make_user(Roles.FUNCIONARIO, team_id=current_user.team.id)
+    foreign_user = _make_user(Roles.FUNCIONARIO, team_id=uuid4(), user_id=linked_user.id)
+    funcionario = Funcionario(
+        team_id=current_user.team.id,
+        nome="Ana Souza",
+        cpf=CPF("11144477735"),
+        cargo="Analista",
+        salario_base=Money(Decimal("4500.00")),
+        data_admissao=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        user_id=linked_user.id,
+    )
+    funcionario_repo = _FakeFuncionarioRepo()
+    await funcionario_repo.save(funcionario)
+    service = RhFuncionarioService(
+        funcionario_repo=funcionario_repo,
+        horario_repo=_FakeHorarioRepo(),
+        user_repo=_FakeUserRepo([foreign_user]),
+        audit_repo=_FakeAuditRepo(),
+        salario_historico_repo=_FakeSalarioHistoricoRepo(),
+        uow=_FakeUow(),
+    )
+
+    enriched = await service.get_funcionario(funcionario.id, current_user)
+
+    assert enriched.usuario_vinculado is None

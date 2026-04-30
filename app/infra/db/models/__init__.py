@@ -16,6 +16,7 @@ from app.infra.db.models.report_job_model import ReportJobModel
 from app.infra.db.models.rh_model import (
     AjustePontoModel,
     AtestadoModel,
+    BeneficioModel,
     FaixaEncargoModel,
     FeriasModel,
     FuncionarioModel,
@@ -65,6 +66,7 @@ __all__ = [
     "AjustePontoModel",
     "TipoAtestadoModel",
     "AtestadoModel",
+    "BeneficioModel",
     "TabelaProgressivaModel",
     "FaixaEncargoModel",
     "RegraEncargoModel",

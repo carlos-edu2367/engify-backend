@@ -206,6 +206,16 @@ class _FakeRegistroPontoRepo:
         registros = await self.list_by_team_periodo(team_id, start, end, status=status, page=1, limit=10_000)
         return len(registros)
 
+    async def list_by_funcionario_day(self, team_id, funcionario_id, day_start, day_end):
+        return [
+            item
+            for item in self.items
+            if item.team_id == team_id
+            and item.funcionario_id == funcionario_id
+            and day_start <= item.timestamp <= day_end
+            and not item.is_deleted
+        ]
+
 
 class _FakeAuditRepo:
     def __init__(self) -> None:
@@ -286,6 +296,83 @@ async def test_create_local_invalidates_geofence_cache():
 
     assert local.nome == "Obra Centro"
     assert cache.invalidations == [(current_user.team.id, funcionario.id)]
+
+
+@pytest.mark.asyncio
+async def test_create_local_validates_radius_bounds_and_default():
+    from app.application.services.rh_ponto_service import CreateLocalPontoDTO, RhLocalPontoService
+
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    service = RhLocalPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo(),
+        audit_repo=_FakeAuditRepo(),
+        geofence_cache=_FakeGeofenceCache(),
+        uow=_FakeUow(),
+    )
+
+    local = await service.create_local(
+        funcionario.id,
+        CreateLocalPontoDTO(nome="Obra Centro", latitude=-16.6869, longitude=-49.2648),
+        current_user,
+    )
+
+    assert local.raio_metros == 100
+    with pytest.raises(DomainError, match="Raio"):
+        await service.create_local(
+            funcionario.id,
+            CreateLocalPontoDTO.model_construct(nome="Muito pequeno", latitude=-16.6869, longitude=-49.2648, raio_metros=10),
+            current_user,
+        )
+    with pytest.raises(DomainError, match="Raio"):
+        await service.create_local(
+            funcionario.id,
+            CreateLocalPontoDTO.model_construct(nome="Muito grande", latitude=-16.6869, longitude=-49.2648, raio_metros=1500),
+            current_user,
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_and_delete_local_validate_radius_soft_delete_audit_and_cache():
+    from app.application.services.rh_ponto_service import CreateLocalPontoDTO, RhLocalPontoService, UpdateLocalPontoDTO
+
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    local_repo = _FakeLocalPontoRepo()
+    audit_repo = _FakeAuditRepo()
+    cache = _FakeGeofenceCache()
+    service = RhLocalPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=local_repo,
+        audit_repo=audit_repo,
+        geofence_cache=cache,
+        uow=_FakeUow(),
+    )
+    local = await service.create_local(
+        funcionario.id,
+        CreateLocalPontoDTO(nome="Obra Centro", latitude=-16.6869, longitude=-49.2648, raio_metros=100),
+        current_user,
+    )
+
+    with pytest.raises(DomainError, match="Raio"):
+        await service.update_local(local.id, UpdateLocalPontoDTO.model_construct(raio_metros=5), current_user)
+
+    updated = await service.update_local(local.id, UpdateLocalPontoDTO(raio_metros=250), current_user)
+    await service.delete_local(local.id, current_user)
+
+    assert updated.raio_metros == 250
+    assert local_repo.by_id[local.id].is_deleted is True
+    assert [event.action for event in audit_repo.events] == [
+        "rh.local_ponto.created",
+        "rh.local_ponto.updated",
+        "rh.local_ponto.deleted",
+    ]
+    assert cache.invalidations == [
+        (current_user.team.id, funcionario.id),
+        (current_user.team.id, funcionario.id),
+        (current_user.team.id, funcionario.id),
+    ]
 
 
 @pytest.mark.asyncio
@@ -493,3 +580,62 @@ async def test_registrar_ponto_rejects_duplicate_idempotency_key():
             current_user,
             RequestContext(idempotency_key="same-key"),
         )
+
+
+@pytest.mark.asyncio
+async def test_obter_dia_ponto_enriches_registros_with_local_metadata_and_outside_flag():
+    from app.application.services.rh_ponto_service import RhPontoService
+
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    local = LocalPonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        nome="Obra Centro",
+        latitude=-16.6869,
+        longitude=-49.2648,
+        raio_metros=50,
+    )
+    inside = RegistroPonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        tipo=TipoPonto.ENTRADA,
+        timestamp=datetime(2026, 4, 28, 8, 0, tzinfo=timezone.utc),
+        latitude=-16.68691,
+        longitude=-49.26481,
+        status=StatusPonto.VALIDADO,
+        local_ponto_id=local.id,
+        gps_accuracy_meters=8.0,
+    )
+    outside = RegistroPonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        tipo=TipoPonto.SAIDA,
+        timestamp=datetime(2026, 4, 28, 18, 0, tzinfo=timezone.utc),
+        latitude=-16.7000,
+        longitude=-49.3000,
+        status=StatusPonto.NEGADO,
+        denial_reason="outside_geofence",
+        gps_accuracy_meters=12.0,
+    )
+    service = RhPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo([local]),
+        registro_ponto_repo=_FakeRegistroPontoRepo([inside, outside]),
+        audit_repo=_FakeAuditRepo(),
+        geofence_cache=_FakeGeofenceCache(),
+        idempotency_repo=None,
+        uow=_FakeUow(),
+    )
+
+    detail = await service.obter_dia_ponto(current_user, funcionario.id, datetime(2026, 4, 28).date())
+
+    assert detail["status"] == "com_negacao"
+    assert detail["local_autorizado_nome"] == "Obra Centro"
+    assert detail["registros"][0].local_ponto_nome == "Obra Centro"
+    assert detail["registros"][0].fora_local_autorizado is False
+    assert detail["registros"][0].latitude == -16.68691
+    assert detail["registros"][0].longitude == -49.26481
+    assert detail["registros"][0].gps_accuracy_meters == 8.0
+    assert detail["registros"][1].local_ponto_nome is None
+    assert detail["registros"][1].fora_local_autorizado is True

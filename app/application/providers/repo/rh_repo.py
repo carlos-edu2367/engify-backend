@@ -4,6 +4,7 @@ from uuid import UUID
 from app.domain.entities.rh import (
     AjustePonto,
     Atestado,
+    Beneficio,
     FaixaEncargo,
     Ferias,
     Funcionario,
@@ -337,6 +338,28 @@ class TabelaProgressivaRepository(ABC):
 
     @abstractmethod
     async def save(self, tabela: TabelaProgressiva) -> TabelaProgressiva:
+        pass
+
+
+class BeneficioRepository(ABC):
+    @abstractmethod
+    async def get_by_id(self, id: UUID, team_id: UUID) -> Beneficio:
+        pass
+
+    @abstractmethod
+    async def get_active_by_nome(self, team_id: UUID, nome: str) -> Beneficio | None:
+        pass
+
+    @abstractmethod
+    async def list_by_filters(self, team_id: UUID, page: int, limit: int, **filters) -> list[Beneficio]:
+        pass
+
+    @abstractmethod
+    async def count_by_filters(self, team_id: UUID, **filters) -> int:
+        pass
+
+    @abstractmethod
+    async def save(self, beneficio: Beneficio) -> Beneficio:
         pass
 
 

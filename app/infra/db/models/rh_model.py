@@ -11,6 +11,7 @@ from app.domain.entities.rh import (
     AjustePonto,
     Atestado,
     BaseCalculoEncargo,
+    Beneficio,
     EscopoAplicabilidade,
     FaixaEncargo,
     Ferias,
@@ -36,6 +37,7 @@ from app.domain.entities.rh import (
     StatusFerias,
     StatusHolerite,
     StatusRegraEncargo,
+    StatusBeneficio,
     StatusPonto,
     TabelaProgressiva,
     TipoAtestado,
@@ -576,6 +578,52 @@ class AtestadoModel(Base, TimestampMixin):
         self.status = atestado.status.value
         self.motivo_rejeicao = atestado.motivo_rejeicao
         self.is_deleted = atestado.is_deleted
+
+
+class BeneficioModel(Base, TimestampMixin):
+    __tablename__ = "rh_beneficios"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=StatusBeneficio.ATIVO.value)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index("idx_rh_beneficios_team_status_deleted", "team_id", "status", "is_deleted"),
+    )
+
+    def to_domain(self) -> Beneficio:
+        beneficio = object.__new__(Beneficio)
+        beneficio.id = self.id
+        beneficio.team_id = self.team_id
+        beneficio.nome = self.nome
+        beneficio.descricao = self.descricao
+        beneficio.status = StatusBeneficio(self.status)
+        beneficio.created_by_user_id = self.created_by_user_id
+        beneficio.is_deleted = self.is_deleted
+        return beneficio
+
+    @classmethod
+    def from_domain(cls, beneficio: Beneficio) -> "BeneficioModel":
+        return cls(
+            id=beneficio.id or uuid.uuid4(),
+            team_id=beneficio.team_id,
+            nome=beneficio.nome,
+            descricao=beneficio.descricao,
+            status=beneficio.status.value,
+            created_by_user_id=beneficio.created_by_user_id,
+            is_deleted=beneficio.is_deleted,
+        )
+
+    def update_from_domain(self, beneficio: Beneficio) -> None:
+        self.nome = beneficio.nome
+        self.descricao = beneficio.descricao
+        self.status = beneficio.status.value
+        self.created_by_user_id = beneficio.created_by_user_id
+        self.is_deleted = beneficio.is_deleted
 
 
 class TabelaProgressivaModel(Base, TimestampMixin):

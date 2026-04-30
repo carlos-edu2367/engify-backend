@@ -11,6 +11,7 @@ from app.domain.entities.rh import (
     HoleriteItemTipo,
     NaturezaEncargo,
     RhFolhaJobStatus,
+    StatusBeneficio,
     StatusAjuste,
     StatusAtestado,
     StatusFerias,
@@ -90,6 +91,12 @@ class RhFuncionarioListItem(BaseModel):
     is_active: bool
 
 
+class RhUsuarioVinculadoResponse(BaseModel):
+    nome: str
+    email: str
+    avatar_url: str | None = None
+
+
 class RhFuncionarioResponse(BaseModel):
     id: UUID
     nome: str
@@ -99,24 +106,25 @@ class RhFuncionarioResponse(BaseModel):
     salario_base: Decimal
     data_admissao: date
     user_id: UUID | None = None
+    usuario_vinculado: RhUsuarioVinculadoResponse | None = None
     is_active: bool
     horario_trabalho: RhHorarioTrabalhoResponse | None = None
 
 
 class RhLocalPontoCreateRequest(BaseModel):
     nome: str
-    latitude: float
-    longitude: float
-    raio_metros: float = Field(default=100)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    raio_metros: float = Field(default=100, ge=20, le=1000)
 
 
 class RhLocalPontoUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nome: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    raio_metros: float | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    raio_metros: float | None = Field(default=None, ge=20, le=1000)
 
 
 class RhLocalPontoResponse(BaseModel):
@@ -153,6 +161,11 @@ class RhRegistroPontoListItem(BaseModel):
     timestamp: datetime
     status: StatusPonto
     local_ponto_id: UUID | None = None
+    local_ponto_nome: str | None = None
+    fora_local_autorizado: bool | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    gps_accuracy_meters: float | None = None
 
 
 class RhFeriasCreateRequest(BaseModel):
@@ -345,6 +358,27 @@ class RhAplicabilidadeResponse(BaseModel):
     valor: str | None = None
 
 
+class RhBeneficioCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nome: str
+    descricao: str | None = None
+
+
+class RhBeneficioUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nome: str | None = None
+    descricao: str | None = None
+
+
+class RhBeneficioResponse(BaseModel):
+    id: UUID
+    nome: str
+    descricao: str | None = None
+    status: StatusBeneficio
+
+
 class RhRegraEncargoCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -511,7 +545,8 @@ class RhPontoDiaDetalheResponse(BaseModel):
     funcionario_nome: str
     funcionario_cpf_mascarado: str
     funcionario_cargo: str
-    status_dia: str
+    status: str
+    local_autorizado_nome: str | None = None
     registros: list[RhRegistroPontoListItem] = Field(default_factory=list)
     locais_autorizados: list[RhLocalPontoResponse] = Field(default_factory=list)
     ajustes_relacionados: list[dict] = Field(default_factory=list)

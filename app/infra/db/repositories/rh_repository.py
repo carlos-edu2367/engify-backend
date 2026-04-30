@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.application.providers.repo.rh_repo import (
     AjustePontoRepository,
     AtestadoRepository,
+    BeneficioRepository,
     FaixaEncargoRepository,
     FeriasRepository,
     FuncionarioRepository,
@@ -29,6 +30,7 @@ from app.application.providers.repo.rh_repo import (
 from app.domain.entities.rh import (
     AjustePonto,
     Atestado,
+    Beneficio,
     FaixaEncargo,
     Ferias,
     Funcionario,
@@ -47,6 +49,7 @@ from app.domain.entities.rh import (
     StatusAtestado,
     StatusFerias,
     StatusHolerite,
+    StatusBeneficio,
     StatusRegraEncargo,
     TabelaProgressiva,
     TipoAtestado,
@@ -55,6 +58,7 @@ from app.domain.errors import DomainError
 from app.infra.db.models.rh_model import (
     AjustePontoModel,
     AtestadoModel,
+    BeneficioModel,
     FaixaEncargoModel,
     FeriasModel,
     FuncionarioModel,
@@ -406,6 +410,49 @@ class LocalPontoRepositoryImpl(_SoftDeleteRepository, LocalPontoRepository):
 
     async def save(self, local_ponto: LocalPonto) -> LocalPonto:
         return await self._save(local_ponto, LocalPontoModel, "Local de ponto nao encontrado para atualizacao")
+
+
+class BeneficioRepositoryImpl(_SoftDeleteRepository, BeneficioRepository):
+    async def get_by_id(self, id: UUID, team_id: UUID) -> Beneficio:
+        return (await self._get_by_id(BeneficioModel, id, team_id, "Beneficio nao encontrado")).to_domain()
+
+    async def get_active_by_nome(self, team_id: UUID, nome: str) -> Beneficio | None:
+        stmt = select(BeneficioModel).where(
+            BeneficioModel.team_id == team_id,
+            func.lower(BeneficioModel.nome) == nome.strip().lower(),
+            BeneficioModel.status == "ativo",
+            BeneficioModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        return model.to_domain() if model else None
+
+    async def list_by_filters(self, team_id: UUID, page: int, limit: int, **filters) -> list[Beneficio]:
+        stmt = self._build_filters(select(BeneficioModel), team_id, **filters)
+        stmt = stmt.order_by(BeneficioModel.nome.asc()).limit(limit).offset((page - 1) * limit)
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def count_by_filters(self, team_id: UUID, **filters) -> int:
+        stmt = self._build_filters(select(func.count()).select_from(BeneficioModel), team_id, **filters)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def save(self, beneficio: Beneficio) -> Beneficio:
+        return await self._save(beneficio, BeneficioModel, "Beneficio nao encontrado para atualizacao")
+
+    def _build_filters(self, stmt, team_id: UUID, **filters):
+        stmt = stmt.where(
+            BeneficioModel.team_id == team_id,
+            BeneficioModel.is_deleted == False,  # noqa: E712
+        )
+        if filters.get("status") is not None:
+            status = filters["status"]
+            stmt = stmt.where(BeneficioModel.status == (status.value if hasattr(status, "value") else str(status)))
+        if filters.get("search"):
+            pattern = f"%{filters['search'].strip()}%"
+            stmt = stmt.where(BeneficioModel.nome.ilike(pattern))
+        return stmt
 
 
 class RegistroPontoRepositoryImpl(_SoftDeleteRepository, RegistroPontoRepository):

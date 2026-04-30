@@ -112,6 +112,40 @@ class _FakeTabelaRepo:
         return tabela
 
 
+class _FakeBeneficioRepo:
+    def __init__(self) -> None:
+        self.items = []
+
+    async def get_by_id(self, id, team_id):
+        for item in self.items:
+            if item.id == id and item.team_id == team_id and not item.is_deleted:
+                return item
+        raise DomainError("Beneficio nao encontrado")
+
+    async def get_active_by_nome(self, team_id, nome):
+        normalized = nome.strip().lower()
+        for item in self.items:
+            status = item.status.value if hasattr(item.status, "value") else item.status
+            if item.team_id == team_id and item.nome.strip().lower() == normalized and status == "ativo" and not item.is_deleted:
+                return item
+        return None
+
+    async def list_by_filters(self, team_id, page, limit, **filters):
+        items = [item for item in self.items if item.team_id == team_id and not item.is_deleted]
+        status = filters.get("status")
+        if status is not None:
+            items = [item for item in items if item.status == status]
+        return items[(page - 1) * limit : page * limit]
+
+    async def count_by_filters(self, team_id, **filters):
+        return len(await self.list_by_filters(team_id, 1, 10_000, **filters))
+
+    async def save(self, beneficio):
+        self.items = [item for item in self.items if item.id != beneficio.id]
+        self.items.append(beneficio)
+        return beneficio
+
+
 class _FakeAuditRepo:
     def __init__(self) -> None:
         self.events: list[RhAuditLog] = []
@@ -150,17 +184,19 @@ def _build_service():
 
     regra_repo = _FakeRegraRepo()
     tabela_repo = _FakeTabelaRepo()
+    beneficio_repo = _FakeBeneficioRepo()
     audit_repo = _FakeAuditRepo()
     cache = _FakeCache()
     uow = _FakeUow()
     service = RhEncargoService(
         regra_repo=regra_repo,
         tabela_repo=tabela_repo,
+        beneficio_repo=beneficio_repo,
         audit_repo=audit_repo,
         uow=uow,
         encargo_cache=cache,
     )
-    return service, regra_repo, tabela_repo, audit_repo, cache, uow
+    return service, regra_repo, tabela_repo, beneficio_repo, audit_repo, cache, uow
 
 
 def _regra_payload(**overrides):
@@ -184,7 +220,7 @@ def _regra_payload(**overrides):
 @pytest.mark.asyncio
 async def test_regra_lifecycle_creates_draft_activates_inactivates_and_versions():
     admin = _make_user()
-    service, regra_repo, _, audit_repo, cache, uow = _build_service()
+    service, regra_repo, _, _, audit_repo, cache, uow = _build_service()
 
     regra = await service.criar_regra(admin, _regra_payload())
     assert regra.status == StatusRegraEncargo.RASCUNHO
@@ -211,7 +247,7 @@ async def test_regra_lifecycle_creates_draft_activates_inactivates_and_versions(
 @pytest.mark.asyncio
 async def test_ativar_regra_rejects_vigencia_conflict_for_same_group_and_scope():
     admin = _make_user()
-    service, regra_repo, _, _, _, _ = _build_service()
+    service, regra_repo, _, _, _, _, _ = _build_service()
     aplicabilidade = RegraEncargoAplicabilidade(team_id=admin.team.id, escopo=EscopoAplicabilidade.TODOS_FUNCIONARIOS)
     active = RegraEncargo(
         team_id=admin.team.id,
@@ -249,8 +285,11 @@ async def test_ativar_regra_rejects_vigencia_conflict_for_same_group_and_scope()
 @pytest.mark.asyncio
 async def test_tabela_progressiva_rejects_empty_and_overlapping_ranges_and_blocks_active_edit():
     admin = _make_user()
-    service, _, tabela_repo, _, _, _ = _build_service()
-    tabela = await service.criar_tabela_progressiva(admin, {"codigo": "INSS_2026", "nome": "INSS 2026"})
+    service, _, tabela_repo, _, _, _, _ = _build_service()
+    tabela = await service.criar_tabela_progressiva(
+        admin,
+        {"codigo": "INSS_2026", "nome": "INSS 2026", "vigencia_inicio": datetime(2026, 1, 1, tzinfo=timezone.utc)},
+    )
 
     with pytest.raises(DomainError, match="ao menos uma faixa"):
         await service.ativar_tabela_progressiva(admin, tabela.id, "Publicar")
@@ -276,3 +315,88 @@ async def test_tabela_progressiva_rejects_empty_and_overlapping_ranges_and_block
     assert activated.status == StatusRegraEncargo.ATIVA
     with pytest.raises(DomainError, match="ativa"):
         await service.atualizar_tabela_progressiva(admin, tabela.id, {"nome": "Novo nome"})
+
+
+@pytest.mark.asyncio
+async def test_beneficio_admin_lifecycle_validates_unique_active_name_and_audits_status_changes():
+    admin = _make_user()
+    service, _, _, beneficio_repo, audit_repo, _, uow = _build_service()
+
+    beneficio = await service.criar_beneficio(
+        admin,
+        {"nome": "Vale transporte", "descricao": "Credito mensal para deslocamento"},
+    )
+
+    assert beneficio.nome == "Vale transporte"
+    assert beneficio.status.value == "ativo"
+    with pytest.raises(DomainError, match="Ja existe"):
+        await service.criar_beneficio(admin, {"nome": " vale transporte "})
+
+    inativo = await service.inativar_beneficio(admin, beneficio.id, "Beneficio substituido")
+    assert inativo.status.value == "inativo"
+    reativado = await service.reativar_beneficio(admin, beneficio.id, "Disponivel novamente")
+    listado, total = await service.listar_beneficios(admin, page=1, limit=20)
+
+    assert reativado.status.value == "ativo"
+    assert total == 1
+    assert listado == [reativado]
+    assert beneficio_repo.items == [reativado]
+    assert [event.action for event in audit_repo.events] == [
+        "rh.beneficio.created",
+        "rh.beneficio.inactivated",
+        "rh.beneficio.reactivated",
+    ]
+    assert all(event.reason for event in audit_repo.events[1:])
+    assert uow.commits == 3
+
+
+@pytest.mark.asyncio
+async def test_beneficio_mutations_require_rh_admin():
+    service, _, _, _, _, _, _ = _build_service()
+    employee = _make_user(Roles.FUNCIONARIO)
+
+    with pytest.raises(DomainError, match="Acesso restrito"):
+        await service.criar_beneficio(employee, {"nome": "Vale refeicao"})
+
+
+@pytest.mark.asyncio
+async def test_regra_validates_percentual_safe_range_and_update_vigencia():
+    admin = _make_user()
+    service, _, _, _, _, _, _ = _build_service()
+
+    with pytest.raises(DomainError, match="Percentual"):
+        await service.criar_regra(admin, _regra_payload(percentual=Decimal("150.00")))
+
+    regra = await service.criar_regra(admin, _regra_payload())
+    with pytest.raises(DomainError, match="Vigencia final"):
+        await service.atualizar_regra(
+            admin,
+            regra.id,
+            {
+                "vigencia_inicio": datetime(2026, 12, 1, tzinfo=timezone.utc),
+                "vigencia_fim": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_tabela_progressiva_requires_safe_aliquota_and_vigencia_to_activate():
+    admin = _make_user()
+    service, _, _, _, _, _, _ = _build_service()
+    tabela = await service.criar_tabela_progressiva(admin, {"codigo": "IRRF_2026", "nome": "IRRF 2026"})
+
+    with pytest.raises(DomainError, match="Aliquota"):
+        await service.substituir_faixas_tabela(
+            admin,
+            tabela.id,
+            [{"ordem": 1, "valor_inicial": Decimal("0.00"), "valor_final": None, "aliquota": Decimal("120.00")}],
+        )
+
+    await service.substituir_faixas_tabela(
+        admin,
+        tabela.id,
+        [{"ordem": 1, "valor_inicial": Decimal("0.00"), "valor_final": None, "aliquota": Decimal("27.50")}],
+    )
+
+    with pytest.raises(DomainError, match="vigencia inicial"):
+        await service.ativar_tabela_progressiva(admin, tabela.id, "Publicar")

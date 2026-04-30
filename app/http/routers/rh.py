@@ -27,7 +27,7 @@ from app.application.dtos.rh import (
 )
 from app.application.services.rh_ponto_service import RequestContext, hash_ip
 from app.application.providers.utility.storage_provider import DirectUploadRequest
-from app.domain.entities.rh import AjustePonto, Atestado, FaixaEncargo, Ferias, Funcionario, Holerite, HoleriteItem, HorarioTrabalho, LocalPonto, RegistroPonto, RegraEncargo, RhFolhaJob, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, StatusRegraEncargo, TabelaProgressiva, TipoAtestado
+from app.domain.entities.rh import AjustePonto, Atestado, Beneficio, FaixaEncargo, Ferias, Funcionario, Holerite, HoleriteItem, HorarioTrabalho, LocalPonto, RegistroPonto, RegraEncargo, RhFolhaJob, StatusAjuste, StatusAtestado, StatusBeneficio, StatusFerias, StatusHolerite, StatusPonto, StatusRegraEncargo, TabelaProgressiva, TipoAtestado
 from app.domain.errors import DomainError
 from app.http.dependencies.auth import CurrentUser, FuncionarioUser, RHAdminUser
 from app.http.dependencies.pagination import Pagination
@@ -57,6 +57,9 @@ from app.http.schemas.rh import (
     RhAtestadoUploadUrlRequest,
     RhAtestadoUploadUrlResponse,
     RhAuditLogResponse,
+    RhBeneficioCreateRequest,
+    RhBeneficioResponse,
+    RhBeneficioUpdateRequest,
     RhDashboardSummaryResponse,
     RhFecharFolhaRequest,
     RhFeriasCreateRequest,
@@ -86,6 +89,7 @@ from app.http.schemas.rh import (
     RhTipoAtestadoResponse,
     RhTipoAtestadoUpdateRequest,
     RhTurnoHorarioResponse,
+    RhUsuarioVinculadoResponse,
 )
 
 
@@ -237,6 +241,7 @@ def _to_funcionario_list_item(funcionario: Funcionario) -> RhFuncionarioListItem
 
 
 def _to_funcionario_response(funcionario: Funcionario) -> RhFuncionarioResponse:
+    usuario_vinculado = getattr(funcionario, "usuario_vinculado", None)
     return RhFuncionarioResponse(
         id=funcionario.id,
         nome=funcionario.nome,
@@ -246,6 +251,15 @@ def _to_funcionario_response(funcionario: Funcionario) -> RhFuncionarioResponse:
         salario_base=funcionario.salario_base.amount,
         data_admissao=funcionario.data_admissao.date(),
         user_id=funcionario.user_id,
+        usuario_vinculado=(
+            RhUsuarioVinculadoResponse(
+                nome=usuario_vinculado.nome,
+                email=usuario_vinculado.email,
+                avatar_url=getattr(usuario_vinculado, "avatar_url", None),
+            )
+            if usuario_vinculado is not None
+            else None
+        ),
         is_active=funcionario.is_active,
         horario_trabalho=(
             _to_horario_response(funcionario.horario_trabalho)
@@ -296,6 +310,11 @@ def _to_registro_item(registro: RegistroPonto) -> RhRegistroPontoListItem:
         timestamp=registro.timestamp,
         status=registro.status,
         local_ponto_id=registro.local_ponto_id,
+        local_ponto_nome=getattr(registro, "local_ponto_nome", None),
+        fora_local_autorizado=getattr(registro, "fora_local_autorizado", None),
+        latitude=registro.latitude,
+        longitude=registro.longitude,
+        gps_accuracy_meters=registro.gps_accuracy_meters,
     )
 
 
@@ -401,6 +420,15 @@ def _to_aplicabilidade_response(item) -> RhAplicabilidadeResponse:
     return RhAplicabilidadeResponse(id=getattr(item, "id", None), escopo=item.escopo, valor=item.valor)
 
 
+def _to_beneficio_response(beneficio: Beneficio) -> RhBeneficioResponse:
+    return RhBeneficioResponse(
+        id=beneficio.id,
+        nome=beneficio.nome,
+        descricao=beneficio.descricao,
+        status=beneficio.status,
+    )
+
+
 def _to_regra_encargo_response(regra: RegraEncargo) -> RhRegraEncargoResponse:
     return RhRegraEncargoResponse(
         id=regra.id,
@@ -502,6 +530,8 @@ def _mask_cpf(cpf: str) -> str:
 def _map_rh_error(exc: DomainError) -> HTTPException:
     detail = getattr(exc, "detail", str(exc))
     lowered = detail.lower()
+    if any(marker in lowered for marker in ("sql", "constraint", "traceback", "psycopg", "integrityerror")):
+        return HTTPException(status_code=400, detail="Nao foi possivel concluir a operacao. Revise os dados informados.")
     if "nao encontrado" in lowered:
         return HTTPException(status_code=404, detail=detail)
     if "ja existe" in lowered or "ja esta vinculado" in lowered:
@@ -609,6 +639,62 @@ async def list_regras_encargo(
         limit=pagination.limit,
         total=total,
     )
+
+
+@router.get("/beneficios", response_model=PaginatedResponse[RhBeneficioResponse])
+async def list_beneficios(
+    user: RHAdminUser,
+    pagination: Pagination,
+    svc: RhEncargoServiceDep,
+    status: StatusBeneficio | None = Query(default=None),
+    search: str | None = Query(default=None),
+):
+    try:
+        items, total = await svc.listar_beneficios(user, pagination.page, pagination.limit, status=status, search=search)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return PaginatedResponse.build(
+        items=[_to_beneficio_response(item) for item in items],
+        page=pagination.page,
+        limit=pagination.limit,
+        total=total,
+    )
+
+
+@router.post("/beneficios", response_model=RhBeneficioResponse, status_code=201)
+async def create_beneficio(body: RhBeneficioCreateRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        beneficio = await svc.criar_beneficio(user, body)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_beneficio_response(beneficio)
+
+
+@router.patch("/beneficios/{beneficio_id}", response_model=RhBeneficioResponse)
+async def update_beneficio(beneficio_id: UUID, body: RhBeneficioUpdateRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        beneficio = await svc.atualizar_beneficio(user, beneficio_id, body)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_beneficio_response(beneficio)
+
+
+@router.post("/beneficios/{beneficio_id}/inativar", response_model=RhBeneficioResponse)
+async def inativar_beneficio(beneficio_id: UUID, body: RhMotivoRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        beneficio = await svc.inativar_beneficio(user, beneficio_id, body.motivo)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_beneficio_response(beneficio)
+
+
+@router.post("/beneficios/{beneficio_id}/reativar", response_model=RhBeneficioResponse)
+async def reativar_beneficio(beneficio_id: UUID, body: RhMotivoRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        beneficio = await svc.reativar_beneficio(user, beneficio_id, body.motivo)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_beneficio_response(beneficio)
 
 
 @router.post("/encargos/regras", response_model=RhRegraEncargoResponse, status_code=201)
@@ -897,7 +983,8 @@ async def get_ponto_dia(funcionario_id: UUID, data: date, user: RHAdminUser, svc
         funcionario_nome=funcionario.nome,
         funcionario_cpf_mascarado=_mask_cpf(funcionario.cpf.value),
         funcionario_cargo=funcionario.cargo,
-        status_dia=detail["status_dia"],
+        status=detail.get("status", detail.get("status_dia")),
+        local_autorizado_nome=detail.get("local_autorizado_nome"),
         registros=[_to_registro_item(item) for item in detail["registros"]],
         locais_autorizados=[_to_local_response(item) for item in detail["locais_autorizados"]],
         ajustes_relacionados=detail["ajustes_relacionados"],

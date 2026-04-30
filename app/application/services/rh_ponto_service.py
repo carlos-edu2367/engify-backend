@@ -308,11 +308,14 @@ class RhPontoService:
         day_end = datetime.combine(data, time.max, tzinfo=timezone.utc)
         registros = await self.registro_ponto_repo.list_by_funcionario_day(current_user.team.id, funcionario.id, day_start, day_end)
         locais = await self.local_ponto_repo.list_by_funcionario(current_user.team.id, funcionario.id)
+        self._enrich_registros_with_locais(registros, locais)
         status_dia = self._status_dia(registros)
         return {
             "funcionario": funcionario,
             "registros": registros,
+            "status": status_dia,
             "status_dia": status_dia,
+            "local_autorizado_nome": self._first_matched_local_nome(registros, locais),
             "locais_autorizados": locais,
             "ajustes_relacionados": [],
             "impacto_estimado": self._impacto_estimado(registros),
@@ -364,6 +367,28 @@ class RhPontoService:
             if distance <= local.raio_metros:
                 return local
         return None
+
+    def _enrich_registros_with_locais(self, registros: list[RegistroPonto], locais: list[LocalPonto]) -> None:
+        locais_by_id = {local.id: local for local in locais}
+        for registro in registros:
+            local = locais_by_id.get(registro.local_ponto_id)
+            registro.local_ponto_nome = local.nome if local else None
+            registro.fora_local_autorizado = self._is_fora_local_autorizado(registro, locais)
+
+    def _is_fora_local_autorizado(self, registro: RegistroPonto, locais: list[LocalPonto]) -> bool:
+        if registro.status == StatusPonto.NEGADO and registro.denial_reason == "outside_geofence":
+            return True
+        if not locais:
+            return False
+        return self._match_local(locais, registro.latitude, registro.longitude) is None
+
+    def _first_matched_local_nome(self, registros: list[RegistroPonto], locais: list[LocalPonto]) -> str | None:
+        locais_by_id = {local.id: local for local in locais}
+        for registro in registros:
+            local = locais_by_id.get(registro.local_ponto_id)
+            if local is not None:
+                return local.nome
+        return locais[0].nome if len(locais) == 1 else None
 
     def _is_inconsistent(self, tipo: TipoPonto, last_on_day: RegistroPonto | None) -> bool:
         if last_on_day is None:

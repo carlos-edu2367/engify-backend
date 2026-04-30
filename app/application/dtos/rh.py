@@ -49,14 +49,14 @@ class CreateLocalPontoDTO(BaseModel):
     nome: str
     latitude: float
     longitude: float
-    raio_metros: float = Field(default=100)
+    raio_metros: float = Field(default=100, ge=20, le=1000)
 
 
 class UpdateLocalPontoDTO(BaseModel):
     nome: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    raio_metros: Optional[float] = None
+    raio_metros: Optional[float] = Field(default=None, ge=20, le=1000)
 
 
 class RegistrarPontoDTO(BaseModel):

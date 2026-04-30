@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
 
@@ -16,6 +17,13 @@ from app.domain.entities.money import Money
 from app.domain.entities.rh import Funcionario, HorarioTrabalho, IntervaloHorario, RhAuditLog, RhSalarioHistorico, TurnoHorario
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
+
+
+@dataclass(frozen=True)
+class UsuarioVinculadoSeguro:
+    nome: str
+    email: str
+    avatar_url: str | None = None
 
 
 class RhFuncionarioService:
@@ -83,12 +91,14 @@ class RhFuncionarioService:
         team_id = current_user.team.id
         items = await self.funcionario_repo.list_by_team(team_id, page, limit, search=search, is_active=is_active)
         total = await self.funcionario_repo.count_by_team(team_id, search=search, is_active=is_active)
+        await self._attach_usuarios_vinculados(team_id, items)
         return items, total
 
     async def get_funcionario(self, funcionario_id: UUID, current_user: User) -> Funcionario:
         self._ensure_rh_admin(current_user)
         funcionario = await self.funcionario_repo.get_by_id(funcionario_id, current_user.team.id)
         funcionario.horario_trabalho = await self.horario_repo.get_by_funcionario_id(current_user.team.id, funcionario.id)
+        funcionario.usuario_vinculado = await self._load_usuario_vinculado(current_user.team.id, funcionario.user_id)
         return funcionario
 
     async def update_funcionario(
@@ -153,6 +163,7 @@ class RhFuncionarioService:
         )
         await self.uow.commit()
         saved.horario_trabalho = await self.horario_repo.get_by_funcionario_id(team_id, saved.id)
+        saved.usuario_vinculado = await self._load_usuario_vinculado(team_id, saved.user_id)
         return saved
 
     async def delete_funcionario(
@@ -255,6 +266,40 @@ class RhFuncionarioService:
         linked = await self.funcionario_repo.get_by_user_id(team_id, user_id)
         if linked and linked.id != existing_funcionario_id:
             raise DomainError("Este usuario ja esta vinculado a outro funcionario ativo")
+
+    async def _attach_usuarios_vinculados(self, team_id: UUID, funcionarios: list[Funcionario]) -> None:
+        linked_user_ids = {funcionario.user_id for funcionario in funcionarios if funcionario.user_id is not None}
+        if not linked_user_ids:
+            for funcionario in funcionarios:
+                funcionario.usuario_vinculado = None
+            return
+        users = await self.user_repo.get_by_team_id(team_id)
+        users_by_id = {user.user_id: user for user in users}
+        for funcionario in funcionarios:
+            user = users_by_id.get(funcionario.user_id)
+            funcionario.usuario_vinculado = self._to_usuario_vinculado(user) if user else None
+
+    async def _load_usuario_vinculado(self, team_id: UUID, user_id: UUID | None) -> UsuarioVinculadoSeguro | None:
+        if user_id is None:
+            return None
+        try:
+            user = await self.user_repo.get_by_id(user_id)
+        except DomainError:
+            return None
+        if user.team.id != team_id:
+            return None
+        return UsuarioVinculadoSeguro(
+            nome=user.nome,
+            email=user.email,
+            avatar_url=getattr(user, "avatar_url", None),
+        )
+
+    def _to_usuario_vinculado(self, user) -> UsuarioVinculadoSeguro:
+        return UsuarioVinculadoSeguro(
+            nome=user.nome,
+            email=user.email,
+            avatar_url=getattr(user, "avatar_url", None),
+        )
 
     def _build_turnos(self, turnos_dto) -> list[TurnoHorario]:
         return [
