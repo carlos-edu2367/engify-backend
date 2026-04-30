@@ -27,7 +27,7 @@ _COOKIE_MAX_AGE = settings.refresh_token_expire_days * 24 * 60 * 60
 
 
 def _refresh_cookie_path() -> str:
-    return f"{settings.api_prefix}/auth"
+    return "/"
 
 
 def _refresh_cookie_samesite() -> str:
