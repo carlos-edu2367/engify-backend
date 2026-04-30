@@ -298,6 +298,15 @@ class _FakeDashboardService:
             raise self.error
         return self.resumo
 
+    async def obter_meu_vinculo(self, current_user):
+        if self.error:
+            raise self.error
+        return {
+            "vinculado": True,
+            "funcionario_id": str(uuid4()),
+            "funcionario_nome": "Ana Souza",
+        }
+
     async def listar_audit_logs(self, current_user, page, limit, filters):
         if self.error:
             raise self.error
@@ -345,7 +354,7 @@ class _FakeStorageProvider:
         return f"https://signed.example/{path}?expires_in={expires_in}"
 
 
-def _make_funcionario(team_id):
+def _make_funcionario(team_id, user_id=None):
     funcionario = Funcionario(
         team_id=team_id,
         nome="Ana Souza",
@@ -353,6 +362,7 @@ def _make_funcionario(team_id):
         cargo="Analista",
         salario_base=Money(Decimal("4500.00")),
         data_admissao=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        user_id=user_id,
     )
     funcionario.horario_trabalho = HorarioTrabalho(
         team_id=team_id,
@@ -635,7 +645,7 @@ def test_post_rh_ponto_route_returns_400_for_geofence_denial():
     assert response.status_code == 400
 
 
-def test_get_meu_ponto_route_returns_403_for_admin():
+def test_get_meu_ponto_route_accepts_admin_with_employee_link():
     admin = _make_user(Roles.ADMIN)
     client = _build_client(
         admin,
@@ -645,7 +655,8 @@ def test_get_meu_ponto_route_returns_403_for_admin():
 
     response = client.get("/rh/me/ponto")
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
 
 
 def test_list_meu_ponto_route_accepts_period_and_status_filters():
@@ -836,7 +847,7 @@ def test_list_folha_route_returns_holerites_for_rh_admin():
     assert response.json()["items"][0]["valor_liquido"] == "4645.00"
 
 
-def test_get_meu_holerite_route_returns_403_for_admin():
+def test_get_meu_holerite_route_accepts_admin_with_employee_link():
     admin = _make_user(Roles.ADMIN)
     funcionario = _make_funcionario(admin.team.id)
     holerite = _make_holerite(admin.team.id, funcionario.id)
@@ -848,7 +859,8 @@ def test_get_meu_holerite_route_returns_403_for_admin():
 
     response = client.get(f"/rh/me/holerites/{holerite.id}")
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["id"] == str(holerite.id)
 
 
 def test_get_dashboard_route_returns_summary_for_rh_admin():
@@ -923,6 +935,44 @@ def test_get_meu_resumo_route_returns_200_for_funcionario():
     assert response.status_code == 200
     assert response.json()["ajustes_pendentes"] == 1
     assert response.json()["ultimo_holerite_fechado"]["status"] == "fechado"
+
+
+def test_get_meu_resumo_route_accepts_admin_with_employee_link():
+    admin = _make_user(Roles.ADMIN)
+    client = _build_client(
+        admin,
+        _FakeRhService(funcionario=_make_funcionario(admin.team.id, user_id=admin.id)),
+        dashboard_service=_FakeDashboardService(
+            resumo={
+                "ultimo_ponto": None,
+                "ajustes_pendentes": 0,
+                "ferias_pendentes": 0,
+                "atestados_pendentes": 0,
+                "ultimo_holerite_fechado": None,
+            }
+        ),
+    )
+
+    response = client.get("/rh/me/resumo")
+
+    assert response.status_code == 200
+    assert response.json()["ajustes_pendentes"] == 0
+
+
+def test_get_meu_vinculo_route_returns_authenticated_user_employee_link():
+    admin = _make_user(Roles.ADMIN)
+    client = _build_client(
+        admin,
+        _FakeRhService(funcionario=_make_funcionario(admin.team.id, user_id=admin.id)),
+        dashboard_service=_FakeDashboardService(),
+    )
+
+    response = client.get("/rh/me/vinculo")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["vinculado"] is True
+    assert payload["funcionario_nome"] == "Ana Souza"
 
 
 def test_get_audit_logs_route_returns_paginated_response_for_admin():

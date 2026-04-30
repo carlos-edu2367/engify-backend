@@ -416,6 +416,38 @@ async def test_registrar_ponto_without_geofence_creates_validado():
 
 
 @pytest.mark.asyncio
+async def test_registrar_ponto_accepts_admin_when_linked_to_funcionario():
+    from app.application.services.rh_ponto_service import RegistrarPontoDTO, RequestContext, RhPontoService
+
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id, user_id=current_user.id)
+    registro_repo = _FakeRegistroPontoRepo()
+    service = RhPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo(),
+        registro_ponto_repo=registro_repo,
+        audit_repo=_FakeAuditRepo(),
+        geofence_cache=_FakeGeofenceCache(),
+        idempotency_repo=None,
+        uow=_FakeUow(),
+    )
+
+    registro = await service.registrar_ponto(
+        RegistrarPontoDTO(
+            tipo=TipoPonto.ENTRADA,
+            latitude=-16.6869,
+            longitude=-49.2648,
+            client_timestamp=datetime(2026, 4, 28, 8, 0, tzinfo=timezone.utc),
+        ),
+        current_user,
+        RequestContext(request_id="req-1", ip_hash="iphash", user_agent="pytest", idempotency_key=None),
+    )
+
+    assert registro.status == StatusPonto.VALIDADO
+    assert registro.funcionario_id == funcionario.id
+
+
+@pytest.mark.asyncio
 async def test_registrar_ponto_outside_geofence_persists_negado_and_raises():
     from app.application.services.rh_ponto_service import RegistrarPontoDTO, RequestContext, RhPontoService
 
@@ -545,6 +577,38 @@ async def test_list_meus_pontos_returns_full_total_not_only_current_page():
 
     assert len(items) == 2
     assert total == 3
+
+
+@pytest.mark.asyncio
+async def test_list_meus_pontos_accepts_admin_when_linked_to_funcionario():
+    from app.application.services.rh_ponto_service import RhPontoService
+
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id, user_id=current_user.id)
+    registros = [
+        RegistroPonto(
+            team_id=current_user.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.ENTRADA,
+            timestamp=datetime(2026, 4, 28, 8, 0, tzinfo=timezone.utc),
+            latitude=-16.6869,
+            longitude=-49.2648,
+        )
+    ]
+    service = RhPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo(),
+        registro_ponto_repo=_FakeRegistroPontoRepo(registros),
+        audit_repo=_FakeAuditRepo(),
+        geofence_cache=_FakeGeofenceCache(),
+        idempotency_repo=None,
+        uow=_FakeUow(),
+    )
+
+    items, total = await service.list_meus_pontos(current_user, page=1, limit=10)
+
+    assert len(items) == 1
+    assert total == 1
 
 
 @pytest.mark.asyncio

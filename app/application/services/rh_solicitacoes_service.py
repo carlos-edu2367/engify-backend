@@ -241,7 +241,6 @@ class RhSolicitacoesService:
         return saved
 
     async def list_tipos_atestado(self, current_user: User, page: int, limit: int):
-        self._ensure_authenticated_rh_or_employee(current_user)
         items = await self.tipo_atestado_repo.list_active(current_user.team.id, page, limit)
         total = await self.tipo_atestado_repo.count_active(current_user.team.id)
         return items, total
@@ -397,16 +396,12 @@ class RhSolicitacoesService:
         if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
             raise DomainError("Acesso restrito ao RH")
 
-    def _ensure_authenticated_rh_or_employee(self, current_user: User) -> None:
-        if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO, Roles.FUNCIONARIO}:
-            raise DomainError("Acesso restrito ao RH")
-
     async def _resolve_funcionario_for_request(self, funcionario_id: UUID | None, current_user: User):
-        if current_user.role == Roles.FUNCIONARIO:
+        if current_user.role in {Roles.ADMIN, Roles.FINANCEIRO} and funcionario_id is not None:
+            return await self.funcionario_repo.get_by_id(funcionario_id, current_user.team.id)
+        if funcionario_id is None or current_user.role == Roles.FUNCIONARIO:
             return await self._get_current_funcionario(current_user)
         self._ensure_rh_admin(current_user)
-        if funcionario_id is None:
-            raise DomainError("Funcionario e obrigatorio")
         return await self.funcionario_repo.get_by_id(funcionario_id, current_user.team.id)
 
     async def _get_current_funcionario(self, current_user: User):

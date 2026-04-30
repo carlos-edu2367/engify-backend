@@ -107,10 +107,9 @@ class RhDashboardService:
         )
 
     async def obter_meu_resumo(self, current_user: User) -> RhMeResumoDTO:
-        self._ensure_funcionario(current_user)
         team_id = current_user.team.id
         funcionario = await self.funcionario_repo.get_by_user_id(team_id, current_user.id)
-        if funcionario is None or funcionario.is_deleted:
+        if funcionario is None or funcionario.is_deleted or not funcionario.is_active:
             raise DomainError("Funcionario vinculado nao encontrado")
 
         start = datetime(2000, 1, 1, tzinfo=timezone.utc)
@@ -182,6 +181,16 @@ class RhDashboardService:
             ),
         )
 
+    async def obter_meu_vinculo(self, current_user: User) -> dict:
+        funcionario = await self.funcionario_repo.get_by_user_id(current_user.team.id, current_user.id)
+        if funcionario is None or funcionario.is_deleted or not funcionario.is_active:
+            return {"vinculado": False, "funcionario_id": None, "funcionario_nome": None}
+        return {
+            "vinculado": True,
+            "funcionario_id": str(funcionario.id),
+            "funcionario_nome": funcionario.nome,
+        }
+
     async def listar_audit_logs(
         self,
         current_user: User,
@@ -243,10 +252,6 @@ class RhDashboardService:
     def _ensure_rh_admin(self, current_user: User) -> None:
         if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
             raise DomainError("Acesso restrito ao RH")
-
-    def _ensure_funcionario(self, current_user: User) -> None:
-        if current_user.role != Roles.FUNCIONARIO:
-            raise DomainError("Acesso restrito a funcionarios")
 
     def _validate_competencia(self, mes: int, ano: int) -> None:
         if mes < 1 or mes > 12:

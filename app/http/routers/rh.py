@@ -29,7 +29,7 @@ from app.application.services.rh_ponto_service import RequestContext, hash_ip
 from app.application.providers.utility.storage_provider import DirectUploadRequest
 from app.domain.entities.rh import AjustePonto, Atestado, Beneficio, FaixaEncargo, Ferias, Funcionario, Holerite, HoleriteItem, HorarioTrabalho, LocalPonto, RegistroPonto, RegraEncargo, RhFolhaJob, StatusAjuste, StatusAtestado, StatusBeneficio, StatusFerias, StatusHolerite, StatusPonto, StatusRegraEncargo, TabelaProgressiva, TipoAtestado
 from app.domain.errors import DomainError
-from app.http.dependencies.auth import CurrentUser, FuncionarioUser, RHAdminUser
+from app.http.dependencies.auth import CurrentUser, RHAdminUser
 from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import RhDashboardServiceDep, RhEncargoServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
 from app.http.schemas.common import MessageResponse, PaginatedResponse
@@ -72,6 +72,7 @@ from app.http.schemas.rh import (
     RhHoleriteAjustesRequest,
     RhHoleriteResponse,
     RhMeResumoResponse,
+    RhMeVinculoResponse,
     RhMotivoRequest,
     RhPontoDiaDetalheResponse,
     RhRegraEncargoCreateRequest,
@@ -574,12 +575,18 @@ async def get_dashboard(
 
 @router.get("/me/resumo", response_model=RhMeResumoResponse)
 @limiter.limit("30/minute")
-async def get_meu_resumo(request: Request, user: FuncionarioUser, svc: RhDashboardServiceDep):
+async def get_meu_resumo(request: Request, user: CurrentUser, svc: RhDashboardServiceDep):
     try:
         summary = await svc.obter_meu_resumo(user)
     except DomainError as exc:
         raise _map_rh_error(exc)
     return _to_me_resumo_response(summary)
+
+
+@router.get("/me/vinculo", response_model=RhMeVinculoResponse)
+@limiter.limit("30/minute")
+async def get_meu_vinculo(request: Request, user: CurrentUser, svc: RhDashboardServiceDep):
+    return RhMeVinculoResponse(**await svc.obter_meu_vinculo(user))
 
 
 @router.get("/audit-logs", response_model=PaginatedResponse[RhAuditLogResponse])
@@ -900,7 +907,7 @@ async def delete_local_ponto(
 async def registrar_ponto(
     body: RhPontoCreateRequest,
     request: Request,
-    user: FuncionarioUser,
+    user: CurrentUser,
     svc: RhPontoServiceDep,
 ):
     try:
@@ -1013,7 +1020,7 @@ async def get_ponto_registro(registro_id: UUID, user: RHAdminUser, svc: RhPontoS
 
 @router.get("/me/ponto", response_model=PaginatedResponse[RhRegistroPontoListItem])
 async def list_meus_pontos(
-    user: FuncionarioUser,
+    user: CurrentUser,
     pagination: Pagination,
     svc: RhPontoServiceDep,
     start: datetime | None = Query(default=None),
@@ -1479,7 +1486,7 @@ async def fechar_folha(
 
 @router.get("/me/holerites", response_model=PaginatedResponse[RhHoleriteResponse])
 async def list_meus_holerites(
-    user: FuncionarioUser,
+    user: CurrentUser,
     pagination: Pagination,
     svc: RhFolhaServiceDep,
 ):
@@ -1496,7 +1503,7 @@ async def list_meus_holerites(
 
 
 @router.get("/me/holerites/{holerite_id}", response_model=RhHoleriteResponse)
-async def get_meu_holerite(holerite_id: UUID, user: FuncionarioUser, svc: RhFolhaServiceDep):
+async def get_meu_holerite(holerite_id: UUID, user: CurrentUser, svc: RhFolhaServiceDep):
     try:
         holerite = await svc.obter_meu_holerite(holerite_id, user)
     except DomainError as exc:
@@ -1505,7 +1512,7 @@ async def get_meu_holerite(holerite_id: UUID, user: FuncionarioUser, svc: RhFolh
 
 
 @router.get("/me/holerites/{holerite_id}/itens", response_model=list[RhHoleriteItemResponse])
-async def list_meu_holerite_itens(holerite_id: UUID, user: FuncionarioUser, svc: RhFolhaServiceDep):
+async def list_meu_holerite_itens(holerite_id: UUID, user: CurrentUser, svc: RhFolhaServiceDep):
     try:
         itens = await svc.listar_itens_holerite(user, holerite_id)
     except DomainError as exc:

@@ -261,6 +261,25 @@ async def test_funcionario_requests_ferias_for_self_and_audits():
 
 
 @pytest.mark.asyncio
+async def test_admin_linked_to_funcionario_requests_ferias_for_self_without_funcionario_id():
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id, user_id=current_user.id)
+    service = _make_service(funcionario)
+
+    ferias = await service.request_ferias(
+        CreateFeriasDTO(
+            funcionario_id=None,
+            data_inicio=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            data_fim=datetime(2026, 5, 10, tzinfo=timezone.utc),
+        ),
+        current_user,
+    )
+
+    assert ferias.funcionario_id == funcionario.id
+    assert ferias.status == StatusFerias.SOLICITADO
+
+
+@pytest.mark.asyncio
 async def test_approve_ferias_revalidates_overlap():
     admin = _make_user(Roles.ADMIN)
     funcionario = _make_funcionario(admin.team.id)

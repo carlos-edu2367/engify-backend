@@ -196,6 +196,8 @@ class _FuncionarioStub:
         self.id = uuid4()
         self.team_id = team_id
         self.user_id = user_id
+        self.nome = "Ana Souza"
+        self.is_active = True
         self.is_deleted = False
 
 
@@ -244,6 +246,52 @@ async def test_obter_meu_resumo_resolves_current_employee_only():
     assert resumo.ajustes_pendentes == 1
     assert resumo.ultimo_holerite_fechado is not None
     assert resumo.ultimo_holerite_fechado.status == StatusHolerite.FECHADO
+
+
+@pytest.mark.asyncio
+async def test_obter_meu_resumo_accepts_admin_when_linked_to_funcionario():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _FuncionarioStub(admin.team.id, admin.id)
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    resumo = await service.obter_meu_resumo(admin)
+
+    assert resumo.ajustes_pendentes == 1
+    assert resumo.ultimo_ponto is not None
+
+
+@pytest.mark.asyncio
+async def test_obter_meu_vinculo_returns_link_status_for_current_user():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _FuncionarioStub(admin.team.id, admin.id)
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    vinculo = await service.obter_meu_vinculo(admin)
+
+    assert vinculo["vinculado"] is True
+    assert vinculo["funcionario_id"] == str(funcionario.id)
 
 
 @pytest.mark.asyncio

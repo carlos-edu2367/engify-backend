@@ -183,7 +183,6 @@ class RhPontoService:
         current_user: User,
         request_context: RequestContext,
     ) -> RegistroPonto:
-        self._ensure_funcionario(current_user)
         funcionario = await self.funcionario_repo.get_by_user_id(current_user.team.id, current_user.id)
         if funcionario is None or not funcionario.is_active or funcionario.is_deleted:
             raise DomainError("Funcionario vinculado nao encontrado")
@@ -273,9 +272,8 @@ class RhPontoService:
         return items, total
 
     async def list_meus_pontos(self, current_user: User, page: int, limit: int, start=None, end=None, status=None):
-        self._ensure_funcionario(current_user)
         funcionario = await self.funcionario_repo.get_by_user_id(current_user.team.id, current_user.id)
-        if funcionario is None:
+        if funcionario is None or not funcionario.is_active or funcionario.is_deleted:
             raise DomainError("Funcionario vinculado nao encontrado")
         start = start or datetime.min.replace(tzinfo=timezone.utc)
         end = end or datetime.max.replace(tzinfo=timezone.utc)
@@ -334,10 +332,6 @@ class RhPontoService:
             "local_ponto": local,
             "auditoria_resumida": [],
         }
-
-    def _ensure_funcionario(self, current_user: User) -> None:
-        if current_user.role != Roles.FUNCIONARIO:
-            raise DomainError("Acesso restrito a funcionarios")
 
     async def _ensure_not_replayed(self, team_id: UUID, funcionario_id: UUID, tipo: TipoPonto, key: str | None) -> None:
         if not key or self.idempotency_repo is None:

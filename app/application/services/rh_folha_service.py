@@ -446,18 +446,16 @@ class RhFolhaService:
         return closed
 
     async def listar_meus_holerites(self, current_user: User, page: int, limit: int):
-        self._ensure_funcionario(current_user)
         funcionario = await self.funcionario_repo.get_by_user_id(current_user.team.id, current_user.id)
-        if funcionario is None or funcionario.is_deleted:
+        if funcionario is None or funcionario.is_deleted or not funcionario.is_active:
             raise DomainError("Funcionario vinculado nao encontrado")
         items = await self.holerite_repo.list_by_funcionario(current_user.team.id, funcionario.id, page, limit)
         total = await self.holerite_repo.count_by_funcionario(current_user.team.id, funcionario.id)
         return items, total
 
     async def obter_meu_holerite(self, holerite_id: UUID, current_user: User) -> Holerite:
-        self._ensure_funcionario(current_user)
         funcionario = await self.funcionario_repo.get_by_user_id(current_user.team.id, current_user.id)
-        if funcionario is None or funcionario.is_deleted:
+        if funcionario is None or funcionario.is_deleted or not funcionario.is_active:
             raise DomainError("Funcionario vinculado nao encontrado")
         holerite = await self.holerite_repo.get_by_id(holerite_id, current_user.team.id)
         if holerite.funcionario_id != funcionario.id:
@@ -758,10 +756,6 @@ class RhFolhaService:
     def _ensure_rh_admin(self, current_user: User) -> None:
         if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
             raise DomainError("Acesso restrito ao RH")
-
-    def _ensure_funcionario(self, current_user: User) -> None:
-        if current_user.role != Roles.FUNCIONARIO:
-            raise DomainError("Acesso restrito a funcionarios")
 
     async def _obter_holerite_autorizado(self, current_user: User, holerite_id: UUID) -> Holerite:
         if current_user.role in {Roles.ADMIN, Roles.FINANCEIRO}:

@@ -590,6 +590,12 @@ class RhMeResumoResponse(BaseModel):
     ultimo_holerite_fechado: RhUltimoHoleriteResumoResponse | None = None
 
 
+class RhMeVinculoResponse(BaseModel):
+    vinculado: bool
+    funcionario_id: UUID | None = None
+    funcionario_nome: str | None = None
+
+
 class RhAuditLogResponse(BaseModel):
     id: UUID
     entity_type: str

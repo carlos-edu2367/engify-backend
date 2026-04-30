@@ -203,6 +203,20 @@ class _FakeHoleriteRepo:
         ]
         return items[:limit]
 
+    async def list_by_funcionario(self, team_id, funcionario_id, page, limit):
+        items = [
+            item
+            for item in self.holerites
+            if item.team_id == team_id
+            and item.funcionario_id == funcionario_id
+            and not item.is_deleted
+        ]
+        return items[(page - 1) * limit : page * limit]
+
+    async def count_by_funcionario(self, team_id, funcionario_id):
+        items = await self.list_by_funcionario(team_id, funcionario_id, page=1, limit=1000)
+        return len(items)
+
     async def save(self, holerite):
         self.holerites = [item for item in self.holerites if item.id != holerite.id]
         self.holerites.append(holerite)
@@ -363,6 +377,55 @@ def _build_service(funcionarios, horarios, registros=None, ferias_items=None, ho
     service.folha_queue = job_queue
     service.encargo_cache = encargo_cache
     return service
+
+
+@pytest.mark.asyncio
+async def test_listar_meus_holerites_accepts_admin_when_linked_to_funcionario():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id, user_id=admin.id)
+    holerite = Holerite(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        mes_referencia=4,
+        ano_referencia=2026,
+        salario_base=Money(Decimal("2200.00")),
+        horas_extras=Money(Decimal("0.00")),
+        descontos_falta=Money(Decimal("0.00")),
+        acrescimos_manuais=Money(Decimal("0.00")),
+        descontos_manuais=Money(Decimal("0.00")),
+        valor_liquido=Money(Decimal("2200.00")),
+        status=StatusHolerite.FECHADO,
+    )
+    service = _build_service([funcionario], {}, holerites=[holerite])
+
+    items, total = await service.listar_meus_holerites(admin, page=1, limit=10)
+
+    assert total == 1
+    assert items[0].id == holerite.id
+
+
+@pytest.mark.asyncio
+async def test_obter_meu_holerite_accepts_admin_when_linked_to_funcionario():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id, user_id=admin.id)
+    holerite = Holerite(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        mes_referencia=4,
+        ano_referencia=2026,
+        salario_base=Money(Decimal("2200.00")),
+        horas_extras=Money(Decimal("0.00")),
+        descontos_falta=Money(Decimal("0.00")),
+        acrescimos_manuais=Money(Decimal("0.00")),
+        descontos_manuais=Money(Decimal("0.00")),
+        valor_liquido=Money(Decimal("2200.00")),
+        status=StatusHolerite.FECHADO,
+    )
+    service = _build_service([funcionario], {}, holerites=[holerite])
+
+    result = await service.obter_meu_holerite(holerite.id, admin)
+
+    assert result.id == holerite.id
 
 
 def _regra_fixa(team_id, codigo="VA", natureza=NaturezaEncargo.PROVENTO, valor="500.00", inicio=None):
