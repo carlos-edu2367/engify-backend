@@ -34,6 +34,11 @@ class MovimentacaoRepository(ABC):
     async def save(self, movimentacao: Movimentacao) -> Movimentacao:
         pass
 
+    @abstractmethod
+    async def get_fluxo_caixa(self, team_id: UUID, months: int) -> list[dict]:
+        """Retorna agregação mensal de entradas e saídas para o fluxo de caixa."""
+        pass
+
 
 class PagamentoAgendadoRepository(ABC):
     @abstractmethod

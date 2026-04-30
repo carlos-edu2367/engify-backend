@@ -1,5 +1,6 @@
 from uuid import UUID, uuid4
-from sqlalchemy import select, func
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select, func, case, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.providers.repo.financeiro_repo import (
@@ -126,6 +127,42 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
             model.update_from_domain(movimentacao)
         await self._session.flush()
         return model.to_domain()
+
+
+    async def get_fluxo_caixa(self, team_id: UUID, months: int) -> list[dict]:
+        # Calcula data inicial baseada no range (ex: 6 meses atrás)
+        # Usamos o primeiro dia do mês de 'months' meses atrás para garantir meses cheios
+        now = datetime.now(timezone.utc)
+        start_date = (now - timedelta(days=30 * months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # Query agregada por mês (YYYY-MM)
+        stmt = (
+            select(
+                func.to_char(MovimentacaoModel.data_movimentacao, "YYYY-MM").label("mes"),
+                func.sum(
+                    case(
+                        (MovimentacaoModel.type == MovimentacaoTypes.ENTRADA.value, MovimentacaoModel.valor_amount),
+                        else_=0,
+                    )
+                ).label("total_entradas"),
+                func.sum(
+                    case(
+                        (MovimentacaoModel.type == MovimentacaoTypes.SAIDA.value, MovimentacaoModel.valor_amount),
+                        else_=0,
+                    )
+                ).label("total_saidas"),
+            )
+            .where(
+                MovimentacaoModel.team_id == team_id,
+                MovimentacaoModel.is_deleted == False,  # noqa: E712
+                MovimentacaoModel.data_movimentacao >= start_date,
+            )
+            .group_by(text("mes"))
+            .order_by(text("mes"))
+        )
+
+        result = await self._session.execute(stmt)
+        return [dict(row._mapping) for row in result.all()]
 
 
 class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):

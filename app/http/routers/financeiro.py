@@ -18,6 +18,7 @@ from app.http.dependencies.auth import FinanceiroUser
 from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import (
     FinanceiroServiceDep,
+    FinanceiroFluxoCaixaServiceDep,
     GenerateCommissionReportUseCaseDep,
     CommissionReportJobStatusUseCaseDep,
 )
@@ -36,6 +37,7 @@ from app.infra.cache.keys import (
     pagamentos_list_key, pagamentos_pattern,
     movimentacao_attachments_key, movimentacao_attachments_pattern,
     movimentacao_delete_lock_key, movimentacao_deleted_tombstone_key,
+    fluxo_caixa_key, fluxo_caixa_pattern,
 )
 from app.core.limiter import limiter
 
@@ -46,6 +48,7 @@ async def _invalidate_movimentacoes_cache(redis, team_id: UUID) -> None:
     pattern = movimentacoes_pattern(team_id)
     async for key in redis.scan_iter(match=pattern, count=100):
         await redis.delete(key)
+    await _invalidate_fluxo_caixa_cache(redis, team_id)
 
 
 async def _invalidate_mov_attachments_cache(redis, team_id: UUID, mov_id: UUID) -> None:
@@ -56,6 +59,12 @@ async def _invalidate_mov_attachments_cache(redis, team_id: UUID, mov_id: UUID) 
 
 async def _invalidate_pagamentos_cache(redis, team_id: UUID) -> None:
     pattern = pagamentos_pattern(team_id)
+    async for key in redis.scan_iter(match=pattern, count=100):
+        await redis.delete(key)
+
+
+async def _invalidate_fluxo_caixa_cache(redis, team_id: UUID) -> None:
+    pattern = fluxo_caixa_pattern(team_id)
     async for key in redis.scan_iter(match=pattern, count=100):
         await redis.delete(key)
 
@@ -151,6 +160,32 @@ async def list_movimentacoes(
     result = PaginatedResponse.build(
         items=items, page=pagination.page, limit=pagination.limit, total=total
     )
+    await redis.set(cache_key, result.model_dump_json(), ex=300)
+    return result
+
+
+from app.http.schemas.financeiro import FluxoCaixaResponse
+
+@router.get("/fluxo-caixa", response_model=FluxoCaixaResponse)
+async def get_fluxo_caixa(
+    user: FinanceiroUser,
+    svc: FinanceiroFluxoCaixaServiceDep,
+    range: str = "6m",
+):
+    """
+    Retorna o fluxo de caixa agregado (entradas vs saídas) por mês.
+    Cache Redis 5min.
+    """
+    if range not in ["6m", "12m", "24m"]:
+        range = "6m"
+
+    redis = get_redis()
+    cache_key = fluxo_caixa_key(user.team.id, range)
+    cached = await redis.get(cache_key)
+    if cached:
+        return FluxoCaixaResponse.model_validate_json(cached)
+
+    result = await svc.get_fluxo_caixa(user.team.id, range)
     await redis.set(cache_key, result.model_dump_json(), ex=300)
     return result
 

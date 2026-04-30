@@ -91,3 +91,22 @@ class LotePagamentoResultDTO(BaseModel):
     quantidade: int
     valor_total: Decimal
     movimentacao_id: UUID
+
+
+class FluxoCaixaItemDTO(BaseModel):
+    mes: str
+    total_entradas: Decimal
+    total_saidas: Decimal
+    saldo: Decimal
+
+
+class FluxoCaixaResumoDTO(BaseModel):
+    total_entradas: Decimal
+    total_saidas: Decimal
+    saldo_total: Decimal
+
+
+class FluxoCaixaDTO(BaseModel):
+    periodo: str
+    dados: list[FluxoCaixaItemDTO]
+    resumo: FluxoCaixaResumoDTO

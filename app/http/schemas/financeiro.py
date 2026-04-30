@@ -105,3 +105,24 @@ class MovimentacaoAttachmentResponse(BaseModel):
     file_name: str
     content_type: str
     created_at: datetime
+
+
+# ── Fluxo de Caixa ────────────────────────────────────────────────────────────
+
+class FluxoCaixaItemResponse(BaseModel):
+    mes: str
+    total_entradas: Decimal
+    total_saidas: Decimal
+    saldo: Decimal
+
+
+class FluxoCaixaResumoResponse(BaseModel):
+    total_entradas: Decimal
+    total_saidas: Decimal
+    saldo_total: Decimal
+
+
+class FluxoCaixaResponse(BaseModel):
+    periodo: str
+    dados: list[FluxoCaixaItemResponse]
+    resumo: FluxoCaixaResumoResponse

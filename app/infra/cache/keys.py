@@ -60,6 +60,10 @@ def pagamentos_list_key(team_id: UUID, page: int, limit: int, filters_dict: dict
     return base
 
 
+def fluxo_caixa_key(team_id: UUID, range_str: str) -> str:
+    return f"{team_id}:fluxo_caixa:{range_str}"
+
+
 def users_list_key(team_id: UUID) -> str:
     return f"{team_id}:users:list"
 
@@ -96,6 +100,10 @@ def movimentacoes_pattern(team_id: UUID) -> str:
 
 def pagamentos_pattern(team_id: UUID) -> str:
     return f"{team_id}:pagamentos:*"
+
+
+def fluxo_caixa_pattern(team_id: UUID) -> str:
+    return f"{team_id}:fluxo_caixa:*"
 
 
 def rh_geofences_pattern(team_id: UUID, funcionario_id: UUID) -> str:
