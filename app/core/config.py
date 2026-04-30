@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
+    refresh_cookie_domain: str | None = None
 
     # Email (Mailgun) — opcional; se não configurado, emails são suprimidos com log de aviso
     mailgun_api_key: str = ""
