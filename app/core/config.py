@@ -1,7 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Literal
 from functools import lru_cache
-from pydantic import field_validator
+from pydantic import Field, field_validator, model_validator
 
 
 class Settings(BaseSettings):
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     mailgun_api_key: str = ""
     mailgun_domain: str = ""
     mailgun_from: str = "noreply@engify.app"
-    frontend_url: str = "https://engify-frontend.vercel.app" if environment == "prod" else "http://localhost:5174"
+    frontend_url: str = ""
 
     # Storage — Supabase Storage REST API
     # storage_url: https://<project-ref>.supabase.co
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     storage_download_expires_in: int = 3600  # 1 hora
 
     # CORS
-    allowed_origins: list[str] = ["https://engify-frontend.vercel.app" if environment == "prod" else "http://localhost:5174"]
+    allowed_origins: list[str] = Field(default_factory=list)
 
     # Trial period
     trial_days: int = 7
@@ -73,6 +73,21 @@ class Settings(BaseSettings):
             if value.startswith("postgresql://"):
                 return value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return value
+
+    @model_validator(mode="after")
+    def apply_environment_defaults(self):
+        default_frontend_url = (
+            "https://engify-frontend.vercel.app"
+            if self.environment == "prod"
+            else "http://localhost:5174"
+        )
+
+        if not self.frontend_url:
+            self.frontend_url = default_frontend_url
+        if not self.allowed_origins:
+            self.allowed_origins = [default_frontend_url]
+
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",
