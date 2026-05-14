@@ -4,7 +4,7 @@ from uuid import uuid4
 from app.domain.entities.identities import CPF
 from app.domain.entities.team import Team, Plans
 from app.domain.entities.user import Roles, User
-from app.http.dependencies.auth import require_funcionario, require_rh_admin
+from app.http.dependencies.auth import require_funcionario, require_manager, require_rh_admin
 
 
 def _make_user(role: Roles) -> User:
@@ -38,6 +38,12 @@ def test_require_rh_admin_allows_financeiro():
     user = _make_user(Roles.FINANCEIRO)
 
     assert require_rh_admin(user) is user
+
+
+def test_require_manager_allows_financeiro():
+    user = _make_user(Roles.FINANCEIRO)
+
+    assert require_manager(user) is user
 
 
 def test_require_rh_admin_blocks_funcionario():
