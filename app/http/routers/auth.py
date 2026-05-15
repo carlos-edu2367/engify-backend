@@ -24,14 +24,8 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 _REFRESH_COOKIE = "refresh_token"
 _COOKIE_MAX_AGE = settings.refresh_token_expire_days * 24 * 60 * 60
-
-
-def _refresh_cookie_path() -> str:
-    return "/"
-
-
-def _refresh_cookie_samesite() -> str:
-    return "lax" if settings.environment == "dev" else "none"
+_COOKIE_SECURE = settings.environment != "dev"
+_COOKIE_SAMESITE = settings.refresh_cookie_samesite  # configurável via REFRESH_COOKIE_SAMESITE
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -39,10 +33,10 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         key=_REFRESH_COOKIE,
         value=token,
         httponly=True,
-        secure=settings.environment != "dev",
-        samesite=_refresh_cookie_samesite(),
+        secure=_COOKIE_SECURE,
+        samesite=_COOKIE_SAMESITE,
         max_age=_COOKIE_MAX_AGE,
-        path=_refresh_cookie_path(),
+        path="/",
         domain=settings.refresh_cookie_domain,
     )
 
@@ -50,10 +44,10 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
         key=_REFRESH_COOKIE,
-        path=_refresh_cookie_path(),
+        path="/",
         domain=settings.refresh_cookie_domain,
-        secure=settings.environment != "dev",
-        samesite=_refresh_cookie_samesite(),
+        secure=_COOKIE_SECURE,
+        samesite=_COOKIE_SAMESITE,
     )
 
 

@@ -3,6 +3,8 @@ from typing import Literal
 from functools import lru_cache
 from pydantic import Field, field_validator, model_validator
 
+CookieSameSite = Literal["lax", "none", "strict"]
+
 
 class Settings(BaseSettings):
     # App
@@ -28,6 +30,11 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
     refresh_cookie_domain: str | None = None
+    # SameSite do cookie de refresh. Em dev usa "lax" (localhost, sem Secure).
+    # Em prod padrão é "none" (cross-site), mas deve ser trocado para "lax" quando
+    # frontend e backend compartilham o mesmo domínio registrável (ex: app.engify.com
+    # + api.engify.com). Isso é necessário para iOS Safari (ITP bloqueia SameSite=None).
+    refresh_cookie_samesite: CookieSameSite | None = None
 
     # Email (Mailgun) — opcional; se não configurado, emails são suprimidos com log de aviso
     mailgun_api_key: str = ""
@@ -87,6 +94,12 @@ class Settings(BaseSettings):
             self.frontend_url = default_frontend_url
         if not self.allowed_origins:
             self.allowed_origins = [default_frontend_url]
+
+        # SameSite default: "lax" em dev (localhost, sem cross-site), "none" em prod.
+        # Para corrigir mobile (iOS Safari ITP), defina REFRESH_COOKIE_SAMESITE=lax
+        # em produção após configurar domínio same-site (ex: api.engify.com).
+        if self.refresh_cookie_samesite is None:
+            self.refresh_cookie_samesite = "lax" if self.environment == "dev" else "none"
 
         return self
 
