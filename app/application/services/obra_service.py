@@ -243,16 +243,6 @@ class ItemService():
         if dtos.descricao:
             item.description = dtos.descricao
         if dtos.status:
-            from app.domain.entities.user import Roles
-            
-            if (
-                item.status == Status.FINANCEIRO
-                and dtos.status == Status.FINALIZADO
-                and caller_role not in (Roles.ADMIN.value, Roles.FINANCEIRO.value)
-            ):
-                raise DomainError(
-                    "Apenas ADMIN ou FINANCEIRO podem finalizar um item em status Financeiro"
-                )
             item.status = dtos.status
 
         saved = await self.item_repo.save(item)
