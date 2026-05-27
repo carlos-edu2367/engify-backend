@@ -91,6 +91,7 @@ class Item():
         self.team_id = team_id  # denormalizado para RLS e isolamento de tenant
         self.id = id
         self.is_deleted = False
+        self.responsavel_nome = None
 
     def delete(self):
         self.is_deleted = True

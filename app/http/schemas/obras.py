@@ -239,6 +239,8 @@ class PublicItemView(BaseModel):
     id: UUID
     title: str
     status: Status
+    descricao: Optional[str] = None
+    responsavel_nome: Optional[str] = None
     attachments: list[PublicItemAttachmentView]
 
 

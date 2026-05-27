@@ -211,6 +211,9 @@ class ItemModel(Base, TimestampMixin):
     attachments: Mapped[list["ItemAttachmentModel"]] = relationship(
         back_populates="item", lazy="raise"
     )
+    responsavel: Mapped["UserModel | None"] = relationship(
+        lazy="raise", foreign_keys=[responsavel_id]
+    )  # type: ignore[name-defined]
 
     __table_args__ = (
         Index("idx_items_obra_deleted", "obra_id", "is_deleted"),
@@ -227,6 +230,12 @@ class ItemModel(Base, TimestampMixin):
         item.description = self.description
         item.status = Status(self.status)
         item.is_deleted = self.is_deleted
+        
+        try:
+            item.responsavel_nome = self.responsavel.nome if self.responsavel else None
+        except Exception:
+            item.responsavel_nome = None
+            
         return item
 
     @classmethod

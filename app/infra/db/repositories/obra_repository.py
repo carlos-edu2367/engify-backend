@@ -247,7 +247,7 @@ class ItemRepositoryImpl(ItemRepository):
         self._session = session
 
     async def get_by_id(self, id: UUID, team_id: UUID | None = None) -> Item:
-        stmt = select(ItemModel).where(
+        stmt = select(ItemModel).options(selectinload(ItemModel.responsavel)).where(
             ItemModel.id == id,
             ItemModel.is_deleted == False,  # noqa: E712
         )
@@ -262,6 +262,7 @@ class ItemRepositoryImpl(ItemRepository):
     async def list_by_obra(self, obra_id: UUID) -> list[Item]:
         stmt = (
             select(ItemModel)
+            .options(selectinload(ItemModel.responsavel))
             .where(ItemModel.obra_id == obra_id, ItemModel.is_deleted == False)  # noqa: E712
             .order_by(ItemModel.created_at.asc())
         )

@@ -112,6 +112,8 @@ async def get_obra_public(
             id=item.id,
             title=item.title,
             status=item.status,
+            descricao=item.description,
+            responsavel_nome=item.responsavel_nome,
             attachments=[
                 PublicItemAttachmentView(
                     id=att.id,
