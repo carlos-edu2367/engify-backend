@@ -1,13 +1,19 @@
 from uuid import UUID, uuid4
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select, func, case, text
+from sqlalchemy import select, func, case, text, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.providers.repo.financeiro_repo import (
     MovimentacaoRepository, PagamentoAgendadoRepository, MovimentacaoAttachmentRepository
 )
 from app.application.dtos.financeiro import MovimentacaoFiltersDTO, PagamentoFiltersDTO
-from app.domain.entities.financeiro import Movimentacao, MovimentacaoTypes, PagamentoAgendado, MovimentacaoAttachment
+from app.domain.entities.financeiro import (
+    Movimentacao,
+    MovimentacaoTypes,
+    PagamentoAgendado,
+    PaymentStatus,
+    MovimentacaoAttachment,
+)
 from app.domain.errors import DomainError
 from app.infra.db.models.financeiro_model import (
     MovimentacaoModel, PagamentoAgendadoModel, MovimentacaoAttachmentModel
@@ -238,6 +244,19 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
             model.update_from_domain(pagamento)
         await self._session.flush()
         return model.to_domain()
+
+    async def delete_unpaid(self, id: UUID, team_id: UUID) -> bool:
+        stmt = (
+            delete(PagamentoAgendadoModel)
+            .where(
+                PagamentoAgendadoModel.id == id,
+                PagamentoAgendadoModel.team_id == team_id,
+                PagamentoAgendadoModel.status != PaymentStatus.PAGO.value,
+            )
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return (result.rowcount or 0) > 0
 
 
 class MovimentacaoAttachmentRepositoryImpl(MovimentacaoAttachmentRepository):

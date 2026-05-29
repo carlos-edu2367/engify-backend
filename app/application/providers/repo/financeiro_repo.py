@@ -62,6 +62,11 @@ class PagamentoAgendadoRepository(ABC):
     async def save(self, pagamento: PagamentoAgendado) -> PagamentoAgendado:
         pass
 
+    @abstractmethod
+    async def delete_unpaid(self, id: UUID, team_id: UUID) -> bool:
+        """Remove um pagamento pendente do tenant. Retorna False se nao removeu."""
+        pass
+
 
 class MovimentacaoAttachmentRepository(ABC):
     @abstractmethod

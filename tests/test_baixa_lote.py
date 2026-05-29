@@ -46,8 +46,16 @@ def _make_service(pagamentos_retornados, movimentacao_salva=None):
     pag_repo = AsyncMock()
     uow = AsyncMock()
 
+    def _get_pagamento_by_id(pag_id, team_id=None):
+        for pagamento in pagamentos_retornados:
+            if pagamento.id == pag_id and (team_id is None or pagamento.team_id == team_id):
+                return pagamento
+        raise DomainError("Pagamento nao encontrado")
+
     pag_repo.list_by_ids.return_value = pagamentos_retornados
+    pag_repo.get_by_id = AsyncMock(side_effect=_get_pagamento_by_id)
     pag_repo.save = AsyncMock(side_effect=lambda p: p)
+    pag_repo.delete_unpaid = AsyncMock(return_value=True)
 
     if movimentacao_salva is None:
         mov_salvo = object.__new__(Movimentacao)
@@ -246,3 +254,57 @@ def test_descricao_resumida_para_lotes_grandes(team_id):
     desc = _build_lote_descricao(pagamentos, total)
 
     assert "mais 10 pagamento(s)" in desc
+
+
+@pytest.mark.asyncio
+async def test_delete_pagamento_aguardando_do_mesmo_tenant(team_id):
+    """Pagamento pendente do tenant atual pode ser apagado."""
+    pagamento = _make_pagamento(team_id)
+    svc, pag_repo, _, uow = _make_service([pagamento])
+
+    await svc.delete_pagamento(pagamento.id, team_id)
+
+    pag_repo.get_by_id.assert_awaited_once_with(pagamento.id, team_id)
+    pag_repo.delete_unpaid.assert_awaited_once_with(pagamento.id, team_id)
+    uow.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_pagamento_de_outro_tenant_nao_encontra(team_id, outro_team_id):
+    """Busca do delete deve ser filtrada por tenant para nao vazar outro time."""
+    pagamento_outro_tenant = _make_pagamento(outro_team_id)
+    svc, pag_repo, _, uow = _make_service([pagamento_outro_tenant])
+
+    with pytest.raises(DomainError, match="nao encontrado"):
+        await svc.delete_pagamento(pagamento_outro_tenant.id, team_id)
+
+    pag_repo.get_by_id.assert_awaited_once_with(pagamento_outro_tenant.id, team_id)
+    pag_repo.delete_unpaid.assert_not_awaited()
+    uow.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_pagamento_pago_eh_bloqueado(team_id):
+    """Pagamento ja pago nao pode ser apagado."""
+    pagamento = _make_pagamento(team_id, status=PaymentStatus.PAGO)
+    svc, pag_repo, _, uow = _make_service([pagamento])
+
+    with pytest.raises(DomainError, match="j.* efetuado"):
+        await svc.delete_pagamento(pagamento.id, team_id)
+
+    pag_repo.delete_unpaid.assert_not_awaited()
+    uow.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_pagamento_bloqueia_corrida_com_baixa(team_id):
+    """Se o pagamento virar pago entre leitura e delete, a remocao deve falhar."""
+    pagamento = _make_pagamento(team_id)
+    svc, pag_repo, _, uow = _make_service([pagamento])
+    pag_repo.delete_unpaid.return_value = False
+
+    with pytest.raises(DomainError, match="j.* efetuado"):
+        await svc.delete_pagamento(pagamento.id, team_id)
+
+    pag_repo.delete_unpaid.assert_awaited_once_with(pagamento.id, team_id)
+    uow.commit.assert_not_awaited()

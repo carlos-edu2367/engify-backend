@@ -157,6 +157,17 @@ class FinanceiroService():
     async def get_pagamento(self, id: UUID, team_id: UUID | None = None) -> PagamentoAgendado:
         return await self.pagamento_repo.get_by_id(id, team_id)
 
+    async def delete_pagamento(self, id: UUID, team_id: UUID) -> None:
+        pagamento = await self.pagamento_repo.get_by_id(id, team_id)
+        if pagamento.status == PaymentStatus.PAGO:
+            raise errors.DomainError("Pagamento ja foi efetuado")
+
+        deleted = await self.pagamento_repo.delete_unpaid(id, team_id)
+        if not deleted:
+            raise errors.DomainError("Pagamento ja foi efetuado")
+
+        await self.uow.commit()
+
     async def edit_pagamento(
         self, pagamento: PagamentoAgendado, dto: EditPagamentoDTO
     ) -> PagamentoAgendado:

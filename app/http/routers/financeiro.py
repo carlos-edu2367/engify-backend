@@ -14,7 +14,7 @@ from app.http.schemas.commission_report import (
     CommissionReportJobStatusResponse,
 )
 from app.http.schemas.common import MessageResponse, PaginatedResponse
-from app.http.dependencies.auth import FinanceiroUser
+from app.http.dependencies.auth import FinanceiroUser, ManagerUser
 from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import (
     FinanceiroServiceDep,
@@ -361,6 +361,26 @@ async def update_pagamento(
     redis = get_redis()
     await _invalidate_pagamentos_cache(redis, user.team.id)
     return _pag_response(updated)
+
+
+@router.delete("/pagamentos/{pagamento_id}", response_model=MessageResponse)
+async def delete_pagamento(
+    pagamento_id: UUID,
+    user: ManagerUser,
+    svc: FinanceiroServiceDep,
+):
+    """Remove um pagamento agendado ainda nao pago. Restrito ao tenant do usuario."""
+    try:
+        await svc.delete_pagamento(pagamento_id, user.team.id)
+    except DomainError as e:
+        detail = str(e)
+        if "nao encontrado" in detail.lower() or "não encontrado" in detail.lower():
+            raise HTTPException(status_code=404, detail="Pagamento nao encontrado")
+        raise HTTPException(status_code=400, detail=detail)
+
+    redis = get_redis()
+    await _invalidate_pagamentos_cache(redis, user.team.id)
+    return MessageResponse(message="Pagamento removido com sucesso")
 
 
 @router.patch("/pagamentos/{pagamento_id}/pay", response_model=MovimentacaoResponse)
