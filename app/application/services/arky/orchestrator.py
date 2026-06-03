@@ -420,7 +420,11 @@ class ArkyOrchestrator:
 
                     # Add model function call + response to contents
                     contents = list(contents)
-                    contents.append(build_model_function_call(tool_name, tool_args))
+                    contents.append(build_model_function_call(
+                        tool_name,
+                        tool_args,
+                        thought_signature=fc.get("thought_signature"),
+                    ))
                     contents.append(build_function_response(tool_name, tool_result))
 
         except GeminiClientError as e:

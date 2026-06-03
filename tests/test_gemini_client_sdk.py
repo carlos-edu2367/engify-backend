@@ -3,7 +3,11 @@
 import pytest
 from google.genai import types
 
-from app.infra.ai.gemini_client import GeminiClient, GeminiToolDeclaration
+from app.infra.ai.gemini_client import (
+    GeminiClient,
+    GeminiToolDeclaration,
+    build_model_function_call,
+)
 
 
 class _FakeModels:
@@ -106,6 +110,48 @@ async def test_generate_parses_sdk_function_call_and_usage():
     ]
     assert out.usage.prompt_tokens == 7
     assert out.usage.completion_tokens == 3
+
+
+@pytest.mark.asyncio
+async def test_generate_preserves_function_call_thought_signature():
+    signature = b"thought-signature"
+    fake = _FakeSdkClient(
+        _sdk_response(
+            types.Part(
+                function_call=types.FunctionCall(
+                    name="obras_prepare_create",
+                    args={"title": "Teste"},
+                ),
+                thought_signature=signature,
+            )
+        )
+    )
+    client = GeminiClient(api_key="test-key", sdk_client=fake)
+
+    out = await client.generate(
+        model="gemini-3.5-flash",
+        system_instruction="system",
+        contents=[{"role": "user", "parts": [{"text": "crie uma obra"}]}],
+    )
+
+    assert out.function_calls == [
+        {
+            "name": "obras_prepare_create",
+            "args": {"title": "Teste"},
+            "thought_signature": signature,
+        }
+    ]
+
+
+def test_build_model_function_call_preserves_thought_signature():
+    content = build_model_function_call(
+        "obras_prepare_create",
+        {"title": "Teste"},
+        thought_signature=b"thought-signature",
+    )
+
+    assert content["parts"][0]["functionCall"]["name"] == "obras_prepare_create"
+    assert content["parts"][0]["thoughtSignature"] == b"thought-signature"
 
 
 @pytest.mark.asyncio

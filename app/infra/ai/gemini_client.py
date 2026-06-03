@@ -142,10 +142,14 @@ class GeminiClient:
             if text:
                 text_parts.append(text)
             elif function_call:
-                function_calls.append({
+                call_data = {
                     "name": getattr(function_call, "name", "") or "",
                     "args": getattr(function_call, "args", {}) or {},
-                })
+                }
+                thought_signature = getattr(part, "thought_signature", None)
+                if thought_signature:
+                    call_data["thought_signature"] = thought_signature
+                function_calls.append(call_data)
 
         return GeminiResponse(
             text="\n".join(text_parts),
@@ -167,10 +171,17 @@ def build_user_message(text: str) -> dict:
     return {"role": "user", "parts": [{"text": text}]}
 
 
-def build_model_function_call(name: str, args: dict) -> dict:
+def build_model_function_call(
+    name: str,
+    args: dict,
+    thought_signature: bytes | None = None,
+) -> dict:
+    part = {"functionCall": {"name": name, "args": args}}
+    if thought_signature:
+        part["thoughtSignature"] = thought_signature
     return {
         "role": "model",
-        "parts": [{"functionCall": {"name": name, "args": args}}],
+        "parts": [part],
     }
 
 
