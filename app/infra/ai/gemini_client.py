@@ -1,20 +1,20 @@
 """
-Gemini REST client via httpx.
-Implements multi-turn conversation with function/tool calling.
+Gemini client adapter using the official Google GenAI SDK.
+
 Sensitive data must be redacted BEFORE calling any method in this module.
+The adapter preserves Arky's internal response contract while delegating
+transport, auth and request serialization to google-genai.
 """
-import json
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
-_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-_MAX_TOOL_ROUNDS = 3
 _REQUEST_TIMEOUT = 60.0
 
 
@@ -47,12 +47,17 @@ class GeminiClientError(Exception):
 
 
 class GeminiClient:
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, sdk_client: Any | None = None) -> None:
         self._api_key = api_key
-        self._http = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT)
+        self._client = sdk_client or genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=int(_REQUEST_TIMEOUT * 1000)),
+        )
 
     async def close(self) -> None:
-        await self._http.aclose()
+        close = getattr(self._client, "aclose", None)
+        if close:
+            await close()
 
     async def generate(
         self,
@@ -65,84 +70,82 @@ class GeminiClient:
         max_output_tokens: int = 2048,
     ) -> GeminiResponse:
         """
-        Generate a response. Handles multiple tool-call rounds automatically.
-        Returns the final text response after all tool calls are resolved.
-        The caller is responsible for executing tool calls between rounds.
-        Use generate_with_tools for automatic tool execution.
+        Generate a response with the Google GenAI SDK.
+        The SDK's automatic function calling is disabled because Arky executes
+        tools through backend policies, tenant scope and audit.
         """
-        url = f"{_GEMINI_BASE}/{model}:generateContent"
-        params = {"key": self._api_key}
-
-        body: dict[str, Any] = {
-            "system_instruction": {"parts": [{"text": system_instruction}]},
-            "contents": contents,
-            "generation_config": {
-                "temperature": temperature,
-                "max_output_tokens": max_output_tokens,
-            },
-        }
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        )
 
         if tools:
-            body["tools"] = [
-                {
-                    "function_declarations": [
-                        {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.parameters,
-                        }
+            config.tools = [
+                types.Tool(
+                    function_declarations=[
+                        types.FunctionDeclaration(
+                            name=t.name,
+                            description=t.description,
+                            parameters_json_schema=t.parameters,
+                        )
                         for t in tools
                     ]
-                }
+                )
             ]
+
+        sdk_contents = [types.Content.model_validate(c) for c in contents]
 
         start = time.monotonic()
         try:
-            resp = await self._http.post(url, params=params, json=body)
-        except httpx.TimeoutException as e:
-            raise GeminiClientError("Gemini API timeout") from e
-        except httpx.RequestError as e:
-            raise GeminiClientError(f"Gemini API request error: {e}") from e
+            resp = await self._client.aio.models.generate_content(
+                model=model,
+                contents=sdk_contents,
+                config=config,
+            )
+        except Exception as e:
+            status_code = getattr(e, "code", None) or getattr(e, "status_code", None)
+            message = str(e) or "Gemini SDK error"
+            logger.error("Gemini SDK error: %s", message[:300])
+            raise GeminiClientError(
+                f"Gemini SDK request error: {message}",
+                status_code=status_code,
+            ) from e
 
         latency_ms = int((time.monotonic() - start) * 1000)
+        return self._parse_response(resp, latency_ms)
 
-        if resp.status_code != 200:
-            logger.error("Gemini API error: %s %s", resp.status_code, resp.text[:300])
-            raise GeminiClientError(
-                f"Gemini API returned {resp.status_code}", status_code=resp.status_code
-            )
-
-        data = resp.json()
-        return self._parse_response(data, latency_ms)
-
-    def _parse_response(self, data: dict, latency_ms: int) -> GeminiResponse:
-        usage_meta = data.get("usageMetadata", {})
+    def _parse_response(self, response: Any, latency_ms: int) -> GeminiResponse:
+        usage_meta = getattr(response, "usage_metadata", None)
         usage = GeminiUsage(
-            prompt_tokens=usage_meta.get("promptTokenCount", 0),
-            completion_tokens=usage_meta.get("candidatesTokenCount", 0),
+            prompt_tokens=_get_field(usage_meta, "prompt_token_count", "promptTokenCount", 0),
+            completion_tokens=_get_field(usage_meta, "candidates_token_count", "candidatesTokenCount", 0),
             latency_ms=latency_ms,
         )
 
-        candidates = data.get("candidates", [])
+        candidates = getattr(response, "candidates", None) or []
         if not candidates:
             return GeminiResponse(text="", usage=usage)
 
         candidate = candidates[0]
-        finish_reason = candidate.get("finishReason", "STOP")
-        content = candidate.get("content", {})
-        parts = content.get("parts", [])
+        finish_reason = _get_field(candidate, "finish_reason", "finishReason", "STOP")
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
 
         text_parts: list[str] = []
         function_calls: list[dict] = []
 
         for part in parts:
-            if "text" in part:
-                text_parts.append(part["text"])
-            elif "functionCall" in part:
-                fc = part["functionCall"]
-                function_calls.append(
-                    {"name": fc.get("name", ""), "args": fc.get("args", {})}
-                )
+            text = getattr(part, "text", None)
+            function_call = getattr(part, "function_call", None)
+            if text:
+                text_parts.append(text)
+            elif function_call:
+                function_calls.append({
+                    "name": getattr(function_call, "name", "") or "",
+                    "args": getattr(function_call, "args", {}) or {},
+                })
 
         return GeminiResponse(
             text="\n".join(text_parts),
@@ -150,6 +153,14 @@ class GeminiClient:
             usage=usage,
             finish_reason=finish_reason,
         )
+
+
+def _get_field(source: Any, snake_name: str, camel_name: str, default: Any) -> Any:
+    if source is None:
+        return default
+    if isinstance(source, dict):
+        return source.get(snake_name, source.get(camel_name, default))
+    return getattr(source, snake_name, getattr(source, camel_name, default))
 
 
 def build_user_message(text: str) -> dict:
