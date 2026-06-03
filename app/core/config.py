@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     # Trial period
     trial_days: int = 7
 
+    # Arky Copilot
+    arky_gemini_api_key: str = ""
+    # Model IDs are configurable; never hardcoded. Validate on deploy.
+    arky_complex_model: str = "gemini-2.0-flash"
+    arky_simple_model: str = "gemini-2.0-flash-lite"
+    arky_enabled: bool = True
+
     @field_validator("debug", mode="before")
     @classmethod
     def normalize_debug(cls, value):

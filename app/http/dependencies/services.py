@@ -73,6 +73,19 @@ from app.application.use_cases.generate_monthly_commission_report import (
 )
 from app.infra.jobs.queue import ArqCommissionReportQueue
 from app.infra.jobs.rh_queue import ArqRhFolhaQueue
+from app.infra.ai.gemini_client import GeminiClient
+from app.application.services.arky.orchestrator import ArkyOrchestrator
+from app.application.services.arky.context_builder import ArkyContextBuilder
+from app.application.services.arky.model_router import ArkyModelRouter
+from app.application.services.arky.policies import ArkyPolicyEngine
+from app.application.services.arky.tool_registry import ArkyToolRegistry
+from app.application.services.arky.audit_service import ArkyAuditService
+from app.infra.db.repositories.arky_repository import (
+    ArkyConversationRepositoryImpl,
+    ArkyMessageRepositoryImpl,
+    ArkyAuditLogRepositoryImpl,
+    ArkyActionPreviewRepositoryImpl,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +137,23 @@ _report_queue = ArqCommissionReportQueue()
 _rh_geofence_cache = RedisRhGeofenceCache()
 _rh_folha_queue = ArqRhFolhaQueue()
 _rh_encargo_cache = NullRhEncargoCache()
+
+# Arky singletons (stateless components shared across requests)
+_arky_context_builder = ArkyContextBuilder()
+_arky_model_router = ArkyModelRouter()
+_arky_policy_engine = ArkyPolicyEngine()
+_arky_tool_registry = ArkyToolRegistry()
+_arky_gemini_client: GeminiClient | None = None
+
+
+def _get_arky_gemini_client() -> GeminiClient | None:
+    global _arky_gemini_client
+    from app.core.config import settings
+    if not settings.arky_gemini_api_key:
+        return None
+    if _arky_gemini_client is None:
+        _arky_gemini_client = GeminiClient(api_key=settings.arky_gemini_api_key)
+    return _arky_gemini_client
 
 
 def get_hash_provider() -> Argon2HashProvider:
@@ -386,6 +416,66 @@ async def get_commission_report_job_status_use_case(
         download_expires_in=settings.storage_download_expires_in,
     )
 
+
+async def get_arky_copilot(session: Session) -> ArkyOrchestrator:
+    from fastapi import HTTPException
+    from app.core.config import settings
+
+    if not settings.arky_enabled:
+        raise HTTPException(status_code=503, detail="Arky está desabilitado neste ambiente")
+
+    gemini_client = _get_arky_gemini_client()
+    if not gemini_client:
+        raise HTTPException(
+            status_code=503,
+            detail="Arky não está configurado. Configure ARKY_GEMINI_API_KEY.",
+        )
+
+    audit_service = ArkyAuditService(
+        audit_repo=ArkyAuditLogRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+    )
+
+    return ArkyOrchestrator(
+        gemini_client=gemini_client,
+        context_builder=_arky_context_builder,
+        model_router=_arky_model_router,
+        policy_engine=_arky_policy_engine,
+        tool_registry=_arky_tool_registry,
+        audit_service=audit_service,
+        conv_repo=ArkyConversationRepositoryImpl(session),
+        msg_repo=ArkyMessageRepositoryImpl(session),
+        preview_repo=ArkyActionPreviewRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+        obra_service=ObraService(
+            obra_repo=ObraRepositoryImpl(session),
+            uow=SQLAlchemyUOW(session),
+        ),
+        item_service=ItemService(
+            item_repo=ItemRepositoryImpl(session),
+            uow=SQLAlchemyUOW(session),
+        ),
+        notificacao_service=NotificacaoService(
+            notif_repo=NotificacaoRepositoryImpl(session),
+            uow=SQLAlchemyUOW(session),
+        ),
+        financeiro_fluxo_service=FinanceiroFluxoCaixaService(
+            mov_repo=MovimentacaoRepositoryImpl(session),
+        ),
+        rh_dashboard_service=RhDashboardService(
+            funcionario_repo=FuncionarioRepositoryImpl(session),
+            ajuste_repo=AjustePontoRepositoryImpl(session),
+            ferias_repo=FeriasRepositoryImpl(session),
+            atestado_repo=AtestadoRepositoryImpl(session),
+            registro_ponto_repo=RegistroPontoRepositoryImpl(session),
+            holerite_repo=HoleriteRepositoryImpl(session),
+            audit_repo=RhAuditLogRepositoryImpl(session),
+            uow=SQLAlchemyUOW(session),
+        ),
+    )
+
+
+ArkyCopilotDep = Annotated[ArkyOrchestrator, Depends(get_arky_copilot)]
 
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 RecoveryServiceDep = Annotated[RecoveryPasswordService, Depends(get_recovery_service)]
