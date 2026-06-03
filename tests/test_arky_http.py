@@ -16,6 +16,7 @@ from app.domain.entities.user import Roles, User
 from app.http.dependencies.auth import get_current_user
 from app.http.dependencies.services import get_arky_copilot
 from app.http.routers.arky import router
+from app.application.services.arky.orchestrator import ArkyStreamEvent
 
 
 def _make_team(team_id=None) -> Team:
@@ -203,6 +204,54 @@ class TestChatEndpoint:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/arky/chat", json={"message": "teste"})
         assert resp.status_code == 503
+
+
+class TestChatStreamEndpoint:
+    def test_stream_returns_sse_events_and_final_payload(self):
+        user = _make_user()
+
+        async def mock_chat_stream(inp):
+            yield ArkyStreamEvent(type="status", status="recebendo_mensagem", label="Recebendo mensagem")
+            yield ArkyStreamEvent(type="tool_start", status="chamando_tool", label="Consultando obras", tool_name="obras_list")
+            yield ArkyStreamEvent(type="tool_end", status="tool_concluida", label="Consulta concluida", tool_name="obras_list", summary="2 obras encontradas")
+            yield ArkyStreamEvent(type="final", status="finalizado", label="Finalizado", data=_make_chat_output())
+
+        mock_copilot = MagicMock()
+        mock_copilot.chat_stream = mock_chat_stream
+        app = _build_app(user, copilot_mock=mock_copilot)
+        client = TestClient(app)
+
+        with client.stream("POST", "/arky/chat/stream", json={"message": "listar obras"}) as resp:
+            body = "".join(resp.iter_text())
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        assert "event: status" in body
+        assert "recebendo_mensagem" in body
+        assert "event: tool_start" in body
+        assert "obras_list" in body
+        assert "event: final" in body
+        assert "Ol" in body
+
+    def test_stream_uses_user_team_id_from_jwt(self):
+        team_id = uuid4()
+        user = _make_user(team_id=team_id)
+        captured_inputs = []
+
+        async def mock_chat_stream(inp):
+            captured_inputs.append(inp)
+            yield ArkyStreamEvent(type="final", status="finalizado", label="Finalizado", data=_make_chat_output())
+
+        mock_copilot = MagicMock()
+        mock_copilot.chat_stream = mock_chat_stream
+        app = _build_app(user, copilot_mock=mock_copilot)
+        client = TestClient(app)
+
+        resp = client.post("/arky/chat/stream", json={"message": "teste"})
+
+        assert resp.status_code == 200
+        assert captured_inputs[0].team_id == team_id
+        assert captured_inputs[0].user == user
 
 
 class TestConfirmEndpoint:

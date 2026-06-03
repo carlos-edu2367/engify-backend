@@ -1,3 +1,5 @@
+import base64
+import binascii
 from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
@@ -34,6 +36,31 @@ class ArkyChatRequest(BaseModel):
     def sanitize_message(cls, v: str) -> str:
         # Strip before min_length is checked so whitespace-only is rejected
         return v.strip() if isinstance(v, str) else v
+
+    @field_validator("screenshot", mode="before")
+    @classmethod
+    def normalize_and_validate_screenshot(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            return v
+
+        raw = v.strip()
+        if not raw:
+            return None
+
+        if raw.startswith("data:"):
+            prefix, sep, payload = raw.partition(",")
+            if sep != "," or ";base64" not in prefix or not prefix.startswith("data:image/"):
+                raise ValueError("screenshot deve ser uma imagem base64")
+            raw = payload.strip()
+
+        padded = raw + ("=" * (-len(raw) % 4))
+        try:
+            base64.b64decode(padded, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("screenshot deve ser base64 valido") from exc
+        return raw
 
 
 class ArkyCardResponse(BaseModel):

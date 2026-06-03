@@ -44,6 +44,17 @@ class TestArkyChatRequest:
         with pytest.raises(ValidationError):
             ArkyChatRequest(message="test", screenshot="a" * 521_000)
 
+    def test_screenshot_invalid_base64_rejected(self):
+        with pytest.raises(ValidationError):
+            ArkyChatRequest(message="test", screenshot="not valid base64!!!")
+
+    def test_screenshot_data_url_is_normalized_to_base64_payload(self):
+        req = ArkyChatRequest(
+            message="test",
+            screenshot="data:image/jpeg;base64,aGVsbG8=",
+        )
+        assert req.screenshot == "aGVsbG8="
+
     def test_conversation_id_max_length(self):
         import uuid
         ArkyChatRequest(message="test", conversation_id=str(uuid.uuid4()))

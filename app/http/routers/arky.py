@@ -1,8 +1,10 @@
 """Arky Copilot router — /arky/chat and /arky/confirm/{preview_id}."""
+import json
 import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from app.core.limiter import limiter
 from app.http.dependencies.auth import CurrentUser
@@ -14,9 +16,85 @@ from app.http.schemas.arky import (
     ArkyCardResponse,
     ArkyConfirmResponse,
 )
-from app.application.services.arky.orchestrator import ArkyChatInput
+from app.application.services.arky.orchestrator import (
+    ArkyChatInput,
+    ArkyChatOutput,
+    ArkyStreamEvent,
+)
 
 router = APIRouter(prefix="/arky", tags=["Arky"])
+
+
+def _parse_conversation_id(value: str | None) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="conversation_id invÃ¡lido")
+
+
+def _build_chat_input(
+    body: ArkyChatRequest,
+    user: CurrentUser,
+    conversation_id: UUID | None,
+) -> ArkyChatInput:
+    return ArkyChatInput(
+        message=body.message,
+        user=user,
+        team_id=user.team.id,
+        conversation_id=conversation_id,
+        screen_data=body.screen.model_dump() if body.screen else None,
+        selection_data=body.selection.model_dump() if body.selection else None,
+        ui_state_data=body.ui_state.model_dump() if body.ui_state else None,
+        intent_hint=body.intent_hint,
+        screenshot_base64=body.screenshot,
+        request_id=str(uuid.uuid4()),
+    )
+
+
+def _chat_output_response(output: ArkyChatOutput) -> ArkyChatResponse:
+    return ArkyChatResponse(
+        conversation_id=output.conversation_id,
+        message_id=output.message_id,
+        message=output.message,
+        intent=output.intent,
+        cards=[
+            ArkyCardResponse(
+                type=c.type,
+                title=c.title,
+                summary=c.summary,
+                risk=c.risk,
+                requires_confirmation=c.requires_confirmation,
+                action_preview_id=c.action_preview_id,
+            )
+            for c in output.cards
+        ],
+        actions=[
+            ArkyActionResponse(
+                type=a.type,
+                label=a.label,
+                action_preview_id=a.action_preview_id,
+                to=a.to,
+            )
+            for a in output.actions
+        ],
+        citations=output.citations,
+    )
+
+
+def _event_payload(event: ArkyStreamEvent) -> dict:
+    payload = {
+        "status": event.status,
+        "label": event.label,
+        "tool_name": event.tool_name,
+        "summary": event.summary,
+    }
+    if isinstance(event.data, ArkyChatOutput):
+        payload["data"] = _chat_output_response(event.data).model_dump()
+    elif isinstance(event.data, dict):
+        payload["data"] = event.data
+    return payload
 
 
 @router.post("/chat", response_model=ArkyChatResponse)
@@ -76,6 +154,33 @@ async def arky_chat(
             for a in output.actions
         ],
         citations=output.citations,
+    )
+
+
+@router.post("/chat/stream")
+@limiter.limit("20/minute")
+async def arky_chat_stream(
+    request: Request,
+    body: ArkyChatRequest,
+    user: CurrentUser,
+    copilot: ArkyCopilotDep,
+) -> StreamingResponse:
+    """Send a message to Arky and stream safe execution status events."""
+    conversation_id = _parse_conversation_id(body.conversation_id)
+    inp = _build_chat_input(body, user, conversation_id)
+
+    async def event_generator():
+        async for event in copilot.chat_stream(inp):
+            payload = json.dumps(_event_payload(event), ensure_ascii=False, default=str)
+            yield f"event: {event.type}\ndata: {payload}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import logging
 import time
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
@@ -19,6 +21,7 @@ from app.application.providers.repo.arky_repo import (
 from app.application.providers.uow import UOWProvider
 from app.application.services.arky.audit_service import ArkyAuditService
 from app.application.services.arky.context_builder import ArkyContextBuilder
+from app.application.services.arky.knowledge import ArkyKnowledgeProvider
 from app.application.services.arky.model_router import ArkyModelRouter
 from app.application.services.arky.policies import ArkyPolicyEngine
 from app.application.services.arky.tool_registry import ArkyToolRegistry
@@ -142,6 +145,19 @@ class ArkyChatOutput:
     citations: list[dict] = field(default_factory=list)
 
 
+@dataclass
+class ArkyStreamEvent:
+    type: str
+    status: str
+    label: str
+    tool_name: str | None = None
+    summary: str | None = None
+    data: object | None = None
+
+
+EventSink = Callable[[ArkyStreamEvent], Awaitable[None]]
+
+
 class ArkyOrchestrator:
     def __init__(
         self,
@@ -161,6 +177,7 @@ class ArkyOrchestrator:
         notificacao_service=None,
         financeiro_fluxo_service=None,
         rh_dashboard_service=None,
+        knowledge_provider: ArkyKnowledgeProvider | None = None,
     ) -> None:
         self._gemini = gemini_client
         self._ctx_builder = context_builder
@@ -177,12 +194,33 @@ class ArkyOrchestrator:
         self._notificacao_service = notificacao_service
         self._financeiro_fluxo_service = financeiro_fluxo_service
         self._rh_dashboard_service = rh_dashboard_service
+        self._knowledge = knowledge_provider or ArkyKnowledgeProvider()
 
-    async def chat(self, inp: ArkyChatInput) -> ArkyChatOutput:
+    async def chat(
+        self,
+        inp: ArkyChatInput,
+        event_sink: EventSink | None = None,
+    ) -> ArkyChatOutput:
         start_ts = time.monotonic()
+        await self._emit(
+            event_sink,
+            ArkyStreamEvent(
+                type="status",
+                status="recebendo_mensagem",
+                label="Recebendo mensagem",
+            ),
+        )
         message = self._ctx_builder.sanitize_message(inp.message)
 
         # Build context
+        await self._emit(
+            event_sink,
+            ArkyStreamEvent(
+                type="status",
+                status="buscando_contexto",
+                label="Buscando contexto permitido",
+            ),
+        )
         ctx = self._ctx_builder.build(
             user=inp.user,
             screen_data=inp.screen_data,
@@ -226,6 +264,14 @@ class ArkyOrchestrator:
         history = await self._msg_repo.list_by_conversation(conversation_id, limit=10)
 
         # Model selection
+        await self._emit(
+            event_sink,
+            ArkyStreamEvent(
+                type="status",
+                status="consultando_documentacao",
+                label="Consultando conhecimento do Engify",
+            ),
+        )
         model_selection = self._model_router.select(
             message=message,
             module=ctx.module,
@@ -267,6 +313,14 @@ class ArkyOrchestrator:
 
         try:
             for round_num in range(_MAX_TOOL_ROUNDS + 1):
+                await self._emit(
+                    event_sink,
+                    ArkyStreamEvent(
+                        type="status",
+                        status="processando_resposta",
+                        label="Processando resposta",
+                    ),
+                )
                 resp = await self._gemini.generate(
                     model=model_selection.model_id,
                     system_instruction=_SYSTEM_PROMPT,
@@ -291,6 +345,7 @@ class ArkyOrchestrator:
                 for fc in resp.function_calls:
                     tool_name = fc["name"]
                     tool_args = fc.get("args", {})
+                    tool_label = _friendly_tool_label(tool_name)
 
                     # Policy check before execution
                     if not self._policy.is_tool_allowed(tool_name, inp.user, ctx.module):
@@ -298,9 +353,28 @@ class ArkyOrchestrator:
                             "error": "Ferramenta não permitida para seu perfil atual"
                         }
                         status = "policy_denied"
+                        await self._emit(
+                            event_sink,
+                            ArkyStreamEvent(
+                                type="tool_error",
+                                status="tool_bloqueada",
+                                label="Nao foi possivel acessar esse modulo com suas permissoes",
+                                tool_name=tool_name,
+                                summary="A policy backend negou a ferramenta.",
+                            ),
+                        )
                     else:
                         tools_called.append(tool_name)
                         tool_params_log[tool_name] = tool_args
+                        await self._emit(
+                            event_sink,
+                            ArkyStreamEvent(
+                                type="tool_start",
+                                status="chamando_tool",
+                                label=tool_label,
+                                tool_name=tool_name,
+                            ),
+                        )
 
                         # Fix conversation_id for preview tools
                         if hasattr(tool_ctx, "arky_preview_repo"):
@@ -312,6 +386,29 @@ class ArkyOrchestrator:
                         else:
                             tool_result = await self._execute_tool(
                                 tool_name, tool_args, tool_ctx
+                            )
+
+                        if isinstance(tool_result, dict) and tool_result.get("error"):
+                            await self._emit(
+                                event_sink,
+                                ArkyStreamEvent(
+                                    type="tool_error",
+                                    status="tool_erro",
+                                    label=f"{tool_label} falhou",
+                                    tool_name=tool_name,
+                                    summary=str(tool_result.get("error"))[:200],
+                                ),
+                            )
+                        else:
+                            await self._emit(
+                                event_sink,
+                                ArkyStreamEvent(
+                                    type="tool_end",
+                                    status="tool_concluida",
+                                    label=f"{tool_label} concluida",
+                                    tool_name=tool_name,
+                                    summary=_safe_tool_summary(tool_result),
+                                ),
                             )
 
                     # Collect action_preview_id if returned
@@ -379,7 +476,42 @@ class ArkyOrchestrator:
 
         output.conversation_id = str(conversation_id)
         output.message_id = str(saved_asst_msg.id)
+        await self._emit(
+            event_sink,
+            ArkyStreamEvent(
+                type="final",
+                status="finalizado" if status != "error" else "erro",
+                label="Finalizado" if status != "error" else "Erro",
+                data=output,
+            ),
+        )
         return output
+
+    async def chat_stream(self, inp: ArkyChatInput) -> AsyncIterator[ArkyStreamEvent]:
+        queue: asyncio.Queue[ArkyStreamEvent] = asyncio.Queue()
+
+        async def sink(event: ArkyStreamEvent) -> None:
+            await queue.put(event)
+
+        task = asyncio.create_task(self.chat(inp, event_sink=sink))
+        try:
+            while True:
+                if task.done() and queue.empty():
+                    break
+                try:
+                    yield await asyncio.wait_for(queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+            await task
+        finally:
+            if not task.done():
+                task.cancel()
+
+    async def _emit(
+        self, event_sink: EventSink | None, event: ArkyStreamEvent
+    ) -> None:
+        if event_sink is not None:
+            await event_sink(event)
 
     def _build_contents(
         self, history: list[ArkyMessage], message: str, ctx, inp: ArkyChatInput
@@ -425,6 +557,9 @@ class ArkyOrchestrator:
         perm_str = ", ".join(f"{k}={v}" for k, v in perms.items() if isinstance(v, bool) and v)
         if perm_str:
             lines.append(f"Permissões ativas: {perm_str}")
+        knowledge = self._knowledge.build_context(ctx.module, perms)
+        if knowledge:
+            lines.append(knowledge)
         if ctx.screenshot_blocked:
             lines.append("[Screenshot bloqueado nesta tela por conter dados sensíveis]")
         lines.append("[FIM DO CONTEXTO DO SISTEMA]")
@@ -518,6 +653,39 @@ class ArkyOrchestrator:
                 output.citations.append(cit)
 
         return output
+
+
+def _friendly_tool_label(tool_name: str) -> str:
+    labels = {
+        "obras_get_detail": "Consultando obra",
+        "obras_list": "Consultando obras",
+        "obras_prepare_create": "Preparando criacao de obra",
+        "obras_prepare_update_status": "Preparando alteracao de status",
+        "items_list_by_obra": "Consultando itens da obra",
+        "items_prepare_create": "Preparando criacao de item",
+        "notificacoes_list": "Consultando notificacoes",
+        "notificacoes_prepare_send": "Preparando notificacao",
+        "financeiro_get_fluxo_caixa": "Buscando dados financeiros permitidos",
+        "rh_get_me_resumo": "Analisando modulo de RH",
+        "rh_get_dashboard": "Analisando modulo de RH",
+    }
+    return labels.get(tool_name, "Executando ferramenta")
+
+
+def _safe_tool_summary(tool_result: object) -> str | None:
+    if not isinstance(tool_result, dict):
+        return "Ferramenta concluida."
+    if "action_preview_id" in tool_result:
+        return "Acao preparada para confirmacao."
+    if "items" in tool_result and isinstance(tool_result["items"], list):
+        return f"{len(tool_result['items'])} itens retornados."
+    if "obras" in tool_result and isinstance(tool_result["obras"], list):
+        return f"{len(tool_result['obras'])} obras retornadas."
+    if "ultimos_meses" in tool_result:
+        return "Resumo financeiro permitido retornado."
+    if any(key.startswith("total_") for key in tool_result):
+        return "Resumo agregado retornado."
+    return "Ferramenta concluida."
 
 
 class _PatchedToolCtx:
