@@ -231,7 +231,7 @@ async def create_obra_pagamento(
         obra_id=obra_id,
     )
     try:
-        pag = await fin_svc.create_pagamento(dto, user.team.id)
+        pag = await fin_svc.create_pagamento(dto, user.team.id, actor_user=user)
     except DomainError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -251,6 +251,11 @@ async def create_obra_pagamento(
         obra_id=pag.obra_id,
         diarist_id=pag.diarist_id,
         payment_date=pag.payment_date,
+        created_by_user_id=pag.created_by_user_id,
+        created_by_role=pag.created_by_role,
+        created_by_name=pag.created_by_name,
+        created_by_engineer=pag.created_by_engineer,
+        created_at=pag.created_at,
     )
 
 

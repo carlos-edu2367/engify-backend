@@ -278,7 +278,7 @@ async def delete_movimentacao_attachment(
 @router.post("/pagamentos", response_model=PagamentoResponse, status_code=201)
 async def create_pagamento(
     body: CreatePagamentoRequest,
-    user: FinanceiroUser,
+    user: ManagerUser,
     svc: FinanceiroServiceDep,
 ):
     """Agenda um pagamento. Restrito a ADMIN e FIN."""
@@ -292,7 +292,10 @@ async def create_pagamento(
         obra_id=body.obra_id,
         diarist_id=body.diarist_id,
     )
-    pag = await svc.create_pagamento(dto, user.team.id)
+    try:
+        pag = await svc.create_pagamento(dto, user.team.id, actor_user=user)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     redis = get_redis()
     await _invalidate_pagamentos_cache(redis, user.team.id)
     return _pag_response(pag)
@@ -300,21 +303,22 @@ async def create_pagamento(
 
 @router.get("/pagamentos", response_model=PaginatedResponse[PagamentoReadResponse])
 async def list_pagamentos(
-    user: FinanceiroUser,
+    user: ManagerUser,
     pagination: Pagination,
     filters: PagamentoFiltersDep,
     svc: FinanceiroServiceDep,
 ):
     """Lista pagamentos agendados (paginado). Cache Redis 5min. Restrito a ADMIN e FIN."""
     redis = get_redis()
-    filters_dict = filters.model_dump(exclude_none=True)
+    effective_filters = svc.get_pagamento_filters_for_actor(filters, user)
+    filters_dict = effective_filters.model_dump(exclude_none=True)
     cache_key = pagamentos_list_key(user.team.id, pagination.page, pagination.limit, filters_dict)
     cached = await redis.get(cache_key)
     if cached:
         return PaginatedResponse[PagamentoReadResponse].model_validate_json(cached)
 
-    items = await svc.list_pagamentos(user.team.id, pagination.page, pagination.limit, filters)
-    total = await svc.count_pagamentos(user.team.id, filters)
+    items = await svc.list_pagamentos(user.team.id, pagination.page, pagination.limit, effective_filters, actor_user=user)
+    total = await svc.count_pagamentos(user.team.id, effective_filters, actor_user=user)
     result = PaginatedResponse.build(
         items=items, page=pagination.page, limit=pagination.limit, total=total
     )
@@ -325,12 +329,12 @@ async def list_pagamentos(
 @router.get("/pagamentos/{pagamento_id}", response_model=PagamentoReadResponse)
 async def get_pagamento(
     pagamento_id: UUID,
-    user: FinanceiroUser,
+    user: ManagerUser,
     svc: FinanceiroServiceDep,
 ):
     """Retorna um pagamento agendado pelo ID. Restrito a ADMIN e FIN."""
     try:
-        pag = await svc.get_pagamento(pagamento_id, user.team.id)
+        pag = await svc.get_pagamento(pagamento_id, user.team.id, actor_user=user)
     except DomainError:
         raise HTTPException(status_code=404, detail="Pagamento não encontrado")
     return _pag_read_response(pag)
@@ -340,12 +344,12 @@ async def get_pagamento(
 async def update_pagamento(
     pagamento_id: UUID,
     body: UpdatePagamentoRequest,
-    user: FinanceiroUser,
+    user: ManagerUser,
     svc: FinanceiroServiceDep,
 ):
     """Edita um pagamento agendado. Restrito a ADMIN e FIN."""
     try:
-        pag = await svc.get_pagamento(pagamento_id, user.team.id)
+        pag = await svc.get_pagamento(pagamento_id, user.team.id, actor_user=user)
     except DomainError:
         raise HTTPException(status_code=404, detail="Pagamento não encontrado")
 
@@ -353,12 +357,13 @@ async def update_pagamento(
         title=body.title,
         details=body.details,
         valor=body.valor,
+        classe=body.classe,
         data_agendada=body.data_agendada,
         payment_cod=body.payment_cod,
         obra_id=body.obra_id,
     )
     try:
-        updated = await svc.edit_pagamento(pag, dto)
+        updated = await svc.edit_pagamento(pag, dto, actor_user=user)
     except DomainError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -375,7 +380,7 @@ async def delete_pagamento(
 ):
     """Remove um pagamento agendado ainda nao pago. Restrito ao tenant do usuario."""
     try:
-        await svc.delete_pagamento(pagamento_id, user.team.id)
+        await svc.delete_pagamento(pagamento_id, user.team.id, actor_user=user)
     except DomainError as e:
         detail = str(e)
         if "nao encontrado" in detail.lower() or "não encontrado" in detail.lower():
@@ -510,6 +515,11 @@ def _pag_response(p) -> PagamentoResponse:
         data_agendada=p.data_agendada, payment_cod=p.payment_cod,
         obra_id=p.obra_id, diarist_id=p.diarist_id,
         payment_date=p.payment_date,
+        created_by_user_id=p.created_by_user_id,
+        created_by_role=p.created_by_role,
+        created_by_name=p.created_by_name,
+        created_by_engineer=p.created_by_engineer,
+        created_at=p.created_at,
     )
 
 
@@ -521,4 +531,9 @@ def _pag_read_response(p) -> PagamentoReadResponse:
         pix_copy_and_past=p.pix_copy_and_past,
         obra_id=p.obra_id, diarist_id=p.diarist_id,
         payment_date=p.payment_date,
+        created_by_user_id=p.created_by_user_id,
+        created_by_role=p.created_by_role,
+        created_by_name=p.created_by_name,
+        created_by_engineer=p.created_by_engineer,
+        created_at=p.created_at,
     )

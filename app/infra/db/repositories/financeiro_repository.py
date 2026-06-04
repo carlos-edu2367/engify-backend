@@ -206,6 +206,8 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
             stmt = stmt.where(PagamentoAgendadoModel.status == filters.status.value)
         if filters.obra_id:
             stmt = stmt.where(PagamentoAgendadoModel.obra_id == filters.obra_id)
+        if filters.created_by_user_id:
+            stmt = stmt.where(PagamentoAgendadoModel.created_by_user_id == filters.created_by_user_id)
         return stmt
 
     async def list_by_team(self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None) -> list[PagamentoAgendado]:
@@ -245,7 +247,7 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
         await self._session.flush()
         return model.to_domain()
 
-    async def delete_unpaid(self, id: UUID, team_id: UUID) -> bool:
+    async def delete_unpaid(self, id: UUID, team_id: UUID, created_by_user_id: UUID | None = None) -> bool:
         stmt = (
             delete(PagamentoAgendadoModel)
             .where(
@@ -254,6 +256,8 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
                 PagamentoAgendadoModel.status != PaymentStatus.PAGO.value,
             )
         )
+        if created_by_user_id is not None:
+            stmt = stmt.where(PagamentoAgendadoModel.created_by_user_id == created_by_user_id)
         result = await self._session.execute(stmt)
         await self._session.flush()
         return (result.rowcount or 0) > 0

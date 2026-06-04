@@ -18,6 +18,7 @@ from app.domain.entities.financeiro import (
     PagamentoAgendado, PaymentStatus, MovimentacaoAttachment
 )
 from app.domain.entities.money import Money
+from app.domain.entities.user import Roles, User
 from app.domain import errors
 
 
@@ -121,8 +122,11 @@ class FinanceiroService():
     # ── Pagamentos Agendados ───────────────────────────────────────────────────
 
     async def create_pagamento(
-        self, dto: CreatePagamentoDTO, team_id: UUID
+        self, dto: CreatePagamentoDTO, team_id: UUID, actor_user: User | None = None
     ) -> PagamentoAgendado:
+        if _is_engineer(actor_user) and not _has_payment_code(dto.payment_cod):
+            raise errors.DomainError("codigo de pagamento e obrigatorio para engenheiros")
+
         receiver_name = await self._resolve_receiver_name(dto.diarist_id, team_id)
         pag = PagamentoAgendado(
             team_id=team_id,
@@ -140,48 +144,88 @@ class FinanceiroService():
             ),
             obra_id=dto.obra_id,
             diarist_id=dto.diarist_id,
+            created_by_user_id=getattr(actor_user, "id", None),
+            created_by_role=actor_user.role.value if actor_user else None,
+            created_by_name=getattr(actor_user, "nome", None),
+            created_by_engineer=_is_engineer(actor_user),
         )
         saved = await self.pagamento_repo.save(pag)
         await self.uow.commit()
         return saved
 
+    def get_pagamento_filters_for_actor(
+        self, filters: PagamentoFiltersDTO | None, actor_user: User | None = None
+    ) -> PagamentoFiltersDTO | None:
+        if not _is_engineer(actor_user):
+            return filters or PagamentoFiltersDTO()
+        base = filters or PagamentoFiltersDTO()
+        return base.model_copy(update={"created_by_user_id": actor_user.id})
+
     async def list_pagamentos(
-        self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None
+        self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None,
+        actor_user: User | None = None,
     ) -> list[PagamentoReadResponse]:
+        filters = self.get_pagamento_filters_for_actor(filters, actor_user)
         pags = await self.pagamento_repo.list_by_team(team_id, page, limit, filters)
         return [_pag_to_response(p) for p in pags]
 
-    async def count_pagamentos(self, team_id: UUID, filters: PagamentoFiltersDTO | None = None) -> int:
+    async def count_pagamentos(
+        self, team_id: UUID, filters: PagamentoFiltersDTO | None = None,
+        actor_user: User | None = None,
+    ) -> int:
+        filters = self.get_pagamento_filters_for_actor(filters, actor_user)
         return await self.pagamento_repo.count_by_team(team_id, filters)
 
-    async def get_pagamento(self, id: UUID, team_id: UUID | None = None) -> PagamentoAgendado:
-        return await self.pagamento_repo.get_by_id(id, team_id)
-
-    async def delete_pagamento(self, id: UUID, team_id: UUID) -> None:
+    async def get_pagamento(
+        self, id: UUID, team_id: UUID | None = None, actor_user: User | None = None
+    ) -> PagamentoAgendado:
         pagamento = await self.pagamento_repo.get_by_id(id, team_id)
+        _ensure_pagamento_visible_to_actor(pagamento, actor_user)
+        return pagamento
+
+    async def delete_pagamento(
+        self, id: UUID, team_id: UUID, actor_user: User | None = None
+    ) -> None:
+        pagamento = await self.pagamento_repo.get_by_id(id, team_id)
+        _ensure_pagamento_visible_to_actor(pagamento, actor_user)
         if pagamento.status == PaymentStatus.PAGO:
             raise errors.DomainError("Pagamento ja foi efetuado")
 
-        deleted = await self.pagamento_repo.delete_unpaid(id, team_id)
+        owner_id = actor_user.id if _is_engineer(actor_user) else None
+        if owner_id is None:
+            deleted = await self.pagamento_repo.delete_unpaid(id, team_id)
+        else:
+            deleted = await self.pagamento_repo.delete_unpaid(id, team_id, owner_id)
         if not deleted:
             raise errors.DomainError("Pagamento ja foi efetuado")
 
         await self.uow.commit()
 
     async def edit_pagamento(
-        self, pagamento: PagamentoAgendado, dto: EditPagamentoDTO
+        self, pagamento: PagamentoAgendado, dto: EditPagamentoDTO,
+        actor_user: User | None = None,
     ) -> PagamentoAgendado:
-        if not any([dto.title, dto.details, dto.valor is not None,
-                    dto.data_agendada, dto.payment_cod, dto.obra_id]):
+        _ensure_pagamento_visible_to_actor(pagamento, actor_user)
+        if pagamento.status == PaymentStatus.PAGO:
+            raise errors.DomainError("Pagamento ja foi efetuado")
+        if not any([dto.title is not None, dto.details is not None, dto.valor is not None,
+                    dto.classe is not None,
+                    dto.data_agendada is not None, dto.payment_cod is not None, dto.obra_id is not None]):
             raise errors.DomainError("Envie ao menos um campo para editar")
 
-        if dto.title:
+        effective_payment_cod = dto.payment_cod if dto.payment_cod is not None else pagamento.payment_cod
+        if _is_engineer(actor_user) and not _has_payment_code(effective_payment_cod):
+            raise errors.DomainError("codigo de pagamento e obrigatorio para engenheiros")
+
+        if dto.title is not None:
             pagamento.title = dto.title
-        if dto.details:
+        if dto.details is not None:
             pagamento.details = dto.details
         if dto.valor is not None:
             pagamento.valor = Money(dto.valor)
-        if dto.data_agendada:
+        if dto.classe is not None:
+            pagamento.classe = dto.classe
+        if dto.data_agendada is not None:
             pagamento.data_agendada = dto.data_agendada
         if dto.payment_cod is not None:
             pagamento.payment_cod = dto.payment_cod
@@ -369,4 +413,24 @@ def _pag_to_response(p: PagamentoAgendado) -> PagamentoReadResponse:
         obra_id=p.obra_id,
         diarist_id=p.diarist_id,
         payment_date=p.payment_date,
+        created_by_user_id=p.created_by_user_id,
+        created_by_role=p.created_by_role,
+        created_by_name=p.created_by_name,
+        created_by_engineer=p.created_by_engineer,
+        created_at=p.created_at,
     )
+
+
+def _is_engineer(user: User | None) -> bool:
+    return bool(user and user.role == Roles.ENGENHEIRO)
+
+
+def _has_payment_code(payment_cod: str | None) -> bool:
+    return bool(payment_cod and payment_cod.strip())
+
+
+def _ensure_pagamento_visible_to_actor(
+    pagamento: PagamentoAgendado, actor_user: User | None
+) -> None:
+    if _is_engineer(actor_user) and pagamento.created_by_user_id != actor_user.id:
+        raise errors.DomainError("Pagamento nao encontrado")

@@ -41,6 +41,7 @@ class EditPagamentoDTO(BaseModel):
     title: Optional[str] = None
     details: Optional[str] = None
     valor: Optional[Decimal] = None
+    classe: Optional[MovClass] = None
     data_agendada: Optional[datetime] = None
     payment_cod: Optional[str] = None
     obra_id: Optional[UUID] = None
@@ -58,6 +59,11 @@ class PagamentoResponse(BaseModel):
     obra_id: Optional[UUID] = None
     diarist_id: Optional[UUID] = None
     payment_date: Optional[datetime] = None
+    created_by_user_id: Optional[UUID] = None
+    created_by_role: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_by_engineer: bool = False
+    created_at: Optional[datetime] = None
 
 
 class PagamentoReadResponse(PagamentoResponse):
@@ -73,6 +79,7 @@ class AddMovimentacaoAttachmentDTO(BaseModel):
 class PagamentoFiltersDTO(BaseModel):
     status: Optional[PaymentStatus] = None
     obra_id: Optional[UUID] = None
+    created_by_user_id: Optional[UUID] = None
 
 
 class MovimentacaoFiltersDTO(BaseModel):

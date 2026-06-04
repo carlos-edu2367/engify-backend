@@ -62,7 +62,12 @@ class PagamentoAgendado():
                  pix_copy_and_past: str = None,
                  status: PaymentStatus = PaymentStatus.AGUARDANDO,
                  diarist_id: UUID = None, obra_id: UUID = None,
-                 id: UUID = None, payment_date: datetime = None):
+                 id: UUID = None, payment_date: datetime = None,
+                 created_by_user_id: UUID = None,
+                 created_by_role: str = None,
+                 created_by_name: str = None,
+                 created_by_engineer: bool = False,
+                 created_at: datetime = None):
         self.id = id
         self.team_id = team_id
         self.title = title
@@ -76,6 +81,11 @@ class PagamentoAgendado():
         self.diarist_id = diarist_id
         self.obra_id = obra_id
         self.payment_date = payment_date
+        self.created_by_user_id = created_by_user_id
+        self.created_by_role = created_by_role
+        self.created_by_name = created_by_name
+        self.created_by_engineer = created_by_engineer
+        self.created_at = created_at
 
 
 class MovimentacaoAttachment():

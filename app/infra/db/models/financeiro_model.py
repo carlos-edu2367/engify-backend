@@ -163,6 +163,12 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         String(20), nullable=False, default=PaymentStatus.AGUARDANDO.value
     )
     payment_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    created_by_role: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_engineer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     team: Mapped["TeamModel"] = relationship(  # type: ignore[name-defined]
         back_populates="pagamentos", lazy="raise"
@@ -175,6 +181,8 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         Index("idx_pagamentos_team_status", "team_id", "status"),
         # Pagamentos de uma obra específica
         Index("idx_pagamentos_obra", "obra_id"),
+        Index("idx_pagamentos_team_creator_data", "team_id", "created_by_user_id", "data_agendada"),
+        Index("idx_pagamentos_team_engineer_data", "team_id", "created_by_engineer", "data_agendada"),
     )
 
     def to_domain(self) -> PagamentoAgendado:
@@ -192,6 +200,11 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         p.pix_copy_and_past = self.pix_copy_and_past
         p.status = PaymentStatus(self.status)
         p.payment_date = self.payment_date
+        p.created_by_user_id = self.created_by_user_id
+        p.created_by_role = self.created_by_role
+        p.created_by_name = self.created_by_name
+        p.created_by_engineer = self.created_by_engineer
+        p.created_at = self.created_at
         return p
 
     @classmethod
@@ -211,6 +224,10 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
             pix_copy_and_past=p.pix_copy_and_past,
             status=p.status.value,
             payment_date=p.payment_date,
+            created_by_user_id=p.created_by_user_id,
+            created_by_role=p.created_by_role,
+            created_by_name=p.created_by_name,
+            created_by_engineer=p.created_by_engineer,
         )
 
     def update_from_domain(self, p: PagamentoAgendado) -> None:
@@ -225,6 +242,10 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         self.data_agendada = p.data_agendada
         self.obra_id = p.obra_id
         self.diarist_id = p.diarist_id
+        self.created_by_user_id = p.created_by_user_id
+        self.created_by_role = p.created_by_role
+        self.created_by_name = p.created_by_name
+        self.created_by_engineer = p.created_by_engineer
 
 
 class MovimentacaoAttachmentModel(Base, TimestampMixin):
