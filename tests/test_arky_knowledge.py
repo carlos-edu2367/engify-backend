@@ -44,3 +44,16 @@ def test_general_knowledge_lists_core_modules_safely():
     assert "Financeiro" in text
     assert "RH" in text
     assert "dados dinamicos" in text
+
+
+def test_obras_knowledge_guides_receipt_invoices_to_recebimentos_not_mural():
+    provider = ArkyKnowledgeProvider()
+
+    text = provider.build_context(module="obras", permission_summary={"role": "engenheiro"})
+    normalized = text.lower()
+
+    assert "recebimentos" in normalized
+    assert "notas fiscais" in normalized
+    assert "mural" in normalized
+    assert "cliente" in normalized
+    assert "nao devem ser anexadas no mural" in normalized

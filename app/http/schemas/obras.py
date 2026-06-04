@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import UUID
 from decimal import Decimal
 from typing import Optional
@@ -244,6 +244,20 @@ class PublicItemView(BaseModel):
     attachments: list[PublicItemAttachmentView]
 
 
+class PublicRecebimentoAttachmentView(BaseModel):
+    id: UUID
+    file_name: str
+    download_url: str
+    content_type: str
+
+
+class PublicRecebimentoView(BaseModel):
+    id: UUID
+    title: str
+    data_movimentacao: datetime
+    attachments: list[PublicRecebimentoAttachmentView]
+
+
 class PublicObraResponse(BaseModel):
     id: UUID
     title: str
@@ -252,3 +266,4 @@ class PublicObraResponse(BaseModel):
     data_entrega: Optional[datetime] = None
     items: list[PublicItemView]
     images: list[PublicImageView]
+    recebimentos: list[PublicRecebimentoView] = Field(default_factory=list)

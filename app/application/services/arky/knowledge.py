@@ -42,7 +42,13 @@ _GENERAL_MODULES = (
 _OBRAS_KNOWLEDGE = (
     "Obras: usado para criar e acompanhar obras, responsaveis, status, itens, "
     "diarias, imagens, mural e pagamentos vinculados. Acoes de escrita devem "
-    "ser preparadas para confirmacao humana e validadas pelo backend."
+    "ser preparadas para confirmacao humana e validadas pelo backend. "
+    "Na pagina de Obras, recebimentos da obra devem ser cadastrados na aba "
+    "Recebimentos. Notas fiscais, comprovantes e recibos ligados a um "
+    "recebimento devem ser anexados no proprio recebimento, pois assim ficam "
+    "disponiveis para o cliente no link publico da obra. Essas notas fiscais "
+    "nao devem ser anexadas no mural quando a intencao for dar acesso ao "
+    "cliente; o mural deve ficar para comunicacao e historico interno da obra."
 )
 
 

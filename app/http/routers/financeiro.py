@@ -37,7 +37,7 @@ from app.infra.cache.keys import (
     pagamentos_list_key, pagamentos_pattern,
     movimentacao_attachments_key, movimentacao_attachments_pattern,
     movimentacao_delete_lock_key, movimentacao_deleted_tombstone_key,
-    fluxo_caixa_key, fluxo_caixa_pattern,
+    fluxo_caixa_key, fluxo_caixa_pattern, public_obra_key,
 )
 from app.core.limiter import limiter
 
@@ -207,6 +207,8 @@ async def add_movimentacao_attachment(
         att = await svc.add_attachment(mov, dto)
         redis = get_redis()
         await _invalidate_mov_attachments_cache(redis, user.team.id, movimentacao_id)
+        if mov.obra_id is not None:
+            await redis.delete(public_obra_key(mov.obra_id))
         return MovimentacaoAttachmentResponse(
             id=att.id,
             movimentacao_id=att.movimentacao_id,
@@ -260,10 +262,12 @@ async def delete_movimentacao_attachment(
     svc: FinanceiroServiceDep,
 ):
     try:
-        await svc.get_movimentacao_by_team(movimentacao_id, user.team.id)
+        mov = await svc.get_movimentacao_by_team(movimentacao_id, user.team.id)
         await svc.delete_attachment(attachment_id, user.team.id)
         redis = get_redis()
         await _invalidate_mov_attachments_cache(redis, user.team.id, movimentacao_id)
+        if mov.obra_id is not None:
+            await redis.delete(public_obra_key(mov.obra_id))
         return MessageResponse(message="Anexo removido com sucesso")
     except DomainError as e:
         raise HTTPException(status_code=400, detail=str(e))

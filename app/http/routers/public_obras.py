@@ -21,10 +21,12 @@ from uuid import UUID
 
 from app.http.schemas.obras import (
     PublicObraResponse, PublicItemView, PublicItemAttachmentView, PublicImageView,
+    PublicRecebimentoAttachmentView, PublicRecebimentoView,
 )
 from app.http.dependencies.services import (
     ObraServiceDep, ItemServiceDep, ObraImageServiceDep,
-    ItemAttachmentServiceDep, StorageProviderDep,
+    ItemAttachmentServiceDep, StorageProviderDep, RecebimentoServiceDep,
+    FinanceiroServiceDep,
 )
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
@@ -36,6 +38,7 @@ router = APIRouter(prefix="/public", tags=["Public"])
 _BUCKET = "engify"
 _URL_TTL = 3600      # signed URLs válidas por 1 hora
 _CACHE_TTL = 600     # cache Redis por 10 minutos (bem abaixo do TTL das URLs)
+_RECEBIMENTOS_LIMIT = 1000
 
 
 async def _sign(storage: StorageProviderDep, path: str) -> str:
@@ -55,6 +58,8 @@ async def get_obra_public(
     item_svc: ItemServiceDep,
     image_svc: ObraImageServiceDep,
     att_svc: ItemAttachmentServiceDep,
+    rec_svc: RecebimentoServiceDep,
+    financeiro_svc: FinanceiroServiceDep,
     storage: StorageProviderDep,
 ):
     """
@@ -79,11 +84,21 @@ async def get_obra_public(
     # Queries independentes — executadas sequencialmente para evitar conflito de sessão
     items = await item_svc.list_items(obra_id)
     images = await image_svc.list_by_obra(obra_id)
+    recebimentos = await rec_svc.list_entradas(
+        obra.id, obra.team_id, page=1, limit=_RECEBIMENTOS_LIMIT
+    )
 
     # Coleta attachments de todos os itens (sequencial — mesma sessão DB)
     item_attachments: dict[UUID, list] = {}
     for item in items:
         item_attachments[item.id] = await att_svc.list_by_item(item.id)
+
+    recebimento_attachments: dict[UUID, list] = {}
+    for recebimento in recebimentos:
+        attachments = await financeiro_svc.get_attachments(recebimento.id)
+        recebimento_attachments[recebimento.id] = [
+            att for att in attachments if att.team_id == obra.team_id
+        ]
 
     # Gera TODAS as URLs assinadas de forma concorrente (I/O externo ao Supabase)
     image_paths = [img.file_path for img in images]
@@ -92,7 +107,12 @@ async def get_obra_public(
         for item in items
         for att in item_attachments[item.id]
     ]
-    all_paths = image_paths + att_paths
+    recebimento_att_paths = [
+        att.file_path
+        for recebimento in recebimentos
+        for att in recebimento_attachments[recebimento.id]
+    ]
+    all_paths = image_paths + att_paths + recebimento_att_paths
 
     signed = await asyncio.gather(*[_sign(storage, p) for p in all_paths])
     url_map: dict[str, str] = dict(zip(all_paths, signed))
@@ -127,6 +147,24 @@ async def get_obra_public(
         for item in items
     ]
 
+    public_recebimentos = [
+        PublicRecebimentoView(
+            id=recebimento.id,
+            title=recebimento.title,
+            data_movimentacao=recebimento.data_movimentacao,
+            attachments=[
+                PublicRecebimentoAttachmentView(
+                    id=att.id,
+                    file_name=att.file_name,
+                    download_url=url_map.get(att.file_path, ""),
+                    content_type=att.content_type,
+                )
+                for att in recebimento_attachments[recebimento.id]
+            ],
+        )
+        for recebimento in recebimentos
+    ]
+
     response = PublicObraResponse(
         id=obra.id,
         title=obra.title,
@@ -135,6 +173,7 @@ async def get_obra_public(
         data_entrega=obra.data_entrega,
         items=public_items,
         images=public_images,
+        recebimentos=public_recebimentos,
     )
 
     await redis.set(cache_key, response.model_dump_json(), ex=_CACHE_TTL)

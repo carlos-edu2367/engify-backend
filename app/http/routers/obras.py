@@ -282,6 +282,7 @@ async def add_recebimento(
     redis = get_redis()
     await _invalidate_obras_cache(redis, user.team.id)
     await _invalidate_movimentacoes_cache(redis, user.team.id)
+    await redis.delete(public_obra_key(obra_id))
     async for key in redis.scan_iter(match=entradas_obra_pattern(user.team.id, obra_id), count=100):
         await redis.delete(key)
 
@@ -317,6 +318,7 @@ async def delete_recebimento(
     redis = get_redis()
     await _invalidate_obras_cache(redis, user.team.id)
     await _invalidate_movimentacoes_cache(redis, user.team.id)
+    await redis.delete(public_obra_key(obra_id))
     async for key in redis.scan_iter(match=entradas_obra_pattern(user.team.id, obra_id), count=100):
         await redis.delete(key)
 
