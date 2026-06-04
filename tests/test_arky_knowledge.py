@@ -6,15 +6,58 @@ from app.application.services.arky.knowledge import ArkyKnowledgeProvider
 def test_financeiro_knowledge_explains_module_without_granting_access():
     provider = ArkyKnowledgeProvider()
 
+    # Funcionario nao tem nenhum acesso ao modulo financeiro
     text = provider.build_context(
         module="financeiro",
-        permission_summary={"can_read_financeiro": False, "role": "engenheiro"},
+        permission_summary={
+            "can_read_financeiro": False,
+            "can_manage_own_pagamentos": False,
+            "role": "funcionario",
+        },
     )
 
     assert "Financeiro" in text
     assert "movimentacoes" in text
-    assert "sem permissao" in text
+    assert "nao tem permissao" in text
     assert "Pix completo" in text
+
+
+def test_financeiro_knowledge_for_engineer_own_payments():
+    provider = ArkyKnowledgeProvider()
+
+    text = provider.build_context(
+        module="financeiro",
+        permission_summary={
+            "can_read_financeiro": False,
+            "can_manage_own_pagamentos": True,
+            "role": "engenheiro",
+        },
+    )
+
+    assert "engenheiro" in text
+    assert "Codigo de pagamento" in text
+    assert "obrigatorio" in text
+    assert "aguardando" in text
+    assert "nao pode marcar" in text
+    assert "fluxo de caixa" in text
+
+
+def test_financeiro_knowledge_for_admin_full_access():
+    provider = ArkyKnowledgeProvider()
+
+    text = provider.build_context(
+        module="financeiro",
+        permission_summary={
+            "can_read_financeiro": True,
+            "can_manage_own_pagamentos": False,
+            "role": "admin",
+        },
+    )
+
+    assert "acesso completo" in text
+    assert "created_by_name" in text
+    assert "created_at" in text
+    assert "Criado por engenheiro" in text
 
 
 def test_rh_knowledge_distinguishes_admin_and_meu_rh_permissions():

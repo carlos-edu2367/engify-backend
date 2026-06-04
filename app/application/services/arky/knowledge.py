@@ -53,16 +53,41 @@ _OBRAS_KNOWLEDGE = (
 
 
 def _financeiro_context(permissions: dict) -> str:
-    access = (
-        "O usuario tem permissao backend para resumo financeiro permitido."
-        if permissions.get("can_read_financeiro")
-        else "O usuario esta sem permissao backend para dados financeiros."
-    )
+    can_full = bool(permissions.get("can_read_financeiro"))
+    can_own = bool(permissions.get("can_manage_own_pagamentos"))
+
+    if can_full:
+        access = (
+            "O usuario tem acesso completo ao modulo financeiro: movimentacoes, "
+            "todos os pagamentos agendados do tenant, baixa individual e em lote, "
+            "fluxo de caixa e relatorios. "
+            "Pagamentos criados por engenheiro exibem badge 'Criado por engenheiro', "
+            "nome do criador (campo created_by_name) e data de criacao (created_at) no card. "
+            "Registros legados sem autoria continuam visiveis normalmente."
+        )
+    elif can_own:
+        access = (
+            "O usuario e engenheiro e acessa o modulo Financeiro apenas pela aba Pagamentos. "
+            "Ele so ve, cria, edita e exclui pagamentos agendados criados por ele proprio. "
+            "Ao criar um pagamento, o campo 'Codigo de pagamento' (PIX ou codigo de barras "
+            "do recebedor) e obrigatorio — sem ele o backend rejeita. "
+            "O valor deve ser informado no formato humano brasileiro, por exemplo 190,50. "
+            "So e possivel editar ou excluir pagamentos com status 'aguardando'; "
+            "pagamentos pagos sao bloqueados para qualquer alteracao. "
+            "O engenheiro nao pode marcar pagamentos como pagos, usar baixa em lote, "
+            "consultar movimentacoes, fluxo de caixa ou relatorios financeiros. "
+            "Se o usuario perguntar sobre pagamentos de outros membros ou dados "
+            "financeiros do tenant, informe que essas informacoes nao estao "
+            "disponiveis para o perfil dele."
+        )
+    else:
+        access = "O usuario nao tem permissao backend para dados financeiros."
+
     return (
         "Financeiro: usado para movimentacoes, pagamentos agendados, baixas, "
         "anexos, relatorios e fluxo de caixa. Nunca exponha Pix completo, "
         "anexos privados, payloads brutos, dados de outro tenant ou acoes "
-        "sensíveis sem validacao backend. "
+        "sensiveis sem validacao backend. "
         f"{access}"
     )
 

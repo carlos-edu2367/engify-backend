@@ -140,3 +140,41 @@ class TestPermissionSummary:
         assert p["can_read_obras"] is True
         assert p["can_edit_obras"] is False
         assert p["can_read_financeiro"] is False
+
+    def test_engineer_has_own_pagamentos_only(self, builder):
+        user = _make_user(Roles.ENGENHEIRO)
+        ctx = builder.build(user=user, screen_data=None, selection_data=None, ui_state_data=None, has_screenshot=False)
+        p = ctx.permission_summary
+        assert p["can_request_pagamentos"] is True
+        assert p["can_manage_own_pagamentos"] is True
+        assert p["can_read_financeiro"] is False
+
+    def test_admin_has_full_pagamentos(self, builder):
+        user = _make_user(Roles.ADMIN)
+        ctx = builder.build(user=user, screen_data=None, selection_data=None, ui_state_data=None, has_screenshot=False)
+        p = ctx.permission_summary
+        assert p["can_request_pagamentos"] is True
+        assert p["can_manage_own_pagamentos"] is False
+        assert p["can_read_financeiro"] is True
+
+    def test_financeiro_has_full_pagamentos(self, builder):
+        user = _make_user(Roles.FINANCEIRO)
+        ctx = builder.build(user=user, screen_data=None, selection_data=None, ui_state_data=None, has_screenshot=False)
+        p = ctx.permission_summary
+        assert p["can_request_pagamentos"] is True
+        assert p["can_manage_own_pagamentos"] is False
+        assert p["can_read_financeiro"] is True
+
+    def test_funcionario_has_no_pagamentos(self, builder):
+        user = _make_user(Roles.FUNCIONARIO)
+        ctx = builder.build(user=user, screen_data=None, selection_data=None, ui_state_data=None, has_screenshot=False)
+        p = ctx.permission_summary
+        assert p["can_request_pagamentos"] is False
+        assert p["can_manage_own_pagamentos"] is False
+
+    def test_cliente_has_no_pagamentos(self, builder):
+        user = _make_user(Roles.CLIENTE)
+        ctx = builder.build(user=user, screen_data=None, selection_data=None, ui_state_data=None, has_screenshot=False)
+        p = ctx.permission_summary
+        assert p["can_request_pagamentos"] is False
+        assert p["can_manage_own_pagamentos"] is False

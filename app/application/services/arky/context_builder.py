@@ -59,6 +59,9 @@ def _build_permission_summary(user: User) -> dict:
         "can_read_obras": role in (Roles.ADMIN, Roles.ENGENHEIRO, Roles.FINANCEIRO, Roles.CLIENTE),
         "can_edit_obras": role in (Roles.ADMIN, Roles.ENGENHEIRO),
         "can_read_financeiro": role in (Roles.ADMIN, Roles.FINANCEIRO),
+        # Engenheiro acessa apenas seus próprios pagamentos agendados
+        "can_request_pagamentos": role in (Roles.ADMIN, Roles.FINANCEIRO, Roles.ENGENHEIRO),
+        "can_manage_own_pagamentos": role == Roles.ENGENHEIRO,
         "can_read_rh_admin": role in (Roles.ADMIN, Roles.FINANCEIRO),
         "can_read_rh_me": role == Roles.FUNCIONARIO,
         "can_prepare_create_obra": role in (Roles.ADMIN, Roles.ENGENHEIRO),
