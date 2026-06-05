@@ -73,7 +73,9 @@ from app.application.use_cases.generate_monthly_commission_report import (
 )
 from app.infra.jobs.queue import ArqCommissionReportQueue
 from app.infra.jobs.rh_queue import ArqRhFolhaQueue
-from app.infra.ai.gemini_client import GeminiClient
+from app.infra.ai.llm import LLMClient
+from app.infra.ai.openrouter_client import OpenRouterClient
+from app.infra.ai.model_registry import ModelRouter
 from app.application.services.arky.orchestrator import ArkyOrchestrator
 from app.application.services.arky.context_builder import ArkyContextBuilder
 from app.application.services.arky.model_router import ArkyModelRouter
@@ -139,21 +141,29 @@ _rh_folha_queue = ArqRhFolhaQueue()
 _rh_encargo_cache = NullRhEncargoCache()
 
 # Arky singletons (stateless components shared across requests)
+from app.core.config import settings as _settings
 _arky_context_builder = ArkyContextBuilder()
-_arky_model_router = ArkyModelRouter()
+_arky_model_router = ArkyModelRouter(
+    registry=ModelRouter(overrides=_settings.openrouter_model_overrides)
+)
 _arky_policy_engine = ArkyPolicyEngine()
 _arky_tool_registry = ArkyToolRegistry()
-_arky_gemini_client: GeminiClient | None = None
+_arky_llm_client: LLMClient | None = None
 
 
-def _get_arky_gemini_client() -> GeminiClient | None:
-    global _arky_gemini_client
+def _get_arky_llm_client() -> LLMClient | None:
+    global _arky_llm_client
     from app.core.config import settings
-    if not settings.arky_gemini_api_key:
+    if not settings.arky_openrouter_api_key:
         return None
-    if _arky_gemini_client is None:
-        _arky_gemini_client = GeminiClient(api_key=settings.arky_gemini_api_key)
-    return _arky_gemini_client
+    if _arky_llm_client is None:
+        _arky_llm_client = OpenRouterClient(
+            api_key=settings.arky_openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            site_url=settings.openrouter_site_url or None,
+            app_name=settings.openrouter_app_name or None,
+        )
+    return _arky_llm_client
 
 
 def get_hash_provider() -> Argon2HashProvider:
@@ -424,11 +434,11 @@ async def get_arky_copilot(session: Session) -> ArkyOrchestrator:
     if not settings.arky_enabled:
         raise HTTPException(status_code=503, detail="Arky está desabilitado neste ambiente")
 
-    gemini_client = _get_arky_gemini_client()
-    if not gemini_client:
+    llm_client = _get_arky_llm_client()
+    if not llm_client:
         raise HTTPException(
             status_code=503,
-            detail="Arky não está configurado. Configure ARKY_GEMINI_API_KEY.",
+            detail="Arky não está configurado. Configure ARKY_OPENROUTER_API_KEY.",
         )
 
     audit_service = ArkyAuditService(
@@ -437,7 +447,7 @@ async def get_arky_copilot(session: Session) -> ArkyOrchestrator:
     )
 
     return ArkyOrchestrator(
-        gemini_client=gemini_client,
+        llm_client=llm_client,
         context_builder=_arky_context_builder,
         model_router=_arky_model_router,
         policy_engine=_arky_policy_engine,

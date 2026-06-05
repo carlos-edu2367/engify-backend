@@ -1,11 +1,14 @@
 """
-ArkyToolRegistry — maps tool names to Gemini function declarations.
+ArkyToolRegistry — maps tool names to provider-agnostic function declarations.
 Only tools registered here can ever be called by the model.
-"""
-from app.infra.ai.gemini_client import GeminiToolDeclaration
 
-_TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
-    "obras_get_detail": GeminiToolDeclaration(
+Os tipos de schema abaixo estao em uppercase (heranca do formato Gemini); o
+OpenRouterClient normaliza para JSON Schema padrao (lowercase) antes de enviar.
+"""
+from app.infra.ai.llm import ToolDeclaration
+
+_TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
+    "obras_get_detail": ToolDeclaration(
         name="obras_get_detail",
         description="Busca detalhes completos de uma obra pelo ID. Use quando o usuário perguntar sobre uma obra específica.",
         parameters={
@@ -16,7 +19,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": ["obra_id"],
         },
     ),
-    "obras_list": GeminiToolDeclaration(
+    "obras_list": ToolDeclaration(
         name="obras_list",
         description="Lista obras do time do usuário. Use para responder perguntas sobre obras em geral, pendências ou status.",
         parameters={
@@ -32,7 +35,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": [],
         },
     ),
-    "items_list_by_obra": GeminiToolDeclaration(
+    "items_list_by_obra": ToolDeclaration(
         name="items_list_by_obra",
         description="Lista itens/tarefas de uma obra. Use para verificar pendências, progresso ou checklist da obra.",
         parameters={
@@ -43,7 +46,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": ["obra_id"],
         },
     ),
-    "notificacoes_list": GeminiToolDeclaration(
+    "notificacoes_list": ToolDeclaration(
         name="notificacoes_list",
         description="Lista notificações recentes do usuário. Use para verificar alertas e pendências de comunicação.",
         parameters={
@@ -55,7 +58,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": [],
         },
     ),
-    "financeiro_get_fluxo_caixa": GeminiToolDeclaration(
+    "financeiro_get_fluxo_caixa": ToolDeclaration(
         name="financeiro_get_fluxo_caixa",
         description="Busca resumo do fluxo de caixa do time. Apenas para roles admin ou financeiro. Não expõe Pix nem anexos.",
         parameters={
@@ -67,7 +70,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": [],
         },
     ),
-    "rh_get_me_resumo": GeminiToolDeclaration(
+    "rh_get_me_resumo": ToolDeclaration(
         name="rh_get_me_resumo",
         description="Busca resumo RH do próprio funcionário autenticado. Apenas para role funcionario.",
         parameters={
@@ -76,7 +79,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": [],
         },
     ),
-    "rh_get_dashboard": GeminiToolDeclaration(
+    "rh_get_dashboard": ToolDeclaration(
         name="rh_get_dashboard",
         description="Busca dashboard RH do time. Apenas para roles admin ou financeiro. Não expõe CPF, salário completo nem documentos.",
         parameters={
@@ -88,7 +91,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": [],
         },
     ),
-    "obras_prepare_create": GeminiToolDeclaration(
+    "obras_prepare_create": ToolDeclaration(
         name="obras_prepare_create",
         description="Prepara uma nova obra para confirmação humana. NÃO cria a obra - apenas gera um preview para o usuário confirmar.",
         parameters={
@@ -103,7 +106,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": ["title", "description", "responsavel_id"],
         },
     ),
-    "obras_prepare_update_status": GeminiToolDeclaration(
+    "obras_prepare_update_status": ToolDeclaration(
         name="obras_prepare_update_status",
         description="Prepara mudança de status de uma obra para confirmação humana. NÃO altera o status - apenas gera preview.",
         parameters={
@@ -120,7 +123,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": ["obra_id", "novo_status"],
         },
     ),
-    "items_prepare_create": GeminiToolDeclaration(
+    "items_prepare_create": ToolDeclaration(
         name="items_prepare_create",
         description="Prepara criação de item/tarefa em uma obra para confirmação humana. NÃO cria o item.",
         parameters={
@@ -133,7 +136,7 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
             "required": ["obra_id", "title"],
         },
     ),
-    "notificacoes_prepare_send": GeminiToolDeclaration(
+    "notificacoes_prepare_send": ToolDeclaration(
         name="notificacoes_prepare_send",
         description="Prepara envio de notificação para destinatários para confirmação humana. NÃO envia a notificação.",
         parameters={
@@ -149,12 +152,12 @@ _TOOL_DECLARATIONS: dict[str, GeminiToolDeclaration] = {
 
 
 class ArkyToolRegistry:
-    def get_declaration(self, tool_name: str) -> GeminiToolDeclaration | None:
+    def get_declaration(self, tool_name: str) -> ToolDeclaration | None:
         return _TOOL_DECLARATIONS.get(tool_name)
 
     def get_declarations_for(
         self, tool_names: list[str]
-    ) -> list[GeminiToolDeclaration]:
+    ) -> list[ToolDeclaration]:
         return [
             _TOOL_DECLARATIONS[name]
             for name in tool_names

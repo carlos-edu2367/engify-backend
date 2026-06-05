@@ -40,12 +40,12 @@ from app.domain.entities.arky import (
     ArkyMessage,
 )
 from app.domain.entities.user import User
-from app.infra.ai.gemini_client import (
-    GeminiClient,
-    GeminiClientError,
-    build_function_response,
-    build_model_function_call,
-    build_user_message,
+from app.infra.ai.llm import (
+    LLMClient,
+    LLMError,
+    assistant_tool_calls_message,
+    tool_result_message,
+    user_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ EventSink = Callable[[ArkyStreamEvent], Awaitable[None]]
 class ArkyOrchestrator:
     def __init__(
         self,
-        gemini_client: GeminiClient,
+        llm_client: LLMClient,
         context_builder: ArkyContextBuilder,
         model_router: ArkyModelRouter,
         policy_engine: ArkyPolicyEngine,
@@ -179,7 +179,7 @@ class ArkyOrchestrator:
         rh_dashboard_service=None,
         knowledge_provider: ArkyKnowledgeProvider | None = None,
     ) -> None:
-        self._gemini = gemini_client
+        self._llm = llm_client
         self._ctx_builder = context_builder
         self._model_router = model_router
         self._policy = policy_engine
@@ -285,8 +285,8 @@ class ArkyOrchestrator:
             [p.name for p in allowed_policies]
         )
 
-        # Build Gemini contents
-        contents = self._build_contents(history, message, ctx, inp)
+        # Build provider-agnostic chat messages (OpenAI/OpenRouter format)
+        messages = self._build_messages(history, message, ctx, inp)
 
         # Tool execution context
         tool_ctx = ArkyToolContext(
@@ -307,6 +307,7 @@ class ArkyOrchestrator:
         status = "ok"
         error_code = None
         final_text = ""
+        final_model_used = model_selection.model_id
         total_prompt_tokens = 0
         total_completion_tokens = 0
         action_preview_id: UUID | None = None
@@ -321,10 +322,10 @@ class ArkyOrchestrator:
                         label="Processando resposta",
                     ),
                 )
-                resp = await self._gemini.generate(
-                    model=model_selection.model_id,
+                resp = await self._llm.generate(
+                    models=model_selection.chain,
                     system_instruction=_SYSTEM_PROMPT,
-                    contents=contents,
+                    messages=messages,
                     tools=tool_declarations if tool_declarations else None,
                     temperature=0.1,
                     max_output_tokens=2048,
@@ -332,8 +333,10 @@ class ArkyOrchestrator:
 
                 total_prompt_tokens += resp.usage.prompt_tokens
                 total_completion_tokens += resp.usage.completion_tokens
+                if resp.model_used:
+                    final_model_used = resp.model_used
 
-                if not resp.function_calls:
+                if not resp.tool_calls:
                     final_text = resp.text
                     break
 
@@ -341,10 +344,16 @@ class ArkyOrchestrator:
                     final_text = resp.text or "Não consegui processar sua solicitação no momento."
                     break
 
+                # Echo the assistant's tool-call request before sending results
+                # (OpenAI/OpenRouter contract: assistant tool_calls message, then
+                # one tool message per tool_call_id).
+                messages = list(messages)
+                messages.append(assistant_tool_calls_message(resp.tool_calls))
+
                 # Execute tool calls
-                for fc in resp.function_calls:
-                    tool_name = fc["name"]
-                    tool_args = fc.get("args", {})
+                for fc in resp.tool_calls:
+                    tool_name = fc.name
+                    tool_args = fc.args or {}
                     tool_label = _friendly_tool_label(tool_name)
 
                     # Policy check before execution
@@ -418,20 +427,16 @@ class ArkyOrchestrator:
                         except (ValueError, TypeError):
                             pass
 
-                    # Add model function call + response to contents
-                    contents = list(contents)
-                    contents.append(build_model_function_call(
-                        tool_name,
-                        tool_args,
-                        thought_signature=fc.get("thought_signature"),
-                    ))
-                    contents.append(build_function_response(tool_name, tool_result))
+                    # Append the tool result, referencing the originating call by id
+                    messages.append(
+                        tool_result_message(fc.id, tool_name, tool_result)
+                    )
 
-        except GeminiClientError as e:
-            logger.error("Gemini error: %s", e)
+        except LLMError as e:
+            logger.error("LLM error: %s", e)
             final_text = "Não consegui processar sua solicitação no momento. Tente novamente em instantes."
             status = "error"
-            error_code = f"gemini_{e.status_code or 'error'}"
+            error_code = f"llm_{e.status_code or 'error'}"
         except Exception as e:
             logger.exception("Unexpected orchestrator error: %s", e)
             final_text = "Ocorreu um erro interno. Por favor, tente novamente."
@@ -465,7 +470,7 @@ class ArkyOrchestrator:
             route=ctx.route,
             module=ctx.module,
             intent=output.intent,
-            model_used=model_selection.model_id,
+            model_used=final_model_used,
             model_family=model_selection.family,
             prompt_tokens=total_prompt_tokens,
             completion_tokens=total_completion_tokens,
@@ -517,32 +522,27 @@ class ArkyOrchestrator:
         if event_sink is not None:
             await event_sink(event)
 
-    def _build_contents(
+    def _build_messages(
         self, history: list[ArkyMessage], message: str, ctx, inp: ArkyChatInput
     ) -> list[dict]:
-        contents: list[dict] = []
+        messages: list[dict] = []
 
         # Include last few history messages (skip the last one which is the current user msg)
         for msg in history[:-1]:
-            role = "user" if msg.role == "user" else "model"
-            contents.append({"role": role, "parts": [{"text": msg.content}]})
+            role = "user" if msg.role == "user" else "assistant"
+            messages.append({"role": role, "content": msg.content})
 
         # Build current user message with context
         context_block = self._format_context(ctx, inp)
         full_user_message = f"{context_block}\n\n{message}" if context_block else message
 
-        parts: list[dict] = [{"text": full_user_message}]
-
         if ctx.screenshot_included and inp.screenshot_base64:
-            parts.append({
-                "inline_data": {
-                    "mime_type": "image/jpeg",
-                    "data": inp.screenshot_base64,
-                }
-            })
-
-        contents.append({"role": "user", "parts": parts})
-        return contents
+            messages.append(
+                user_message(full_user_message, image_base64=inp.screenshot_base64)
+            )
+        else:
+            messages.append(user_message(full_user_message))
+        return messages
 
     def _format_context(self, ctx, inp: ArkyChatInput) -> str:
         lines = [

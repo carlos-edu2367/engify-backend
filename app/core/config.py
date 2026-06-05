@@ -59,12 +59,34 @@ class Settings(BaseSettings):
     # Trial period
     trial_days: int = 7
 
-    # Arky Copilot
-    arky_gemini_api_key: str = ""
-    # Model IDs are configurable; never hardcoded. Validate on deploy.
-    arky_complex_model: str = "gemini-2.0-flash"
-    arky_simple_model: str = "gemini-2.0-flash-lite"
+    # Arky Copilot — IA via OpenRouter (camada provider-agnostica)
+    arky_openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Identificacao opcional enviada ao OpenRouter (rankings/limites de uso).
+    openrouter_site_url: str = ""
+    openrouter_app_name: str = "Engify Arky"
+    # Overrides opcionais das cadeias de fallback por papel (ids separados por
+    # virgula). Vazio = usa o catalogo curado (app.infra.ai.model_catalog).
+    # Permite trocar modelos sem deploy de codigo.
+    openrouter_models_weak: str = ""
+    openrouter_models_strong: str = ""
+    openrouter_models_vision: str = ""
     arky_enabled: bool = True
+
+    @property
+    def openrouter_model_overrides(self) -> dict[str, list[str]]:
+        """Overrides de cadeia por papel, parseados de env. Vazio => sem override."""
+        def _parse(value: str) -> list[str]:
+            return [item.strip() for item in value.split(",") if item.strip()]
+
+        overrides: dict[str, list[str]] = {}
+        if self.openrouter_models_weak:
+            overrides["weak"] = _parse(self.openrouter_models_weak)
+        if self.openrouter_models_strong:
+            overrides["strong"] = _parse(self.openrouter_models_strong)
+        if self.openrouter_models_vision:
+            overrides["vision"] = _parse(self.openrouter_models_vision)
+        return overrides
 
     @field_validator("debug", mode="before")
     @classmethod

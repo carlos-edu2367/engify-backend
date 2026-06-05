@@ -8,7 +8,7 @@ from app.application.services.arky.orchestrator import ArkyOrchestrator
 def _make_orchestrator() -> ArkyOrchestrator:
     # Minimal orchestrator with all deps mocked (we only test _parse_response)
     return ArkyOrchestrator(
-        gemini_client=MagicMock(),
+        llm_client=MagicMock(),
         context_builder=MagicMock(),
         model_router=MagicMock(),
         policy_engine=MagicMock(),

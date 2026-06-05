@@ -25,11 +25,8 @@ openpyxl>=3.1.5
 # Rate limiting
 slowapi>=0.1.9
 
-# HTTP client
+# HTTP client (também usado pela camada de IA via OpenRouter)
 httpx>=0.27.0
-
-# AI SDK
-google-genai>=1.55.0
 
 # Observabilidade
 structlog>=24.0.0

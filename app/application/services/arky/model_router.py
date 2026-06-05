@@ -1,20 +1,36 @@
 """
-ArkyModelRouter — selects the appropriate Gemini model per request complexity.
-Model IDs are configured via environment variables, never hardcoded.
-"""
-from dataclasses import dataclass
+ArkyModelRouter — classifica a complexidade de cada requisicao do Arky e devolve
+a CADEIA de fallback de modelos apropriada (provider-agnostica).
 
-from app.core.config import settings
+A heuristica de complexidade (modulo sensivel, screenshot, intencao, tamanho da
+mensagem) e regra de negocio do Arky e vive aqui. QUAIS modelos concretos
+implementam cada papel (weak/strong/vision) e responsabilidade do `ModelRouter`
+(model_registry.py), que consome o catalogo curado. Separacao deliberada:
+trocar modelo nunca exige tocar nesta logica.
+"""
+from dataclasses import dataclass, field
+
+from app.infra.ai.model_registry import ModelRouter, STRONG, VISION, WEAK
 
 
 @dataclass
 class ModelSelection:
-    model_id: str
-    family: str
-    reason: str
+    role: str                       # "weak" | "strong" | "vision"
+    chain: list[str] = field(default_factory=list)  # fallback: preferido -> ultimo
+    reason: str = ""
+
+    @property
+    def model_id(self) -> str:
+        """Primeiro modelo da cadeia — usado na auditoria como preferencia."""
+        return self.chain[0] if self.chain else ""
+
+    @property
+    def family(self) -> str:
+        """Familia logica para auditoria/telemetria."""
+        return f"openrouter-{self.role}"
 
 
-# Modules and intent patterns that require the complex model
+# Modules and intent patterns that require the strong (complex) role
 _COMPLEX_MODULES = frozenset({"financeiro", "rh"})
 _COMPLEX_INTENT_HINTS = frozenset({
     "analyze", "explain", "summary", "relatorio", "report",
@@ -23,6 +39,9 @@ _COMPLEX_INTENT_HINTS = frozenset({
 
 
 class ArkyModelRouter:
+    def __init__(self, registry: ModelRouter | None = None) -> None:
+        self._registry = registry or ModelRouter()
+
     def select(
         self,
         message: str,
@@ -31,35 +50,22 @@ class ArkyModelRouter:
         intent_hint: str | None,
     ) -> ModelSelection:
         if has_screenshot:
-            return ModelSelection(
-                model_id=settings.arky_complex_model,
-                family="gemini-complex",
-                reason="screenshot requires multimodal model",
-            )
+            return self._build(VISION, "screenshot requires multimodal model")
 
         if module and module.lower() in _COMPLEX_MODULES:
-            return ModelSelection(
-                model_id=settings.arky_complex_model,
-                family="gemini-complex",
-                reason=f"sensitive module: {module}",
-            )
+            return self._build(STRONG, f"sensitive module: {module}")
 
         if intent_hint and intent_hint.lower() in _COMPLEX_INTENT_HINTS:
-            return ModelSelection(
-                model_id=settings.arky_complex_model,
-                family="gemini-complex",
-                reason=f"complex intent: {intent_hint}",
-            )
+            return self._build(STRONG, f"complex intent: {intent_hint}")
 
         if len(message) > 300:
-            return ModelSelection(
-                model_id=settings.arky_complex_model,
-                family="gemini-complex",
-                reason="long message requiring deeper reasoning",
-            )
+            return self._build(STRONG, "long message requiring deeper reasoning")
 
+        return self._build(WEAK, "simple task")
+
+    def _build(self, role: str, reason: str) -> ModelSelection:
         return ModelSelection(
-            model_id=settings.arky_simple_model,
-            family="gemini-simple",
-            reason="simple task",
+            role=role,
+            chain=self._registry.chain_for(role),
+            reason=reason,
         )
