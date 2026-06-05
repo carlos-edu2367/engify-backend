@@ -161,10 +161,10 @@ async def test_prepare_saves_single_preview_for_list(team_id):
     assert out["preview"]["quantidade"] == 2
     assert out["preview"]["total"] == 320.0
     preview_repo.save.assert_awaited_once()
-    # A prévia exibida ao usuario nao contem o codigo Pix em texto, so o booleano
+    # A previa de preparacao mostra o codigo ao usuario para revisao antes da aprovacao.
     item = out["preview"]["itens"][0]
     assert item["tem_codigo_pagamento"] is True
-    assert "payment_cod" not in item
+    assert item["payment_cod"] == "pix-1"
 
 
 @pytest.mark.asyncio

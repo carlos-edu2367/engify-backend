@@ -298,6 +298,7 @@ async def financeiro_prepare_pagamentos(params: dict, ctx: ArkyToolContext) -> d
                     "classe": i["classe"],
                     "data_agendada": i["data_agendada"],
                     "tem_codigo_pagamento": bool(i.get("payment_cod")),
+                    "payment_cod": i.get("payment_cod"),
                     "obra_title": i.get("obra_title"),
                     "diarist_nome": i.get("diarist_nome"),
                 }
