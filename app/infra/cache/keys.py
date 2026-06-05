@@ -115,6 +115,11 @@ def revoked_token_key(jti: str) -> str:
     return f"revoked:{jti}"
 
 
+def rotated_refresh_key(jti: str) -> str:
+    """Resultado temporario de uma rotacao de refresh para idempotencia curta."""
+    return f"refresh:rotated:{jti}"
+
+
 def mural_list_key(team_id: UUID, obra_id: UUID, page: int, limit: int) -> str:
     return f"{team_id}:obras:{obra_id}:mural:{page}:{limit}"
 

@@ -129,3 +129,116 @@ async def test_refresh_rotates_cookie_and_revokes_previous_token(monkeypatch):
     assert "refresh_token=" in set_cookie
     new_cookie_value = set_cookie.split("refresh_token=", 1)[1].split(";", 1)[0]
     assert new_cookie_value != old_token
+
+
+@pytest.mark.asyncio
+async def test_refresh_allows_immediate_duplicate_request_after_rotation(monkeypatch):
+    user_id = uuid4()
+    team_id = uuid4()
+    old_token = create_refresh_token(user_id, team_id, "admin")
+
+    class RedisStub:
+        def __init__(self):
+            self.store: dict[str, str] = {}
+
+        async def exists(self, key: str) -> int:
+            return int(key in self.store)
+
+        async def get(self, key: str) -> str | None:
+            return self.store.get(key)
+
+        async def set(self, key: str, value: str, ex: int) -> None:
+            self.store[key] = value
+
+    redis = RedisStub()
+    monkeypatch.setattr(auth, "get_redis", lambda: redis)
+    monkeypatch.setattr(
+        auth,
+        "settings",
+        SimpleNamespace(
+            environment="dev",
+            api_prefix="/api/v1",
+            refresh_cookie_domain=None,
+            frontend_url="http://localhost:5174",
+            allowed_origins=["http://localhost:5174"],
+        ),
+    )
+
+    first_response = Response()
+    first_result = await auth.refresh_token(
+        Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/v1/auth/refresh",
+                "headers": [(b"origin", b"http://localhost:5174")],
+            }
+        ),
+        first_response,
+        old_token,
+    )
+
+    second_response = Response()
+    second_result = await auth.refresh_token(
+        Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/v1/auth/refresh",
+                "headers": [(b"origin", b"http://localhost:5174")],
+            }
+        ),
+        second_response,
+        old_token,
+    )
+
+    assert second_result.access_token == first_result.access_token
+    assert second_response.headers["set-cookie"] == first_response.headers["set-cookie"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_logged_out_revoked_token(monkeypatch):
+    user_id = uuid4()
+    team_id = uuid4()
+    old_token = create_refresh_token(user_id, team_id, "admin")
+    old_jti = decode_refresh_token(old_token)["jti"]
+
+    class RedisStub:
+        async def exists(self, key: str) -> int:
+            return int(key == f"revoked:{old_jti}")
+
+        async def get(self, key: str) -> str | None:
+            if key == f"revoked:{old_jti}":
+                return "1"
+            return None
+
+    monkeypatch.setattr(auth, "get_redis", lambda: RedisStub())
+    monkeypatch.setattr(
+        auth,
+        "settings",
+        SimpleNamespace(
+            environment="dev",
+            api_prefix="/api/v1",
+            refresh_cookie_domain=None,
+            frontend_url="http://localhost:5174",
+            allowed_origins=["http://localhost:5174"],
+        ),
+    )
+
+    response = Response()
+    with pytest.raises(HTTPException) as exc:
+        await auth.refresh_token(
+            Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/v1/auth/refresh",
+                    "headers": [(b"origin", b"http://localhost:5174")],
+                }
+            ),
+            response,
+            old_token,
+        )
+
+    assert exc.value.status_code == 401
+    assert "refresh_token=" in response.headers["set-cookie"]

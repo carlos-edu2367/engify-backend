@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Response, Cookie, Request
 from typing import Annotated
@@ -16,7 +17,7 @@ from app.infra.security.jwt import (
     create_access_token, create_refresh_token, decode_refresh_token
 )
 from app.infra.cache.client import get_redis
-from app.infra.cache.keys import revoked_token_key
+from app.infra.cache.keys import revoked_token_key, rotated_refresh_key
 from jose import JWTError
 from app.core.config import settings
 
@@ -24,6 +25,9 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 _REFRESH_COOKIE = "refresh_token"
 _COOKIE_MAX_AGE = settings.refresh_token_expire_days * 24 * 60 * 60
+_REFRESH_ROTATION_GRACE_SECONDS = 30
+
+
 def _refresh_cookie_path() -> str:
     return f"{settings.api_prefix.rstrip('/')}/auth"
 
@@ -102,6 +106,53 @@ async def _revoke_refresh_payload(payload: dict) -> None:
     await redis.set(revoked_token_key(jti), "1", ex=_refresh_ttl(payload))
 
 
+def _rotated_refresh_payload(access_token: str, refresh_token: str) -> str:
+    return json.dumps(
+        {
+            "reason": "rotated",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "reuse_until": int(datetime.now(timezone.utc).timestamp()) + _REFRESH_ROTATION_GRACE_SECONDS,
+        }
+    )
+
+
+def _parse_rotated_refresh_payload(value: str | bytes | None) -> dict | None:
+    if not value:
+        return None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("reason") != "rotated":
+        return None
+    if not data.get("access_token") or not data.get("refresh_token"):
+        return None
+    try:
+        reuse_until = int(data.get("reuse_until", 0))
+    except (TypeError, ValueError):
+        return None
+    if reuse_until < int(datetime.now(timezone.utc).timestamp()):
+        return None
+    return data
+
+
+async def _cache_rotated_refresh_payload(payload: dict, access_token: str, refresh_token: str) -> None:
+    jti = payload.get("jti")
+    if not jti:
+        return
+    redis = get_redis()
+    await redis.set(
+        rotated_refresh_key(jti),
+        _rotated_refresh_payload(access_token, refresh_token),
+        ex=_REFRESH_ROTATION_GRACE_SECONDS,
+    )
+
+
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest, response: Response, svc: UserServiceDep):
@@ -166,6 +217,10 @@ async def refresh_token(
     if jti:
         redis = get_redis()
         if await redis.exists(revoked_token_key(jti)):
+            rotated_payload = _parse_rotated_refresh_payload(await redis.get(rotated_refresh_key(jti)))
+            if rotated_payload:
+                _set_refresh_cookie(response, rotated_payload["refresh_token"])
+                return RefreshResponse(access_token=rotated_payload["access_token"])
             _clear_refresh_cookie(response)
             raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
 
@@ -180,6 +235,7 @@ async def refresh_token(
         role=payload["role"],
     )
     await _revoke_refresh_payload(payload)
+    await _cache_rotated_refresh_payload(payload, new_access, new_refresh)
     _set_refresh_cookie(response, new_refresh)
 
     return RefreshResponse(access_token=new_access)
