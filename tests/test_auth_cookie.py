@@ -33,6 +33,38 @@ def test_refresh_cookie_uses_lax_without_secure_in_dev(monkeypatch):
     assert "Secure" not in set_cookie
 
 
+def test_refresh_cookie_uses_none_with_secure_when_forwarded_https_in_dev(monkeypatch):
+    response = Response()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/login",
+            "headers": [(b"x-forwarded-proto", b"https")],
+        }
+    )
+    monkeypatch.setattr(
+        auth,
+        "settings",
+        SimpleNamespace(
+            environment="dev",
+            api_prefix="/api/v1",
+            refresh_cookie_domain=None,
+            refresh_cookie_samesite="lax",
+            frontend_url="https://engify.arcaikaengenharia.com",
+            allowed_origins=["https://engify.arcaikaengenharia.com"],
+        ),
+    )
+
+    auth._set_refresh_cookie(response, "refresh.jwt", request)
+
+    set_cookie = response.headers["set-cookie"]
+    assert "refresh_token=refresh.jwt" in set_cookie
+    assert "Path=/api/v1/auth" in set_cookie
+    assert "SameSite=none" in set_cookie
+    assert "Secure" in set_cookie
+
+
 def test_refresh_cookie_uses_none_with_secure_outside_dev(monkeypatch):
     response = Response()
     monkeypatch.setattr(auth, "settings", SimpleNamespace(environment="prod", api_prefix="/api/v1", refresh_cookie_domain=None))

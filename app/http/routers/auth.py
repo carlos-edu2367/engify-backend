@@ -32,38 +32,49 @@ def _refresh_cookie_path() -> str:
     return f"{settings.api_prefix.rstrip('/')}/auth"
 
 
-def _refresh_cookie_secure() -> bool:
-    return settings.environment != "dev"
+def _request_is_https(request: Request | None) -> bool:
+    if request is None:
+        return False
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    if forwarded_proto.split(",", 1)[0].strip().lower() == "https":
+        return True
+    return request.url.scheme == "https"
 
 
-def _refresh_cookie_samesite() -> str:
+def _refresh_cookie_secure(request: Request | None = None) -> bool:
+    return settings.environment != "dev" or _request_is_https(request)
+
+
+def _refresh_cookie_samesite(request: Request | None = None) -> str:
     configured = getattr(settings, "refresh_cookie_samesite", None)
+    if settings.environment == "dev" and _request_is_https(request):
+        return "none"
     if configured:
         return configured
     return "lax" if settings.environment == "dev" else "none"
 _COOKIE_SAMESITE = settings.refresh_cookie_samesite  # configurável via REFRESH_COOKIE_SAMESITE
 
 
-def _set_refresh_cookie(response: Response, token: str) -> None:
+def _set_refresh_cookie(response: Response, token: str, request: Request | None = None) -> None:
     response.set_cookie(
         key=_REFRESH_COOKIE,
         value=token,
         httponly=True,
-        secure=_refresh_cookie_secure(),
-        samesite=_refresh_cookie_samesite(),
+        secure=_refresh_cookie_secure(request),
+        samesite=_refresh_cookie_samesite(request),
         max_age=_COOKIE_MAX_AGE,
         path=_refresh_cookie_path(),
         domain=settings.refresh_cookie_domain,
     )
 
 
-def _clear_refresh_cookie(response: Response) -> None:
+def _clear_refresh_cookie(response: Response, request: Request | None = None) -> None:
     response.delete_cookie(
         key=_REFRESH_COOKIE,
         path=_refresh_cookie_path(),
         domain=settings.refresh_cookie_domain,
-        secure=_refresh_cookie_secure(),
-        samesite=_refresh_cookie_samesite(),
+        secure=_refresh_cookie_secure(request),
+        samesite=_refresh_cookie_samesite(request),
     )
 
 
@@ -164,7 +175,7 @@ async def login(request: Request, body: LoginRequest, response: Response, svc: U
 
     access_token = create_access_token(user.id, user.team.id, user.role.value)
     refresh_token = create_refresh_token(user.id, user.team.id, user.role.value)
-    _set_refresh_cookie(response, refresh_token)
+    _set_refresh_cookie(response, refresh_token, request)
 
     return TokenResponse(
         access_token=access_token,
@@ -209,7 +220,7 @@ async def refresh_token(
     try:
         payload = decode_refresh_token(refresh_token)
     except JWTError:
-        _clear_refresh_cookie(response)
+        _clear_refresh_cookie(response, request)
         raise HTTPException(status_code=401, detail="Refresh token inválido ou expirado")
 
     # Verifica se o token foi revogado por logout
@@ -219,9 +230,9 @@ async def refresh_token(
         if await redis.exists(revoked_token_key(jti)):
             rotated_payload = _parse_rotated_refresh_payload(await redis.get(rotated_refresh_key(jti)))
             if rotated_payload:
-                _set_refresh_cookie(response, rotated_payload["refresh_token"])
+                _set_refresh_cookie(response, rotated_payload["refresh_token"], request)
                 return RefreshResponse(access_token=rotated_payload["access_token"])
-            _clear_refresh_cookie(response)
+            _clear_refresh_cookie(response, request)
             raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
 
     new_access = create_access_token(
@@ -236,7 +247,7 @@ async def refresh_token(
     )
     await _revoke_refresh_payload(payload)
     await _cache_rotated_refresh_payload(payload, new_access, new_refresh)
-    _set_refresh_cookie(response, new_refresh)
+    _set_refresh_cookie(response, new_refresh, request)
 
     return RefreshResponse(access_token=new_access)
 
@@ -257,7 +268,7 @@ async def logout(
         except JWTError:
             pass  # token já inválido — só limpar o cookie
 
-    _clear_refresh_cookie(response)
+    _clear_refresh_cookie(response, request)
     return MessageResponse(message="Logout realizado com sucesso")
 
 
