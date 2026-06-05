@@ -60,6 +60,21 @@ def test_financeiro_knowledge_for_admin_full_access():
     assert "Criado por engenheiro" in text
 
 
+def test_financeiro_knowledge_teaches_payment_suggestion_flow():
+    provider = ArkyKnowledgeProvider()
+
+    for perms in (
+        {"can_read_financeiro": True, "can_manage_own_pagamentos": False, "role": "admin"},
+        {"can_read_financeiro": False, "can_manage_own_pagamentos": True, "role": "engenheiro"},
+    ):
+        text = provider.build_context(module="financeiro", permission_summary=perms)
+        assert "financeiro_prepare_pagamentos" in text
+        assert "financeiro_pagamentos_overview" in text
+        assert "financeiro_buscar_pagamentos" in text
+        assert "LISTA" in text
+        assert "confirmacao" in text
+
+
 def test_rh_knowledge_distinguishes_admin_and_meu_rh_permissions():
     provider = ArkyKnowledgeProvider()
 

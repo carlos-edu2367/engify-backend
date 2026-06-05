@@ -37,6 +37,16 @@ _COMPLEX_INTENT_HINTS = frozenset({
     "update_obra_status", "create_obra",
 })
 
+# Intents de extração/execução estruturada que rodam bem em modelos gratuitos
+# (Gemma 4). Forçam a cadeia WEAK (free-first) MESMO em módulos sensíveis, pois
+# são tarefas de parsing + tool-calling, não de raciocínio complexo. Mantém o
+# requisito "free-first com fallback pago de boa qualidade" sem custo de Gemini
+# em fluxos de alto volume (ex.: usuário lança vários pagamentos de uma vez).
+_EXTRACTION_INTENT_HINTS = frozenset({
+    "create_pagamentos", "cadastrar_pagamentos", "pagamentos_agendados",
+    "agendar_pagamento", "agendar_pagamentos",
+})
+
 
 class ArkyModelRouter:
     def __init__(self, registry: ModelRouter | None = None) -> None:
@@ -51,6 +61,11 @@ class ArkyModelRouter:
     ) -> ModelSelection:
         if has_screenshot:
             return self._build(VISION, "screenshot requires multimodal model")
+
+        # Extração estruturada (ex.: cadastro de pagamentos) vai para a cadeia
+        # gratuita ANTES do gate de módulo sensível — Gemma 4 dá conta.
+        if intent_hint and intent_hint.lower() in _EXTRACTION_INTENT_HINTS:
+            return self._build(WEAK, f"structured extraction intent: {intent_hint}")
 
         if module and module.lower() in _COMPLEX_MODULES:
             return self._build(STRONG, f"sensitive module: {module}")

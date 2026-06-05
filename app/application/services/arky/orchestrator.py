@@ -27,6 +27,7 @@ from app.application.services.arky.policies import ArkyPolicyEngine
 from app.application.services.arky.tool_registry import ArkyToolRegistry
 from app.application.services.arky.tools.context import ArkyToolContext
 from app.application.services.arky.tools import (
+    diaristas as diarista_tools,
     financeiro as fin_tools,
     items as item_tools,
     notificacoes as notif_tools,
@@ -40,6 +41,7 @@ from app.domain.entities.arky import (
     ArkyMessage,
 )
 from app.domain.entities.user import User
+from app.domain.errors import DomainError
 from app.infra.ai.llm import (
     LLMClient,
     LLMError,
@@ -176,6 +178,8 @@ class ArkyOrchestrator:
         item_service=None,
         notificacao_service=None,
         financeiro_fluxo_service=None,
+        financeiro_service=None,
+        diarist_service=None,
         rh_dashboard_service=None,
         knowledge_provider: ArkyKnowledgeProvider | None = None,
     ) -> None:
@@ -193,6 +197,8 @@ class ArkyOrchestrator:
         self._item_service = item_service
         self._notificacao_service = notificacao_service
         self._financeiro_fluxo_service = financeiro_fluxo_service
+        self._financeiro_service = financeiro_service
+        self._diarist_service = diarist_service
         self._rh_dashboard_service = rh_dashboard_service
         self._knowledge = knowledge_provider or ArkyKnowledgeProvider()
 
@@ -296,6 +302,8 @@ class ArkyOrchestrator:
             item_service=self._item_service,
             notificacao_service=self._notificacao_service,
             financeiro_fluxo_service=self._financeiro_fluxo_service,
+            financeiro_service=self._financeiro_service,
+            diarist_service=self._diarist_service,
             rh_dashboard_service=self._rh_dashboard_service,
             arky_preview_repo=self._preview_repo,
             uow=self._uow,
@@ -496,6 +504,61 @@ class ArkyOrchestrator:
         )
         return output
 
+    async def execute_confirmed_action(
+        self, preview: ArkyActionPreview, user: User
+    ) -> dict | None:
+        """Executa de fato uma ação confirmada (human-in-the-loop).
+
+        Chamada pelo endpoint /arky/confirm APÓS a prévia ser confirmada. A
+        autoria e as permissões são derivadas do usuário autenticado (`user`),
+        nunca do payload — toda a validação acontece no backend. Tipos de ação
+        sem executor registrado permanecem preview-only (retornam None), o que
+        preserva o comportamento anterior das demais previews.
+        """
+        if preview.action_type != "prepare_create_pagamentos":
+            return None
+
+        if self._financeiro_service is None:
+            raise DomainError("Serviço financeiro indisponível para confirmação")
+
+        # Defesa em profundidade: o tenant do payload precisa bater com o do token.
+        payload = preview.payload or {}
+        payload_team = payload.get("team_id")
+        if payload_team and str(payload_team) != str(user.team.id):
+            raise DomainError("Prévia pertence a outro tenant")
+
+        itens = payload.get("itens") or []
+        if not itens:
+            raise DomainError("Nenhum pagamento para confirmar")
+
+        from app.application.dtos.financeiro import CreatePagamentoDTO
+        from app.domain.entities.financeiro import MovClass
+
+        dtos: list[CreatePagamentoDTO] = []
+        for item in itens:
+            dtos.append(
+                CreatePagamentoDTO(
+                    title=item["title"],
+                    details=item.get("details", ""),
+                    valor=item["valor"],
+                    classe=MovClass(item["classe"]),
+                    data_agendada=item["data_agendada"],
+                    payment_cod=item.get("payment_cod"),
+                    obra_id=item.get("obra_id"),
+                    diarist_id=item.get("diarist_id"),
+                )
+            )
+
+        criados = await self._financeiro_service.create_pagamentos(
+            dtos, user.team.id, actor_user=user
+        )
+        total = round(sum(float(p.valor.amount) for p in criados), 2)
+        return {
+            "created": len(criados),
+            "total": total,
+            "pagamento_ids": [str(p.id) for p in criados],
+        }
+
     async def chat_stream(self, inp: ArkyChatInput) -> AsyncIterator[ArkyStreamEvent]:
         queue: asyncio.Queue[ArkyStreamEvent] = asyncio.Queue()
 
@@ -582,6 +645,10 @@ class ArkyOrchestrator:
             "notificacoes_list": notif_tools.notificacoes_list,
             "notificacoes_prepare_send": notif_tools.notificacoes_prepare_send,
             "financeiro_get_fluxo_caixa": fin_tools.financeiro_get_fluxo_caixa,
+            "financeiro_pagamentos_overview": fin_tools.financeiro_pagamentos_overview,
+            "financeiro_buscar_pagamentos": fin_tools.financeiro_buscar_pagamentos,
+            "financeiro_prepare_pagamentos": fin_tools.financeiro_prepare_pagamentos,
+            "diaristas_list": diarista_tools.diaristas_list,
             "rh_get_me_resumo": rh_tools.rh_get_me_resumo,
             "rh_get_dashboard": rh_tools.rh_get_dashboard,
         }
@@ -670,6 +737,10 @@ def _friendly_tool_label(tool_name: str) -> str:
         "notificacoes_list": "Consultando notificacoes",
         "notificacoes_prepare_send": "Preparando notificacao",
         "financeiro_get_fluxo_caixa": "Buscando dados financeiros permitidos",
+        "financeiro_pagamentos_overview": "Verificando pagamentos atrasados",
+        "financeiro_buscar_pagamentos": "Buscando histórico de pagamentos",
+        "financeiro_prepare_pagamentos": "Preparando pagamentos para confirmacao",
+        "diaristas_list": "Consultando diaristas",
         "rh_get_me_resumo": "Analisando modulo de RH",
         "rh_get_dashboard": "Analisando modulo de RH",
     }

@@ -47,6 +47,30 @@ _TOOL_POLICIES: dict[str, ToolPolicy] = {
         allowed_modules=frozenset({"financeiro"}),
         risk_level="leitura",
     ),
+    "financeiro_pagamentos_overview": ToolPolicy(
+        name="financeiro_pagamentos_overview",
+        # Engenheiro participa do fluxo de pagamentos (vê apenas os próprios,
+        # escopo aplicado no service). Não é module-scoped: o usuário pode
+        # perguntar sobre pagamentos a partir de qualquer tela.
+        allowed_roles=frozenset({Roles.ADMIN, Roles.FINANCEIRO, Roles.ENGENHEIRO}),
+        risk_level="leitura",
+    ),
+    "financeiro_buscar_pagamentos": ToolPolicy(
+        name="financeiro_buscar_pagamentos",
+        allowed_roles=frozenset({Roles.ADMIN, Roles.FINANCEIRO, Roles.ENGENHEIRO}),
+        risk_level="leitura",
+    ),
+    "diaristas_list": ToolPolicy(
+        name="diaristas_list",
+        allowed_roles=frozenset({Roles.ADMIN, Roles.FINANCEIRO, Roles.ENGENHEIRO}),
+        risk_level="leitura",
+    ),
+    "financeiro_prepare_pagamentos": ToolPolicy(
+        name="financeiro_prepare_pagamentos",
+        allowed_roles=frozenset({Roles.ADMIN, Roles.FINANCEIRO, Roles.ENGENHEIRO}),
+        requires_confirmation=True,
+        risk_level="preparacao",
+    ),
     "rh_get_me_resumo": ToolPolicy(
         name="rh_get_me_resumo",
         allowed_roles=frozenset({Roles.FUNCIONARIO}),

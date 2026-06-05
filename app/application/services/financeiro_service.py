@@ -121,14 +121,19 @@ class FinanceiroService():
 
     # ── Pagamentos Agendados ───────────────────────────────────────────────────
 
-    async def create_pagamento(
-        self, dto: CreatePagamentoDTO, team_id: UUID, actor_user: User | None = None
+    async def _build_pagamento(
+        self, dto: CreatePagamentoDTO, team_id: UUID, actor_user: User | None
     ) -> PagamentoAgendado:
+        """Valida e constrói um PagamentoAgendado sem persistir.
+
+        Centraliza as regras de criação (código obrigatório p/ engenheiro,
+        carimbo de autoria, geração do Pix) para reuso entre a criação
+        unitária e a criação em lote."""
         if _is_engineer(actor_user) and not _has_payment_code(dto.payment_cod):
             raise errors.DomainError("codigo de pagamento e obrigatorio para engenheiros")
 
         receiver_name = await self._resolve_receiver_name(dto.diarist_id, team_id)
-        pag = PagamentoAgendado(
+        return PagamentoAgendado(
             team_id=team_id,
             title=dto.title,
             details=dto.details,
@@ -149,9 +154,51 @@ class FinanceiroService():
             created_by_name=getattr(actor_user, "nome", None),
             created_by_engineer=_is_engineer(actor_user),
         )
+
+    async def create_pagamento(
+        self, dto: CreatePagamentoDTO, team_id: UUID, actor_user: User | None = None
+    ) -> PagamentoAgendado:
+        pag = await self._build_pagamento(dto, team_id, actor_user)
         saved = await self.pagamento_repo.save(pag)
         await self.uow.commit()
         return saved
+
+    async def create_pagamentos(
+        self, dtos: list[CreatePagamentoDTO], team_id: UUID,
+        actor_user: User | None = None,
+    ) -> list[PagamentoAgendado]:
+        """Cria múltiplos pagamentos agendados de forma atômica.
+
+        Valida TODOS os itens antes de persistir qualquer um (validação
+        completa no backend), depois salva todos e faz um único commit.
+        Usado pela confirmação de sugestões do Arky."""
+        if not dtos:
+            raise errors.DomainError("A lista de pagamentos não pode ser vazia")
+
+        # Constrói/valida todos primeiro — falha total se qualquer item for inválido.
+        pagamentos = [
+            await self._build_pagamento(dto, team_id, actor_user) for dto in dtos
+        ]
+        salvos = [await self.pagamento_repo.save(p) for p in pagamentos]
+        await self.uow.commit()
+        return salvos
+
+    async def list_pagamentos_overdue(
+        self, team_id: UUID, actor_user: User | None = None, limit: int = 20,
+        reference: datetime | None = None,
+    ) -> list[PagamentoAgendado]:
+        """Pagamentos atrasados (AGUARDANDO e vencidos). Engenheiro vê só os seus."""
+        ref = reference or datetime.now(timezone.utc)
+        owner_id = actor_user.id if _is_engineer(actor_user) else None
+        return await self.pagamento_repo.list_overdue(team_id, ref, limit, owner_id)
+
+    async def search_pagamentos(
+        self, team_id: UUID, query: str, actor_user: User | None = None,
+        limit: int = 10,
+    ) -> list[PagamentoAgendado]:
+        """Busca pagamentos por texto (nome/descrição). Engenheiro vê só os seus."""
+        owner_id = actor_user.id if _is_engineer(actor_user) else None
+        return await self.pagamento_repo.search(team_id, query, limit, owner_id)
 
     def get_pagamento_filters_for_actor(
         self, filters: PagamentoFiltersDTO | None, actor_user: User | None = None

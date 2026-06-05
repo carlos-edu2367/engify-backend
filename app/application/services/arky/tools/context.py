@@ -14,6 +14,8 @@ class ArkyToolContext:
     item_service: object | None = None
     notificacao_service: object | None = None
     financeiro_fluxo_service: object | None = None
+    financeiro_service: object | None = None
+    diarist_service: object | None = None
     rh_dashboard_service: object | None = None
     arky_preview_repo: object | None = None
     uow: object | None = None

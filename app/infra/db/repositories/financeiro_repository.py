@@ -230,6 +230,49 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
+    async def list_overdue(
+        self, team_id: UUID, reference: datetime, limit: int,
+        created_by_user_id: UUID | None = None,
+    ) -> list[PagamentoAgendado]:
+        stmt = (
+            select(PagamentoAgendadoModel)
+            .where(
+                PagamentoAgendadoModel.team_id == team_id,
+                PagamentoAgendadoModel.status == PaymentStatus.AGUARDANDO.value,
+                PagamentoAgendadoModel.data_agendada < reference,
+            )
+            .order_by(PagamentoAgendadoModel.data_agendada.asc())
+            .limit(limit)
+        )
+        if created_by_user_id is not None:
+            stmt = stmt.where(PagamentoAgendadoModel.created_by_user_id == created_by_user_id)
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
+    async def search(
+        self, team_id: UUID, query: str, limit: int,
+        created_by_user_id: UUID | None = None,
+    ) -> list[PagamentoAgendado]:
+        # Escapa curingas LIKE para tratar a entrada do usuário como literal.
+        safe = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{safe}%"
+        stmt = (
+            select(PagamentoAgendadoModel)
+            .where(
+                PagamentoAgendadoModel.team_id == team_id,
+                (
+                    PagamentoAgendadoModel.title.ilike(pattern, escape="\\")
+                    | PagamentoAgendadoModel.details.ilike(pattern, escape="\\")
+                ),
+            )
+            .order_by(PagamentoAgendadoModel.data_agendada.desc())
+            .limit(limit)
+        )
+        if created_by_user_id is not None:
+            stmt = stmt.where(PagamentoAgendadoModel.created_by_user_id == created_by_user_id)
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
     async def save(self, pagamento: PagamentoAgendado) -> PagamentoAgendado:
         if pagamento.id is None:
             pagamento.id = uuid4()

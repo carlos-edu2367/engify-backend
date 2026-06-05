@@ -94,6 +94,39 @@ class TestFinanceiroTools:
         assert engine.is_tool_allowed("financeiro_get_fluxo_caixa", user, None) is False
 
 
+class TestPagamentosTools:
+    """Tools de pagamentos agendados: admin, financeiro e engenheiro; nao module-scoped."""
+
+    @pytest.mark.parametrize("tool", [
+        "financeiro_pagamentos_overview",
+        "financeiro_buscar_pagamentos",
+        "diaristas_list",
+        "financeiro_prepare_pagamentos",
+    ])
+    @pytest.mark.parametrize("role", [Roles.ADMIN, Roles.FINANCEIRO, Roles.ENGENHEIRO])
+    def test_managers_and_engineer_allowed(self, engine, tool, role):
+        user = _make_user(role)
+        # Sem module (qualquer tela) deve ser permitido.
+        assert engine.is_tool_allowed(tool, user, None) is True
+
+    @pytest.mark.parametrize("tool", [
+        "financeiro_pagamentos_overview",
+        "financeiro_buscar_pagamentos",
+        "diaristas_list",
+        "financeiro_prepare_pagamentos",
+    ])
+    @pytest.mark.parametrize("role", [Roles.CLIENTE, Roles.FUNCIONARIO])
+    def test_cliente_and_funcionario_denied(self, engine, tool, role):
+        user = _make_user(role)
+        assert engine.is_tool_allowed(tool, user, None) is False
+
+    def test_engineer_does_not_get_fluxo_caixa(self, engine):
+        """Engenheiro participa de pagamentos mas nunca do fluxo de caixa."""
+        user = _make_user(Roles.ENGENHEIRO)
+        assert engine.is_tool_allowed("financeiro_prepare_pagamentos", user, "financeiro") is True
+        assert engine.is_tool_allowed("financeiro_get_fluxo_caixa", user, "financeiro") is False
+
+
 class TestRhTools:
     def test_funcionario_can_access_me_resumo(self, engine):
         user = _make_user(Roles.FUNCIONARIO)

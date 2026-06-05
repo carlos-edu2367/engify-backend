@@ -21,6 +21,7 @@ from app.application.services.arky.orchestrator import (
     ArkyChatOutput,
     ArkyStreamEvent,
 )
+from app.domain.errors import DomainError
 
 router = APIRouter(prefix="/arky", tags=["Arky"])
 
@@ -214,13 +215,26 @@ async def arky_confirm(
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
+    # Executa a ação confirmada (human-in-the-loop). A autoria/permissões vêm do
+    # usuário autenticado, com validação completa no backend. Se a execução
+    # falhar, a prévia NÃO é marcada como confirmada (nada é persistido).
+    try:
+        result = await copilot.execute_confirmed_action(preview, user)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(getattr(e, "detail", e)))
+
     await copilot._preview_repo.update(preview)
     await copilot._uow.commit()
+
+    message = "Ação confirmada com sucesso."
+    if result and result.get("created"):
+        message = f"{result['created']} pagamento(s) agendado(s) com sucesso."
 
     return ArkyConfirmResponse(
         action_preview_id=str(pid),
         status="confirmed",
-        message="Ação confirmada com sucesso.",
+        message=message,
+        result=result,
     )
 
 

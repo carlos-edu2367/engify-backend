@@ -5,7 +5,11 @@ Only tools registered here can ever be called by the model.
 Os tipos de schema abaixo estao em uppercase (heranca do formato Gemini); o
 OpenRouterClient normaliza para JSON Schema padrao (lowercase) antes de enviar.
 """
+from app.domain.entities.financeiro import MovClass
 from app.infra.ai.llm import ToolDeclaration
+
+# Valores válidos de classe de pagamento, derivados do domínio (fonte única).
+_VALID_CLASSES_FOR_SCHEMA = [c.value for c in MovClass]
 
 _TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
     "obras_get_detail": ToolDeclaration(
@@ -68,6 +72,92 @@ _TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
                 "ano": {"type": "INTEGER", "description": "Ano (ex: 2025). Se omitido, usa o ano atual."},
             },
             "required": [],
+        },
+    ),
+    "financeiro_pagamentos_overview": ToolDeclaration(
+        name="financeiro_pagamentos_overview",
+        description=(
+            "Lista pagamentos agendados ATRASADOS (aguardando e vencidos) e o "
+            "total em atraso. Use quando o usuário perguntar sobre pagamentos "
+            "atrasados/pendentes. Engenheiro vê apenas os próprios. Não expõe Pix."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "limit": {"type": "INTEGER", "description": "Máximo de itens (padrão 15, máx 30)"},
+            },
+            "required": [],
+        },
+    ),
+    "financeiro_buscar_pagamentos": ToolDeclaration(
+        name="financeiro_buscar_pagamentos",
+        description=(
+            "Busca pagamentos agendados por nome/texto no título ou descrição. "
+            "Use para responder 'quando foi o último pagamento para a pessoa X' "
+            "ou consultar o histórico de pagamentos de alguém. Engenheiro vê "
+            "apenas os próprios. Não expõe Pix nem código do recebedor."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Nome da pessoa ou texto a buscar (mín. 2 caracteres)"},
+                "limit": {"type": "INTEGER", "description": "Máximo de resultados (padrão 10, máx 20)"},
+            },
+            "required": ["query"],
+        },
+    ),
+    "diaristas_list": ToolDeclaration(
+        name="diaristas_list",
+        description=(
+            "Lista diaristas cadastrados do time (id, nome, valor da diária) para "
+            "ajudar a vincular pagamentos a um diarista. Não retorna a chave Pix."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "limit": {"type": "INTEGER", "description": "Máximo de diaristas (padrão 30, máx 50)"},
+            },
+            "required": [],
+        },
+    ),
+    "financeiro_prepare_pagamentos": ToolDeclaration(
+        name="financeiro_prepare_pagamentos",
+        description=(
+            "Prepara uma LISTA de pagamentos agendados para o usuário aprovar ou "
+            "rejeitar. NÃO cria nada — apenas gera uma prévia. Use quando o usuário "
+            "pedir para cadastrar/agendar um ou vários pagamentos. Suporta vários "
+            "pagamentos de uma vez. Vincule diarist_id/obra_id apenas quando o "
+            "usuário deixar claro; para diárias soltas (ex.: '5 diárias para Pedro') "
+            "NÃO vincule diarista nem obra — use classe 'diarista', coloque o nome "
+            "no título e o código Pix em payment_cod. data_agendada vazia = hoje."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "pagamentos": {
+                    "type": "ARRAY",
+                    "description": "Lista de pagamentos a agendar",
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "title": {"type": "STRING", "description": "Título/descrição curta do pagamento (inclua o nome da pessoa quando aplicável)"},
+                            "valor": {"type": "NUMBER", "description": "Valor do pagamento em reais"},
+                            "classe": {
+                                "type": "STRING",
+                                "description": "Categoria do pagamento",
+                                "enum": sorted(_VALID_CLASSES_FOR_SCHEMA),
+                            },
+                            "details": {"type": "STRING", "description": "Detalhes adicionais (opcional)"},
+                            "data_agendada": {"type": "STRING", "description": "Data agendada ISO 8601 (opcional; vazio = hoje)"},
+                            "payment_cod": {"type": "STRING", "description": "Código Pix ou de barras do recebedor (obrigatório para engenheiro)"},
+                            "obra_id": {"type": "STRING", "description": "UUID da obra vinculada (opcional)"},
+                            "diarist_id": {"type": "STRING", "description": "UUID do diarista vinculado (opcional)"},
+                        },
+                        "required": ["title", "valor", "classe"],
+                    },
+                },
+            },
+            "required": ["pagamentos"],
         },
     ),
     "rh_get_me_resumo": ToolDeclaration(

@@ -62,6 +62,27 @@ class TestComplexIntentHints:
         _assert_chain(sel, WEAK)
 
 
+class TestExtractionIntentFreeFirst:
+    """Cadastro de pagamentos (extracao) usa cadeia gratuita mesmo em financeiro."""
+
+    def test_create_pagamentos_overrides_financeiro_module(self, router):
+        sel = router.select(
+            message="agenda 5 diarias pra Pedro",
+            module="financeiro", has_screenshot=False,
+            intent_hint="create_pagamentos",
+        )
+        _assert_chain(sel, WEAK)
+        # Lidera com Gemma 4 gratuito (free-first).
+        assert sel.chain[0] == "google/gemma-4-31b-it:free"
+
+    def test_extraction_intent_still_yields_to_screenshot(self, router):
+        sel = router.select(
+            message="x", module="financeiro", has_screenshot=True,
+            intent_hint="cadastrar_pagamentos",
+        )
+        _assert_chain(sel, VISION)
+
+
 class TestLongMessageStrong:
     def test_message_over_300_chars_uses_strong(self, router):
         long = "x" * 301

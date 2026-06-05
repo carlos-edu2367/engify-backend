@@ -58,7 +58,21 @@ class TestDeclaredToolsAreComplete:
         "obras_prepare_update_status",
         "items_prepare_create",
         "notificacoes_prepare_send",
+        "financeiro_pagamentos_overview",
+        "financeiro_buscar_pagamentos",
+        "diaristas_list",
+        "financeiro_prepare_pagamentos",
     ]
+
+    def test_prepare_pagamentos_schema_supports_list(self, registry):
+        decl = registry.get_declaration("financeiro_prepare_pagamentos")
+        props = decl.parameters["properties"]
+        assert props["pagamentos"]["type"] == "ARRAY"
+        item_props = props["pagamentos"]["items"]["properties"]
+        # Classe enum must be derived from the domain MovClass values.
+        from app.domain.entities.financeiro import MovClass
+        assert set(item_props["classe"]["enum"]) == {c.value for c in MovClass}
+        assert set(props["pagamentos"]["items"]["required"]) == {"title", "valor", "classe"}
 
     def test_all_expected_tools_exist(self, registry):
         for tool_name in self.EXPECTED_TOOLS:

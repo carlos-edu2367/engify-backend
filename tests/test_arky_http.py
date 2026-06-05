@@ -280,6 +280,8 @@ class TestConfirmEndpoint:
         mock_copilot = MagicMock()
         mock_copilot._uow = MagicMock()
         mock_copilot._uow.commit = AsyncMock()
+        # Preview-only action types execute nothing on confirm.
+        mock_copilot.execute_confirmed_action = AsyncMock(return_value=None)
 
         mock_preview_repo = MagicMock()
         if not_found or preview is None:

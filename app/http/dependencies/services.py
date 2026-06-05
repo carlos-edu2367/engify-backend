@@ -472,6 +472,18 @@ async def get_arky_copilot(session: Session) -> ArkyOrchestrator:
         financeiro_fluxo_service=FinanceiroFluxoCaixaService(
             mov_repo=MovimentacaoRepositoryImpl(session),
         ),
+        financeiro_service=FinanceiroService(
+            mov_repo=MovimentacaoRepositoryImpl(session),
+            pagamento_repo=PagamentoAgendadoRepositoryImpl(session),
+            mov_attachment_repo=MovimentacaoAttachmentRepositoryImpl(session),
+            diarist_repo=DiaristRepositoryImpl(session),
+            uow=SQLAlchemyUOW(session),
+        ),
+        diarist_service=DiaristService(
+            team_repo=TeamRepositoryImpl(session),
+            diarist_repo=DiaristRepositoryImpl(session),
+            uow=SQLAlchemyUOW(session),
+        ),
         rh_dashboard_service=RhDashboardService(
             funcionario_repo=FuncionarioRepositoryImpl(session),
             ajuste_repo=AjustePontoRepositoryImpl(session),

@@ -97,3 +97,6 @@ class ArkyConfirmResponse(BaseModel):
     action_preview_id: str
     status: str
     message: str
+    # Resultado da execução da ação confirmada (ex.: pagamentos criados).
+    # None para ações preview-only que não executam nada no backend.
+    result: dict | None = None

@@ -52,6 +52,22 @@ _OBRAS_KNOWLEDGE = (
 )
 
 
+_PAGAMENTOS_SUGESTAO_KNOWLEDGE = (
+    "Voce pode ajudar com pagamentos agendados: para saber de atrasados use a "
+    "tool financeiro_pagamentos_overview; para o historico/ultimo pagamento de "
+    "uma pessoa use financeiro_buscar_pagamentos. Para CADASTRAR pagamentos, "
+    "monte uma sugestao com financeiro_prepare_pagamentos (aceita uma LISTA, "
+    "pois o usuario costuma enviar varios de uma vez) e deixe o usuario aprovar "
+    "ou rejeitar — nada e criado sem confirmacao. Use diaristas_list e obras_list "
+    "para resolver nomes em ids quando o usuario citar um diarista ou uma obra. "
+    "Para diarias soltas (ex.: '5 diarias para Pedro, 200 cada'), NAO pergunte a "
+    "obra nem vincule diarista: lance com classe 'diarista', o nome no titulo e o "
+    "codigo Pix em payment_cod. data_agendada vazia significa hoje. A criacao real "
+    "e a validacao (incluindo codigo obrigatorio para engenheiro e o carimbo de "
+    "autoria) acontecem no backend no momento da confirmacao."
+)
+
+
 def _financeiro_context(permissions: dict) -> str:
     can_full = bool(permissions.get("can_read_financeiro"))
     can_own = bool(permissions.get("can_manage_own_pagamentos"))
@@ -63,7 +79,8 @@ def _financeiro_context(permissions: dict) -> str:
             "fluxo de caixa e relatorios. "
             "Pagamentos criados por engenheiro exibem badge 'Criado por engenheiro', "
             "nome do criador (campo created_by_name) e data de criacao (created_at) no card. "
-            "Registros legados sem autoria continuam visiveis normalmente."
+            "Registros legados sem autoria continuam visiveis normalmente. "
+            f"{_PAGAMENTOS_SUGESTAO_KNOWLEDGE}"
         )
     elif can_own:
         access = (
@@ -78,7 +95,8 @@ def _financeiro_context(permissions: dict) -> str:
             "consultar movimentacoes, fluxo de caixa ou relatorios financeiros. "
             "Se o usuario perguntar sobre pagamentos de outros membros ou dados "
             "financeiros do tenant, informe que essas informacoes nao estao "
-            "disponiveis para o perfil dele."
+            "disponiveis para o perfil dele. "
+            f"{_PAGAMENTOS_SUGESTAO_KNOWLEDGE}"
         )
     else:
         access = "O usuario nao tem permissao backend para dados financeiros."

@@ -59,6 +59,29 @@ class PagamentoAgendadoRepository(ABC):
         pass
 
     @abstractmethod
+    async def list_overdue(
+        self, team_id: UUID, reference: datetime, limit: int,
+        created_by_user_id: UUID | None = None,
+    ) -> list[PagamentoAgendado]:
+        """Pagamentos AGUARDANDO com data_agendada < reference (atrasados).
+
+        Ordenados do mais antigo para o mais recente. Quando
+        ``created_by_user_id`` é informado, restringe à autoria (escopo de
+        engenheiro)."""
+        pass
+
+    @abstractmethod
+    async def search(
+        self, team_id: UUID, query: str, limit: int,
+        created_by_user_id: UUID | None = None,
+    ) -> list[PagamentoAgendado]:
+        """Busca pagamentos por texto em title/details (case-insensitive).
+
+        Ordenados por data_agendada desc. Seguro por tenant; restringe à
+        autoria quando ``created_by_user_id`` é informado."""
+        pass
+
+    @abstractmethod
     async def save(self, pagamento: PagamentoAgendado) -> PagamentoAgendado:
         pass
 
