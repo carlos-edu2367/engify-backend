@@ -21,6 +21,73 @@ def _make_orchestrator() -> ArkyOrchestrator:
     )
 
 
+class TestReconcilePreparedPreviews:
+    def setup_method(self):
+        self.orc = _make_orchestrator()
+
+    def _prepared(self, pid="11111111-1111-1111-1111-111111111111"):
+        return [{
+            "action_preview_id": pid,
+            "action_type": "prepare_create_pagamentos",
+            "summary": "Agendar 1 pagamento",
+            "risk_level": "preparacao",
+            "data": {"total": 120.0, "quantidade": 1, "itens": [{"title": "X", "valor": 120.0}]},
+        }]
+
+    def test_replaces_hallucinated_id_with_real_one(self):
+        out = self.orc._parse_response(
+            '{"message": "ok", "cards": [{"type": "action_preview", "title": "P",'
+            ' "summary": "s", "risk": "preparacao", "requires_confirmation": true,'
+            ' "action_preview_id": "deadbeef-0000-0000-0000-000000000000"}],'
+            ' "actions": [{"type": "confirm_action", "label": "Confirmar",'
+            ' "action_preview_id": "deadbeef-0000-0000-0000-000000000000"}], "citations": []}'
+        )
+        real = "11111111-1111-1111-1111-111111111111"
+        self.orc._reconcile_prepared_previews(out, self._prepared(real))
+
+        conf = [c for c in out.cards if c.requires_confirmation]
+        assert len(conf) == 1
+        assert conf[0].action_preview_id == real
+        assert conf[0].data["total"] == 120.0
+        acts = [a for a in out.actions if a.type == "confirm_action"]
+        assert len(acts) == 1 and acts[0].action_preview_id == real
+
+    def test_synthesizes_card_when_model_omits_it(self):
+        out = self.orc._parse_response(
+            '{"message": "ok", "cards": [], "actions": [], "citations": []}'
+        )
+        real = "22222222-2222-2222-2222-222222222222"
+        self.orc._reconcile_prepared_previews(out, self._prepared(real))
+
+        assert len(out.cards) == 1
+        assert out.cards[0].action_preview_id == real
+        assert out.cards[0].requires_confirmation is True
+        assert any(a.action_preview_id == real for a in out.actions)
+
+    def test_strips_hallucinated_confirm_card_when_nothing_prepared(self):
+        out = self.orc._parse_response(
+            '{"message": "ok", "cards": [{"type": "action_preview", "title": "P",'
+            ' "summary": "s", "risk": "preparacao", "requires_confirmation": true,'
+            ' "action_preview_id": "deadbeef-0000-0000-0000-000000000000"}],'
+            ' "actions": [{"type": "confirm_action", "label": "Confirmar",'
+            ' "action_preview_id": "deadbeef-0000-0000-0000-000000000000"}], "citations": []}'
+        )
+        # Nenhuma tool preparou prévia -> nada confirmável deve sobrar.
+        self.orc._reconcile_prepared_previews(out, [])
+        assert all(not c.requires_confirmation for c in out.cards)
+        assert all(a.type != "confirm_action" for a in out.actions)
+
+    def test_preserves_informational_cards_and_deeplinks(self):
+        out = self.orc._parse_response(
+            '{"message": "ok", "cards": [{"type": "info", "title": "I", "summary": "s",'
+            ' "risk": "leitura", "requires_confirmation": false}],'
+            ' "actions": [{"type": "deep_link", "label": "Abrir", "to": "/obras/1"}], "citations": []}'
+        )
+        self.orc._reconcile_prepared_previews(out, self._prepared())
+        assert any(c.type == "info" and not c.requires_confirmation for c in out.cards)
+        assert any(a.type == "deep_link" for a in out.actions)
+
+
 class TestParseResponse:
     def setup_method(self):
         self.orc = _make_orchestrator()

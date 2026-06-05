@@ -2,13 +2,16 @@
 ModelRouter — consome o catalogo curado (model_catalog) e monta as cadeias de
 fallback por PAPEL LOGICO.
 
+Estrategia free-first (cost-control): Arky e um assistente operacional simples;
+TODAS as cadeias lideram com Gemma 4 GRATUITO e escalam por modelos pagos baratos
+(Gemma 4 pago -> DeepSeek -> Qwen), deixando o Gemini (caro) como ULTIMO recurso.
+
 Papeis:
-  - "weak":   tarefas simples (parsing, classificacao, execucao). Free-first,
-              depois modelos fracos pagos dentro do teto de custo.
-  - "strong": tarefas complexas (planejamento, reasoning, sintese). Modelos
-              fortes em ordem de preferencia, com FALLBACK final para modelos
-              gratuitos — nunca fica sem resposta por custo/indisponibilidade.
-  - "vision": entrada multimodal (screenshot). Modelos com visao, fortes primeiro.
+  - "weak":   tarefas simples (parsing, classificacao, execucao). Cadeia free-first.
+  - "strong": tarefas complexas. MESMA cadeia free-first (custo acima de tudo);
+              o Gemini so e alcancado se todos os anteriores falharem.
+  - "vision": entrada multimodal (screenshot). Modelos COM visao, tambem free-first
+              (Gemma 4 gratuito suporta imagem); escala p/ Qwen e por fim Gemini.
 
 Cada cadeia pode ser SOBRESCRITA por env var (lista separada por virgula), sem
 deploy de codigo (ver app.core.config.Settings.openrouter_model_overrides):
@@ -67,23 +70,29 @@ class ModelRouter:
         return {role: self.chain_for(role) for role in ROLES}
 
     # -- construcao a partir do catalogo --------------------------------------
+    def _canonical_text_chain(self) -> list[str]:
+        """Cadeia unica free-first para TODO fluxo de texto.
+
+        Segue a ordem do catalogo (que ja e gratuito -> pago barato -> Gemini),
+        materializando o requisito de produto: Gemma 4 gratuito primeiro, depois
+        Gemma 4 pago, DeepSeek, Qwen e SO em ultimo caso Gemini (caro). DeepSeek
+        (sem visao) participa de texto normalmente.
+        """
+        return _dedupe([s.id for s in catalog.CATALOGO])
+
     def _build_weak(self) -> list[str]:
-        # Gratuitos primeiro (custo zero), depois fracos pagos dentro do teto.
-        return _dedupe(catalog.ids_gratuitos() + catalog.ids_fracos_dentro_do_teto())
+        # Arky e um assistente simples: a tarefa "fraca" usa a mesma cadeia
+        # free-first do texto. Nunca lidera com modelo pago.
+        return self._canonical_text_chain()
 
     def _build_strong(self) -> list[str]:
-        # Tarefas complexas lideram com o modelo MAIS FORTE (pago), conforme
-        # requisito de produto, e caem para gratuitos apenas como ultimo recurso
-        # (custo/indisponibilidade). Modelos fortes gratuitos entram no bloco de
-        # fallback gratuito, nunca a frente dos pagos.
-        fortes_pagos = [
-            s.id
-            for s in catalog.specs_por_categoria(catalog.Categoria.FORTE)
-            if not s.gratuito
-        ]
-        return _dedupe(fortes_pagos + catalog.ids_gratuitos())
+        # Tarefas "fortes" tambem lideram com gratuito e escalam pela MESMA
+        # cadeia; o Gemini (caro) continua sendo o ultimo recurso. Cost-control
+        # acima de tudo, conforme requisito.
+        return self._canonical_text_chain()
 
     def _build_vision(self) -> list[str]:
+        # Visao tambem e free-first: Gemma 4 gratuito suporta imagem. So escala
+        # para Qwen/Gemini quando necessario. Exclui modelos sem visao (DeepSeek).
         chain = catalog.ids_com_vision()
-        # Sem modelo de visao no catalogo? cai para a cadeia forte (best-effort).
-        return _dedupe(chain) if chain else self._build_strong()
+        return _dedupe(chain) if chain else self._canonical_text_chain()

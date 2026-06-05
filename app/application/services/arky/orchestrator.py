@@ -126,6 +126,9 @@ class ArkyCardItem:
     risk: str = "leitura"
     requires_confirmation: bool = False
     action_preview_id: str | None = None
+    # Detalhes estruturados da ação preparada (ex.: itens de pagamento),
+    # vindos DIRETAMENTE da tool — não dependem do que o modelo escreveu.
+    data: dict | None = None
 
 
 @dataclass
@@ -319,6 +322,9 @@ class ArkyOrchestrator:
         total_prompt_tokens = 0
         total_completion_tokens = 0
         action_preview_id: UUID | None = None
+        # Previews preparadas por tools neste turno (fonte autoritativa de id +
+        # detalhes do card; não dependemos do modelo ecoar o UUID correto).
+        prepared_previews: list[dict] = []
 
         try:
             for round_num in range(_MAX_TOOL_ROUNDS + 1):
@@ -434,6 +440,14 @@ class ArkyOrchestrator:
                             action_preview_id = UUID(tool_result["action_preview_id"])
                         except (ValueError, TypeError):
                             pass
+                        else:
+                            prepared_previews.append({
+                                "action_preview_id": tool_result["action_preview_id"],
+                                "action_type": tool_result.get("action_type", ""),
+                                "summary": tool_result.get("summary", ""),
+                                "risk_level": tool_result.get("risk_level", "preparacao"),
+                                "data": tool_result.get("preview"),
+                            })
 
                     # Append the tool result, referencing the originating call by id
                     messages.append(
@@ -453,6 +467,14 @@ class ArkyOrchestrator:
 
         # Parse structured response
         output = self._parse_response(final_text)
+
+        # Reconcilia previews preparadas: o card/ação de confirmação passa a usar
+        # o action_preview_id REAL e os detalhes vindos da tool. Roda SEMPRE — se
+        # nenhuma tool preparou prévia, remove cards de confirmação inventados
+        # pelo modelo (que apontariam para um id inexistente e dariam 404),
+        # evitando um botão "Confirmar" morto. Garante que "Confirmar" só apareça
+        # quando há uma prévia válida no backend.
+        self._reconcile_prepared_previews(output, prepared_previews)
 
         # Save assistant message
         assistant_msg = ArkyMessage(
@@ -661,6 +683,57 @@ class ArkyOrchestrator:
         except Exception as e:
             logger.warning("Tool execution error [%s]: %s", tool_name, e)
             return {"error": "Erro ao executar a ferramenta. Tente novamente."}
+
+    def _reconcile_prepared_previews(
+        self, output: ArkyChatOutput, prepared: list[dict]
+    ) -> None:
+        """Torna o servidor a fonte de verdade dos cards de confirmação.
+
+        Para cada prévia realmente preparada por uma tool neste turno, garante um
+        único card de confirmação com o action_preview_id correto e os detalhes
+        estruturados (independente do que o modelo escreveu). Remove cards/ações
+        de confirmação gerados pelo modelo para evitar ids inventados/duplicados.
+        """
+        real_ids = {p["action_preview_id"] for p in prepared}
+
+        # Mantém apenas cards SEM confirmação (informativos) gerados pelo modelo.
+        output.cards = [c for c in output.cards if not c.requires_confirmation]
+        # Remove ações de confirmação do modelo; mantém deep links e afins.
+        output.actions = [
+            a
+            for a in output.actions
+            if a.type != "confirm_action" and a.action_preview_id not in real_ids
+        ]
+
+        _CARD_TITLES = {
+            "prepare_create_pagamentos": "Pagamentos a agendar",
+            "prepare_create_obra": "Nova obra",
+            "prepare_update_obra_status": "Alterar status da obra",
+            "prepare_create_item": "Novo item",
+            "prepare_send_notificacao": "Enviar notificação",
+        }
+
+        for prev in prepared:
+            pid = prev["action_preview_id"]
+            title = _CARD_TITLES.get(prev.get("action_type", ""), "Ação a confirmar")
+            output.cards.append(
+                ArkyCardItem(
+                    type="action_preview",
+                    title=title,
+                    summary=prev.get("summary", ""),
+                    risk=prev.get("risk_level", "preparacao"),
+                    requires_confirmation=True,
+                    action_preview_id=pid,
+                    data=prev.get("data"),
+                )
+            )
+            output.actions.append(
+                ArkyActionItem(
+                    type="confirm_action",
+                    label="Confirmar",
+                    action_preview_id=pid,
+                )
+            )
 
     def _parse_response(self, text: str) -> ArkyChatOutput:
         output = ArkyChatOutput(

@@ -162,6 +162,7 @@ def _get_arky_llm_client() -> LLMClient | None:
             base_url=settings.openrouter_base_url,
             site_url=settings.openrouter_site_url or None,
             app_name=settings.openrouter_app_name or None,
+            cooldown_seconds=settings.arky_model_cooldown_seconds,
         )
     return _arky_llm_client
 

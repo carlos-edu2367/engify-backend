@@ -68,6 +68,7 @@ def _chat_output_response(output: ArkyChatOutput) -> ArkyChatResponse:
                 risk=c.risk,
                 requires_confirmation=c.requires_confirmation,
                 action_preview_id=c.action_preview_id,
+                data=c.data,
             )
             for c in output.cards
         ],
@@ -142,6 +143,7 @@ async def arky_chat(
                 risk=c.risk,
                 requires_confirmation=c.requires_confirmation,
                 action_preview_id=c.action_preview_id,
+                data=c.data,
             )
             for c in output.cards
         ],

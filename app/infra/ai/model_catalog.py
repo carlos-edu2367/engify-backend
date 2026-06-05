@@ -7,16 +7,23 @@ PT-BR e janela de contexto.
 
 O `ModelRouter` (model_registry.py) consome este catalogo para montar as cadeias
 de fallback por papel logico. Trocar/adicionar/remover modelo = editar este
-arquivo ou sobrepor via env var — nunca mexer em logica.
+arquivo ou sobrepor via env var (OPENROUTER_MODELS_*) — nunca mexer em logica.
 
 Precos sao em USD por MILHAO de tokens (entrada e saida separados), para casar
 com o formato de `pricing` do OpenRouter (`/api/v1/models`). O teto do projeto e
 sobre a SOMA input+output: <= $2.00 / milhao para modelos fracos.
 
-NOTA DE VERIFICACAO: os ids/precos abaixo sao um default sensato. Eles NAO foram
-validados contra a API publica do OpenRouter nesta sessao — precos e
-disponibilidade mudam. Ajuste por env var (OPENROUTER_MODELS_*) sem deploy de
-codigo, ou edite este catalogo, validando contra `GET /api/v1/models`.
+ESTRATEGIA DE CUSTO (free-first):
+Arky e um assistente operacional simples; modelos gratuitos Gemma 4 dao conta da
+maioria das tarefas (incluindo visao). A cadeia escala para modelos pagos baratos
+(Gemma 4 pago, DeepSeek, Qwen) e SO em ultimo caso para Gemini, que e caro.
+O `gemini-3.5-flash` (1.50/9.00 por M) deve ser o ULTIMO recurso, nunca a 1a
+opcao.
+
+VERIFICACAO: ids e precos abaixo foram conferidos contra `GET /api/v1/models` do
+OpenRouter em 2026-06-05. Precos/disponibilidade mudam; ajuste por env var
+(OPENROUTER_MODELS_*) sem deploy de codigo, ou reedite este catalogo validando
+novamente contra a API publica.
 """
 from __future__ import annotations
 
@@ -70,22 +77,23 @@ class ModelSpec:
 
 
 # ---------------------------------------------------------------------------
-# Catalogo. Ordenado por categoria e, dentro dela, do mais barato/preferido ao
-# mais caro. As cadeias de fallback padrao (model_registry) seguem esta ordem.
+# Catalogo. A ORDEM importa: dentro de cada bloco, do preferido (mais barato/
+# gratuito) ao ultimo recurso. As cadeias de fallback (model_registry) seguem
+# esta ordem. Precos conferidos em 2026-06-05 via /api/v1/models.
 # ---------------------------------------------------------------------------
 CATALOGO: tuple[ModelSpec, ...] = (
-    # ---- GRATUITOS / FRACOS (free first) ----------------------------------
+    # ---- GRATUITOS (free first) — Gemma 4 tem visao ----------------------
     ModelSpec(
         id="google/gemma-4-31b-it:free",
         categoria=Categoria.FORTE,
         preco_input_milhao=0.0,
         preco_output_milhao=0.0,
         suporta_tools=True,
-        suporta_vision=False,
+        suporta_vision=True,
         contexto_tokens=262_144,
         ptbr_score=4,
         gratuito=True,
-        notas="Gemma 4 31B gratuito; bom PT-BR e tools; 1a escolha de executor.",
+        notas="Gemma 4 31B gratuito; bom PT-BR, tools e visao; 1a escolha sempre.",
     ),
     ModelSpec(
         id="google/gemma-4-26b-a4b-it:free",
@@ -93,34 +101,36 @@ CATALOGO: tuple[ModelSpec, ...] = (
         preco_input_milhao=0.0,
         preco_output_milhao=0.0,
         suporta_tools=True,
-        suporta_vision=False,
+        suporta_vision=True,
         contexto_tokens=262_144,
         ptbr_score=4,
         gratuito=True,
-        notas="Gemma 4 26B MoE gratuito; rapido; fallback de executor.",
+        notas="Gemma 4 26B MoE gratuito; rapido; visao; fallback gratuito.",
+    ),
+    # ---- PAGOS BARATOS (Gemma 4 pago) -------------------------------------
+    ModelSpec(
+        id="google/gemma-4-26b-a4b-it",
+        categoria=Categoria.FRACO,
+        preco_input_milhao=0.06,
+        preco_output_milhao=0.33,
+        suporta_tools=True,
+        suporta_vision=True,
+        contexto_tokens=262_144,
+        ptbr_score=4,
+        notas="Gemma 4 26B pago (~$0.39/M); visao; 1o fallback pago.",
     ),
     ModelSpec(
-        id="inclusionai/ling-2.6-flash",
-        categoria=Categoria.FRACO,
-        preco_input_milhao=0.01,
-        preco_output_milhao=0.03,
+        id="google/gemma-4-31b-it",
+        categoria=Categoria.FORTE,
+        preco_input_milhao=0.12,
+        preco_output_milhao=0.37,
         suporta_tools=True,
-        suporta_vision=False,
+        suporta_vision=True,
         contexto_tokens=262_144,
-        ptbr_score=3,
-        notas="Extremamente barato (~$0.04/M); bom para classificacao/parsing.",
+        ptbr_score=4,
+        notas="Gemma 4 31B pago (~$0.49/M); visao; fallback pago de boa qualidade.",
     ),
-    ModelSpec(
-        id="qwen/qwen3.5-9b",
-        categoria=Categoria.FRACO,
-        preco_input_milhao=0.04,
-        preco_output_milhao=0.15,
-        suporta_tools=True,
-        suporta_vision=False,
-        contexto_tokens=262_144,
-        ptbr_score=3,
-        notas="Qwen 3.5 9B (~$0.19/M); tools robustas; fallback barato.",
-    ),
+    # ---- PAGOS BARATOS (DeepSeek / Qwen) ----------------------------------
     ModelSpec(
         id="deepseek/deepseek-v4-flash",
         categoria=Categoria.FRACO,
@@ -130,9 +140,54 @@ CATALOGO: tuple[ModelSpec, ...] = (
         suporta_vision=False,
         contexto_tokens=1_048_576,
         ptbr_score=4,
-        notas="DeepSeek V4 Flash (~$0.30/M); contexto 1M; bom custo/qualidade.",
+        notas="DeepSeek V4 Flash (~$0.30/M); contexto 1M; otimo custo; SEM visao.",
     ),
-    # ---- FORTES (podem exceder o teto) ------------------------------------
+    ModelSpec(
+        id="qwen/qwen3.5-flash-02-23",
+        categoria=Categoria.FRACO,
+        preco_input_milhao=0.065,
+        preco_output_milhao=0.26,
+        suporta_tools=True,
+        suporta_vision=True,
+        contexto_tokens=1_000_000,
+        ptbr_score=4,
+        notas="Qwen 3.5 Flash (~$0.33/M); contexto 1M; visao; tools robustas.",
+    ),
+    ModelSpec(
+        id="qwen/qwen3.5-9b",
+        categoria=Categoria.FRACO,
+        preco_input_milhao=0.04,
+        preco_output_milhao=0.15,
+        suporta_tools=True,
+        suporta_vision=True,
+        contexto_tokens=262_144,
+        ptbr_score=3,
+        notas="Qwen 3.5 9B (~$0.19/M); visao; fallback barato adicional.",
+    ),
+    # ---- GEMINI (ultimo recurso; caros) -----------------------------------
+    # Cheap-first dentro do Gemini: flash-lite antes do flash completo.
+    ModelSpec(
+        id="google/gemini-2.5-flash-lite",
+        categoria=Categoria.FORTE,
+        preco_input_milhao=0.10,
+        preco_output_milhao=0.40,
+        suporta_tools=True,
+        suporta_vision=True,
+        contexto_tokens=1_048_576,
+        ptbr_score=5,
+        notas="Gemini 2.5 Flash Lite (~$0.50/M); multimodal; escalada barata.",
+    ),
+    ModelSpec(
+        id="google/gemini-3.1-flash-lite",
+        categoria=Categoria.FORTE,
+        preco_input_milhao=0.25,
+        preco_output_milhao=1.50,
+        suporta_tools=True,
+        suporta_vision=True,
+        contexto_tokens=1_048_576,
+        ptbr_score=5,
+        notas="Gemini 3.1 Flash Lite (~$1.75/M); multimodal; escalada media.",
+    ),
     ModelSpec(
         id="google/gemini-3.5-flash",
         categoria=Categoria.FORTE,
@@ -142,21 +197,7 @@ CATALOGO: tuple[ModelSpec, ...] = (
         suporta_vision=True,
         contexto_tokens=1_048_576,
         ptbr_score=5,
-        notas=(
-            "Gemini 3.5 Flash; multimodal; 1M context; forte para "
-            "planner/validator/reasoning; tool calling robusto; caro em loops massivos."
-        ),
-    ),
-    ModelSpec(
-        id="qwen/qwen3.7-plus",
-        categoria=Categoria.FORTE,
-        preco_input_milhao=0.40,
-        preco_output_milhao=2.00,
-        suporta_tools=True,
-        suporta_vision=False,
-        contexto_tokens=262_144,
-        ptbr_score=4,
-        notas="Qwen 3.7 Plus; reasoning forte; fallback de planner/validator.",
+        notas="Gemini 3.5 Flash (CARO: ~$10.50/M); ULTIMO recurso apenas.",
     ),
 )
 
@@ -193,10 +234,13 @@ def ids_fortes() -> list[str]:
 
 
 def ids_com_vision() -> list[str]:
-    """Ids com suporte a visao, fortes primeiro (melhor leitura de documentos)."""
-    fortes = [s.id for s in specs_por_categoria(Categoria.FORTE) if s.suporta_vision]
-    fracos = [s.id for s in specs_por_categoria(Categoria.FRACO) if s.suporta_vision]
-    return fortes + fracos
+    """Ids com suporte a visao, na ORDEM do catalogo (free-first).
+
+    Mantem a ordem global do catalogo (gratuitos -> pagos baratos -> gemini),
+    garantindo que a entrada multimodal tambem lidere com Gemma 4 gratuito e so
+    escale para Gemini quando necessario.
+    """
+    return [s.id for s in CATALOGO if s.suporta_vision]
 
 
 def suporta_vision(model_id: str) -> bool | None:

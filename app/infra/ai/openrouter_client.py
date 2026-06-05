@@ -52,6 +52,7 @@ class OpenRouterClient(LLMClient):
         app_name: str | None = None,
         http_client: httpx.AsyncClient | None = None,
         timeout: float = _REQUEST_TIMEOUT,
+        cooldown_seconds: int = 0,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
@@ -59,6 +60,11 @@ class OpenRouterClient(LLMClient):
         self._app_name = app_name
         self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(timeout=timeout)
+        # Cache de modelos em "cooldown" apos falha transitoria: id -> instante
+        # (monotonic) em que volta a ser elegivel. Evita regastar tempo/credito
+        # tentando um modelo que acabou de falhar. 0 desativa o cache.
+        self._cooldown_seconds = max(0, int(cooldown_seconds))
+        self._unhealthy: dict[str, float] = {}
 
     async def close(self) -> None:
         if self._owns_client:
@@ -86,13 +92,18 @@ class OpenRouterClient(LLMClient):
         )
         has_image = _messages_have_image(messages)
 
+        # Pula modelos em cooldown (falharam recentemente). Se TODOS estiverem em
+        # cooldown, ignora o cache e tenta a cadeia inteira (melhor tentar do que
+        # falhar sem chamada).
+        effective_models = self._healthy_models(models)
+
         last_error: LLMError | None = None
-        for model in models:
+        for model in effective_models:
             if has_image and catalog.suporta_vision(model) is False:
                 logger.info("Pulando modelo sem visao para entrada multimodal: %s", model)
                 continue
             try:
-                return await self._call_once(
+                resp = await self._call_once(
                     model=model,
                     messages=payload_messages,
                     tools=tool_payload,
@@ -102,17 +113,43 @@ class OpenRouterClient(LLMClient):
             except LLMError as e:
                 last_error = e
                 if not e.retryable:
+                    # Erro fatal (chave/credito): nao penaliza o modelo, e da conta.
                     raise
+                self._mark_unhealthy(model)
                 logger.warning(
-                    "OpenRouter modelo '%s' falhou (%s); tentando proximo da cadeia.",
+                    "OpenRouter modelo '%s' falhou (%s); cooldown e proximo da cadeia.",
                     model,
                     e,
                 )
                 continue
+            else:
+                self._mark_healthy(model)
+                return resp
 
         raise last_error or LLMError(
             "Todos os modelos da cadeia de fallback falharam", retryable=True
         )
+
+    # -- cache de saude dos modelos -------------------------------------------
+    def _healthy_models(self, models: list[str]) -> list[str]:
+        if not self._cooldown_seconds or not self._unhealthy:
+            return models
+        now = time.monotonic()
+        # Limpa entradas expiradas (reset automatico do cooldown).
+        self._unhealthy = {
+            m: exp for m, exp in self._unhealthy.items() if exp > now
+        }
+        healthy = [m for m in models if m not in self._unhealthy]
+        # Se o cooldown derrubou a cadeia inteira, nao fica sem opcao: tenta tudo.
+        return healthy or models
+
+    def _mark_unhealthy(self, model: str) -> None:
+        if self._cooldown_seconds:
+            self._unhealthy[model] = time.monotonic() + self._cooldown_seconds
+
+    def _mark_healthy(self, model: str) -> None:
+        # Sucesso reabilita o modelo imediatamente.
+        self._unhealthy.pop(model, None)
 
     async def _call_once(
         self,

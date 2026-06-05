@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     openrouter_models_strong: str = ""
     openrouter_models_vision: str = ""
     arky_enabled: bool = True
+    # Tempo (segundos) que um modelo com falha transitoria fica em "cooldown" e e
+    # pulado nas proximas chamadas, preservando performance/custo. Reset automatico
+    # ao expirar. Padrao 45 min. 0 desativa o cache.
+    arky_model_cooldown_seconds: int = 2700
 
     @property
     def openrouter_model_overrides(self) -> dict[str, list[str]]:

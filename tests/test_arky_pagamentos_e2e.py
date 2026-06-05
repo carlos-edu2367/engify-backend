@@ -148,6 +148,18 @@ async def test_full_flow_prepare_then_confirm_creates_payments():
     assert preview.action_type == "prepare_create_pagamentos"
     assert len(preview.payload["itens"]) == 2
 
+    # Card de confirmacao e AUTORITATIVO no servidor: mesmo o modelo devolvendo
+    # cards: [] no JSON final, o orchestrator injeta o card com o id REAL e os
+    # detalhes vindos da tool (corrige o bug de "confirmar nao cria / sem detalhes").
+    conf_cards = [c for c in out.cards if c.requires_confirmation]
+    assert len(conf_cards) == 1
+    card = conf_cards[0]
+    assert card.action_preview_id == str(preview.id)
+    assert card.data is not None and len(card.data["itens"]) == 2
+    assert card.data["total"] == 300.0
+    conf_actions = [a for a in out.actions if a.type == "confirm_action"]
+    assert conf_actions and conf_actions[0].action_preview_id == str(preview.id)
+
     # Free-first: tarefa de extracao usou a cadeia gratuita liderada por Gemma 4.
     assert llm.calls[0]["models"][0] == "google/gemma-4-31b-it:free"
 

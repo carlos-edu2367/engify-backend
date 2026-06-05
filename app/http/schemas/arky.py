@@ -70,6 +70,8 @@ class ArkyCardResponse(BaseModel):
     risk: str = "leitura"
     requires_confirmation: bool = False
     action_preview_id: str | None = None
+    # Detalhes estruturados da ação preparada (ex.: itens de pagamento).
+    data: dict | None = None
 
 
 class ArkyActionResponse(BaseModel):
