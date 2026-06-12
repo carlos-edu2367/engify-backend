@@ -16,6 +16,7 @@ class UserListItem(BaseModel):
     nome: str
     email: str
     role: Roles
+    cpf: str
 
 
 class UpdateMeRequest(BaseModel):

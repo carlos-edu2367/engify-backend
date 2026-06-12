@@ -28,4 +28,5 @@ class SimpleUserDisplay(BaseModel):
     nome: str
     email: str
     role: Roles
+    cpf: str
     

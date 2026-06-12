@@ -76,6 +76,7 @@ class UserRepositoryImpl(UserRepository):
                 nome=m.nome,
                 email=m.email,
                 role=m.role,
+                cpf=m.cpf,
             )
             for m in models
         ]

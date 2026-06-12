@@ -131,6 +131,7 @@ class _FakeUserRepo:
                     "nome": user.nome,
                     "email": user.email,
                     "role": user.role,
+                    "cpf": user.cpf.value if hasattr(user.cpf, "value") else user.cpf,
                     "avatar_url": getattr(user, "avatar_url", None),
                 },
             )()

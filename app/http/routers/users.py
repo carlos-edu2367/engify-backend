@@ -73,7 +73,7 @@ async def list_team_users(user: RHAdminUser, session: Session):
     users = await repo.get_by_team_id(user.team.id)
 
     result = [
-        UserListItem(user_id=u.user_id, nome=u.nome, email=u.email, role=u.role)
+        UserListItem(user_id=u.user_id, nome=u.nome, email=u.email, role=u.role, cpf=u.cpf)
         for u in users
     ]
     await redis.set(
