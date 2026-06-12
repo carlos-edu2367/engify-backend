@@ -5,7 +5,7 @@ from uuid import UUID
 
 from app.http.schemas.users import UserResponse, UserListItem, UpdateMeRequest
 from app.http.schemas.common import MessageResponse
-from app.http.dependencies.auth import CurrentUser, AdminUser, EngineerUser
+from app.http.dependencies.auth import CurrentUser, AdminUser, EngineerUser, RHAdminUser
 from app.http.dependencies.services import UserServiceDep, Session
 from app.infra.db.repositories.user_repository import UserRepositoryImpl
 from app.infra.db.models.user_model import UserModel
@@ -57,7 +57,7 @@ async def update_me(body: UpdateMeRequest, user: CurrentUser, session: Session):
 
 
 @router.get("", response_model=list[UserListItem])
-async def list_team_users(user: EngineerUser, session: Session):
+async def list_team_users(user: RHAdminUser, session: Session):
     """
     Lista todos os usuários do time. Cache Redis 10min.
     Restrito a ADMIN e ENGENHEIRO.

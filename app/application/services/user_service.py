@@ -10,7 +10,7 @@ from app.application.providers.repo.team_repos import TeamRepository
 from app.application.providers.utility.hash_provider import HashProvider
 from app.application.providers.uow import UOWProvider
 from app.domain import errors
-from app.domain.entities.user import User, SolicitacaoCadastro, RecoveryCode, CPF
+from app.domain.entities.user import User, SolicitacaoCadastro, RecoveryCode, CPF, Roles
 
 
 def _hash_code(plain: str) -> str:
@@ -55,7 +55,9 @@ class UserService():
         return saved
 
     async def invite_user(self, dtos: user.CreateSolicitacaoRegistro, current_user: User) -> SolicitacaoCadastro:
-        current_user.ensure_can_do_admin()
+        if current_user.role == Roles.FINANCEIRO and dtos.role != Roles.FUNCIONARIO:
+            raise errors.DomainError("Financeiro so pode convidar usuarios com perfil Funcionario")
+        current_user.ensure_can_operate()
         new = SolicitacaoCadastro(team_id=current_user.team.id,
                                   email=dtos.email, role=dtos.role)
         invite = await self.solicitacao_repo.save(new)

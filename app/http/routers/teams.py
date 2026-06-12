@@ -9,7 +9,7 @@ from app.http.schemas.teams import (
     CreateDiaristRequest, UpdateDiaristRequest, DiaristResponse,
 )
 from app.http.schemas.common import MessageResponse, PaginatedResponse
-from app.http.dependencies.auth import CurrentUser, AdminUser, ManagerUser
+from app.http.dependencies.auth import CurrentUser, AdminUser, InviteActorUser, ManagerUser
 from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import TeamServiceDep, DiaristServiceDep, UserServiceDep
 from app.application.dtos.team import CreateTeam, CreateFirstUser, CreateDiarist, EditDiarist
@@ -115,7 +115,7 @@ async def get_expiration(user: CurrentUser, svc: TeamServiceDep):
 
 
 @router.post("/me/invite", response_model=InviteResponse, status_code=201)
-async def invite_user(body: InviteUserRequest, user: AdminUser, svc: UserServiceDep):
+async def invite_user(body: InviteUserRequest, user: InviteActorUser, svc: UserServiceDep):
     """
     Convida um usuário para o time via e-mail.
     Gera um SolicitacaoCadastro que expira em 7 dias.

@@ -77,9 +77,16 @@ def require_funcionario(user: CurrentUser) -> User:
     return user
 
 
+def require_invite_actor(user: CurrentUser) -> User:
+    if user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
+        raise HTTPException(status_code=403, detail="Sem permissao para convidar usuarios")
+    return user
+
+
 AdminUser = Annotated[User, Depends(require_admin)]
 ManagerUser = Annotated[User, Depends(require_manager)]
 EngineerUser = Annotated[User, Depends(require_engineer)]
 FinanceiroUser = Annotated[User, Depends(require_financeiro)]
 RHAdminUser = Annotated[User, Depends(require_rh_admin)]
 FuncionarioUser = Annotated[User, Depends(require_funcionario)]
+InviteActorUser = Annotated[User, Depends(require_invite_actor)]
