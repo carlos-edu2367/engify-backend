@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, time, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,6 +12,7 @@ from app.domain.entities.rh import (
     Atestado,
     BaseCalculoEncargo,
     Beneficio,
+    BeneficioFuncionario,
     EscopoAplicabilidade,
     FaixaEncargo,
     Ferias,
@@ -587,6 +588,7 @@ class BeneficioModel(Base, TimestampMixin):
     team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valor_dia: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=StatusBeneficio.ATIVO.value)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -601,6 +603,7 @@ class BeneficioModel(Base, TimestampMixin):
         beneficio.team_id = self.team_id
         beneficio.nome = self.nome
         beneficio.descricao = self.descricao
+        beneficio.valor_dia = Money(self.valor_dia)
         beneficio.status = StatusBeneficio(self.status)
         beneficio.created_by_user_id = self.created_by_user_id
         beneficio.is_deleted = self.is_deleted
@@ -613,6 +616,7 @@ class BeneficioModel(Base, TimestampMixin):
             team_id=beneficio.team_id,
             nome=beneficio.nome,
             descricao=beneficio.descricao,
+            valor_dia=beneficio.valor_dia.amount,
             status=beneficio.status.value,
             created_by_user_id=beneficio.created_by_user_id,
             is_deleted=beneficio.is_deleted,
@@ -621,9 +625,59 @@ class BeneficioModel(Base, TimestampMixin):
     def update_from_domain(self, beneficio: Beneficio) -> None:
         self.nome = beneficio.nome
         self.descricao = beneficio.descricao
+        self.valor_dia = beneficio.valor_dia.amount
         self.status = beneficio.status.value
         self.created_by_user_id = beneficio.created_by_user_id
         self.is_deleted = beneficio.is_deleted
+
+
+class BeneficioFuncionarioModel(Base, TimestampMixin):
+    __tablename__ = "rh_beneficio_funcionario"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    beneficio_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_beneficios.id"), nullable=False)
+    funcionario_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_funcionarios.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=StatusBeneficio.ATIVO.value)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index(
+            "uq_rh_beneficio_funcionario_ativo",
+            "team_id", "beneficio_id", "funcionario_id",
+            unique=True,
+            postgresql_where=text("is_deleted = false"),
+        ),
+        Index("idx_rh_benef_func_team_func", "team_id", "funcionario_id", "status", "is_deleted"),
+    )
+
+    def to_domain(self) -> BeneficioFuncionario:
+        v = object.__new__(BeneficioFuncionario)
+        v.id = self.id
+        v.team_id = self.team_id
+        v.beneficio_id = self.beneficio_id
+        v.funcionario_id = self.funcionario_id
+        v.status = StatusBeneficio(self.status)
+        v.created_by_user_id = self.created_by_user_id
+        v.is_deleted = self.is_deleted
+        return v
+
+    @classmethod
+    def from_domain(cls, v: BeneficioFuncionario) -> "BeneficioFuncionarioModel":
+        return cls(
+            id=v.id or uuid.uuid4(),
+            team_id=v.team_id,
+            beneficio_id=v.beneficio_id,
+            funcionario_id=v.funcionario_id,
+            status=v.status.value,
+            created_by_user_id=v.created_by_user_id,
+            is_deleted=v.is_deleted,
+        )
+
+    def update_from_domain(self, v: BeneficioFuncionario) -> None:
+        self.status = v.status.value
+        self.is_deleted = v.is_deleted
 
 
 class TabelaProgressivaModel(Base, TimestampMixin):
