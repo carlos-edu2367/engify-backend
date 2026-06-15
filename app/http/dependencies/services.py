@@ -57,6 +57,7 @@ from app.infra.db.repositories.rh_repository import (
     AjustePontoRepositoryImpl,
     AtestadoRepositoryImpl,
     BeneficioRepositoryImpl,
+    BeneficioFuncionarioRepositoryImpl,
     FeriasRepositoryImpl,
     HoleriteItemRepositoryImpl,
     TipoAtestadoRepositoryImpl,
@@ -341,6 +342,7 @@ async def get_rh_encargo_service(session: Session) -> RhEncargoService:
         uow=SQLAlchemyUOW(session),
         encargo_cache=_rh_encargo_cache,
         beneficio_repo=BeneficioRepositoryImpl(session),
+        beneficio_funcionario_repo=BeneficioFuncionarioRepositoryImpl(session),
     )
 
 

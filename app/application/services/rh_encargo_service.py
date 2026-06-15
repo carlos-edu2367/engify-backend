@@ -6,6 +6,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from app.application.providers.repo.rh_repo import (
+    BeneficioFuncionarioRepository,
     BeneficioRepository,
     RegraEncargoRepository,
     RhAuditLogRepository,
@@ -17,6 +18,7 @@ from app.domain.entities.money import Money
 from app.domain.entities.rh import (
     BaseCalculoEncargo,
     Beneficio,
+    BeneficioFuncionario,
     EscopoAplicabilidade,
     FaixaEncargo,
     NaturezaEncargo,
@@ -41,10 +43,12 @@ class RhEncargoService:
         uow: UOWProvider,
         encargo_cache: RhEncargoCachePort | None = None,
         beneficio_repo: BeneficioRepository | None = None,
+        beneficio_funcionario_repo: BeneficioFuncionarioRepository | None = None,
     ) -> None:
         self.regra_repo = regra_repo
         self.tabela_repo = tabela_repo
         self.beneficio_repo = beneficio_repo
+        self.beneficio_funcionario_repo = beneficio_funcionario_repo
         self.audit_repo = audit_repo
         self.uow = uow
         self.encargo_cache = encargo_cache
@@ -217,6 +221,7 @@ class RhEncargoService:
             nome=data["nome"],
             descricao=data.get("descricao"),
             status=StatusBeneficio.ATIVO,
+            valor_dia=self._money_or_none(data.get("valor_dia")) or Money(Decimal("0.00")),
             created_by_user_id=current_user.id,
         )
         saved = await repo.save(beneficio)
@@ -233,7 +238,7 @@ class RhEncargoService:
         novo_nome = data.get("nome")
         if novo_nome is not None and novo_nome.strip().lower() != beneficio.nome.strip().lower():
             await self._ensure_beneficio_nome_available(current_user.team.id, novo_nome)
-        beneficio.atualizar(nome=novo_nome, descricao=data.get("descricao"))
+        beneficio.atualizar(nome=novo_nome, descricao=data.get("descricao"), valor_dia=self._money_or_none(data.get("valor_dia")))
         saved = await repo.save(beneficio)
         await self._record_audit(current_user, "beneficio", saved.id, "rh.beneficio.updated", before=before, after=self._beneficio_snapshot(saved))
         await self.uow.commit()
@@ -355,6 +360,48 @@ class RhEncargoService:
         if self.beneficio_repo is None:
             raise DomainError("Recurso de beneficios indisponivel")
         return self.beneficio_repo
+
+    def _ensure_vinculo_repo(self) -> BeneficioFuncionarioRepository:
+        if self.beneficio_funcionario_repo is None:
+            raise DomainError("Recurso de atribuicao de beneficios indisponivel")
+        return self.beneficio_funcionario_repo
+
+    async def listar_funcionarios_beneficio(self, current_user: User, beneficio_id: UUID):
+        self._ensure_rh_read(current_user)
+        repo = self._ensure_vinculo_repo()
+        return await repo.list_by_beneficio(current_user.team.id, beneficio_id)
+
+    async def atribuir_funcionario(self, current_user: User, beneficio_id: UUID, funcionario_id: UUID) -> BeneficioFuncionario:
+        self._ensure_rh_admin(current_user)
+        await self._ensure_beneficio_repo().get_by_id(beneficio_id, current_user.team.id)
+        repo = self._ensure_vinculo_repo()
+        existing = await repo.get_vinculo(current_user.team.id, beneficio_id, funcionario_id)
+        if existing is not None:
+            existing.ativar()
+            saved = await repo.save(existing)
+        else:
+            saved = await repo.save(
+                BeneficioFuncionario(
+                    team_id=current_user.team.id,
+                    beneficio_id=beneficio_id,
+                    funcionario_id=funcionario_id,
+                    created_by_user_id=current_user.id,
+                )
+            )
+        await self._record_audit(current_user, "beneficio_funcionario", saved.id, "rh.beneficio.funcionario_atribuido", after={"beneficio_id": str(beneficio_id), "funcionario_id": str(funcionario_id)})
+        await self.uow.commit()
+        return saved
+
+    async def remover_funcionario(self, current_user: User, beneficio_id: UUID, funcionario_id: UUID) -> None:
+        self._ensure_rh_admin(current_user)
+        repo = self._ensure_vinculo_repo()
+        vinculo = await repo.get_vinculo(current_user.team.id, beneficio_id, funcionario_id)
+        if vinculo is None:
+            raise DomainError("Vinculo de beneficio nao encontrado")
+        vinculo.delete()
+        await repo.save(vinculo)
+        await self._record_audit(current_user, "beneficio_funcionario", vinculo.id, "rh.beneficio.funcionario_removido", before={"beneficio_id": str(beneficio_id), "funcionario_id": str(funcionario_id)})
+        await self.uow.commit()
 
     async def _ensure_beneficio_nome_available(self, team_id: UUID, nome: str) -> None:
         existing = await self._ensure_beneficio_repo().get_active_by_nome(team_id, nome)
@@ -522,6 +569,7 @@ class RhEncargoService:
             "nome": beneficio.nome,
             "descricao": beneficio.descricao,
             "status": beneficio.status.value,
+            "valor_dia": str(beneficio.valor_dia.amount),
             "is_deleted": beneficio.is_deleted,
         }
 
