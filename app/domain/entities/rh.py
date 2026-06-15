@@ -503,6 +503,35 @@ class Beneficio:
         self.is_deleted = True
 
 
+class BeneficioFuncionario:
+    def __init__(
+        self,
+        team_id: UUID,
+        beneficio_id: UUID,
+        funcionario_id: UUID,
+        status: StatusBeneficio = StatusBeneficio.ATIVO,
+        created_by_user_id: UUID | None = None,
+        id: UUID | None = None,
+    ) -> None:
+        self.id = id or uuid4()
+        self.team_id = team_id
+        self.beneficio_id = beneficio_id
+        self.funcionario_id = funcionario_id
+        self.status = status
+        self.created_by_user_id = created_by_user_id
+        self.is_deleted = False
+
+    def ativar(self) -> None:
+        self.status = StatusBeneficio.ATIVO
+        self.is_deleted = False
+
+    def inativar(self) -> None:
+        self.status = StatusBeneficio.INATIVO
+
+    def delete(self) -> None:
+        self.is_deleted = True
+
+
 class HoleriteItemTipo(Enum):
     SALARIO_BASE = "salario_base"
     HORA_EXTRA = "hora_extra"
