@@ -463,26 +463,35 @@ class Beneficio:
         nome: str,
         descricao: str | None = None,
         status: StatusBeneficio = StatusBeneficio.ATIVO,
+        valor_dia: Money | None = None,
         created_by_user_id: UUID | None = None,
         id: UUID | None = None,
     ) -> None:
         if not nome.strip():
             raise DomainError("Nome do beneficio e obrigatorio")
+        valor_dia = valor_dia or Money(Decimal("0.00"))
+        if valor_dia.amount < Decimal("0.00"):
+            raise DomainError("Valor por dia do beneficio nao pode ser negativo")
         self.id = id or uuid4()
         self.team_id = team_id
         self.nome = nome.strip()
         self.descricao = descricao.strip() if isinstance(descricao, str) and descricao.strip() else None
         self.status = status
+        self.valor_dia = valor_dia
         self.created_by_user_id = created_by_user_id
         self.is_deleted = False
 
-    def atualizar(self, nome: str | None = None, descricao: str | None = None) -> None:
+    def atualizar(self, nome: str | None = None, descricao: str | None = None, valor_dia: Money | None = None) -> None:
         if nome is not None:
             if not nome.strip():
                 raise DomainError("Nome do beneficio e obrigatorio")
             self.nome = nome.strip()
         if descricao is not None:
             self.descricao = descricao.strip() or None
+        if valor_dia is not None:
+            if valor_dia.amount < Decimal("0.00"):
+                raise DomainError("Valor por dia do beneficio nao pode ser negativo")
+            self.valor_dia = valor_dia
 
     def inativar(self) -> None:
         self.status = StatusBeneficio.INATIVO
