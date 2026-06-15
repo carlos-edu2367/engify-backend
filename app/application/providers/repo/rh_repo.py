@@ -5,6 +5,7 @@ from app.domain.entities.rh import (
     AjustePonto,
     Atestado,
     Beneficio,
+    BeneficioFuncionario,
     FaixaEncargo,
     Ferias,
     Funcionario,
@@ -361,6 +362,28 @@ class BeneficioRepository(ABC):
     @abstractmethod
     async def save(self, beneficio: Beneficio) -> Beneficio:
         pass
+
+
+class BeneficioFuncionarioRepository(ABC):
+    @abstractmethod
+    async def list_by_beneficio(self, team_id: UUID, beneficio_id: UUID) -> list[BeneficioFuncionario]:
+        ...
+
+    @abstractmethod
+    async def list_ativos_by_funcionario(self, team_id: UUID, funcionario_id: UUID) -> list[BeneficioFuncionario]:
+        ...
+
+    @abstractmethod
+    async def list_ativos_by_team(self, team_id: UUID) -> list[BeneficioFuncionario]:
+        ...
+
+    @abstractmethod
+    async def get_vinculo(self, team_id: UUID, beneficio_id: UUID, funcionario_id: UUID) -> BeneficioFuncionario | None:
+        ...
+
+    @abstractmethod
+    async def save(self, vinculo: BeneficioFuncionario) -> BeneficioFuncionario:
+        ...
 
 
 class FaixaEncargoRepository(ABC):

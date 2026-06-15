@@ -11,6 +11,7 @@ from app.application.providers.repo.rh_repo import (
     AjustePontoRepository,
     AtestadoRepository,
     BeneficioRepository,
+    BeneficioFuncionarioRepository,
     FaixaEncargoRepository,
     FeriasRepository,
     FuncionarioRepository,
@@ -31,6 +32,7 @@ from app.domain.entities.rh import (
     AjustePonto,
     Atestado,
     Beneficio,
+    BeneficioFuncionario,
     FaixaEncargo,
     Ferias,
     Funcionario,
@@ -59,6 +61,7 @@ from app.infra.db.models.rh_model import (
     AjustePontoModel,
     AtestadoModel,
     BeneficioModel,
+    BeneficioFuncionarioModel,
     FaixaEncargoModel,
     FeriasModel,
     FuncionarioModel,
@@ -453,6 +456,49 @@ class BeneficioRepositoryImpl(_SoftDeleteRepository, BeneficioRepository):
             pattern = f"%{filters['search'].strip()}%"
             stmt = stmt.where(BeneficioModel.nome.ilike(pattern))
         return stmt
+
+
+class BeneficioFuncionarioRepositoryImpl(_SoftDeleteRepository, BeneficioFuncionarioRepository):
+    async def list_by_beneficio(self, team_id: UUID, beneficio_id: UUID) -> list[BeneficioFuncionario]:
+        stmt = select(BeneficioFuncionarioModel).where(
+            BeneficioFuncionarioModel.team_id == team_id,
+            BeneficioFuncionarioModel.beneficio_id == beneficio_id,
+            BeneficioFuncionarioModel.is_deleted == False,  # noqa: E712
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [row.to_domain() for row in rows]
+
+    async def list_ativos_by_funcionario(self, team_id: UUID, funcionario_id: UUID) -> list[BeneficioFuncionario]:
+        stmt = select(BeneficioFuncionarioModel).where(
+            BeneficioFuncionarioModel.team_id == team_id,
+            BeneficioFuncionarioModel.funcionario_id == funcionario_id,
+            BeneficioFuncionarioModel.status == "ativo",
+            BeneficioFuncionarioModel.is_deleted == False,  # noqa: E712
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [row.to_domain() for row in rows]
+
+    async def list_ativos_by_team(self, team_id: UUID) -> list[BeneficioFuncionario]:
+        stmt = select(BeneficioFuncionarioModel).where(
+            BeneficioFuncionarioModel.team_id == team_id,
+            BeneficioFuncionarioModel.status == "ativo",
+            BeneficioFuncionarioModel.is_deleted == False,  # noqa: E712
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [row.to_domain() for row in rows]
+
+    async def get_vinculo(self, team_id: UUID, beneficio_id: UUID, funcionario_id: UUID) -> BeneficioFuncionario | None:
+        stmt = select(BeneficioFuncionarioModel).where(
+            BeneficioFuncionarioModel.team_id == team_id,
+            BeneficioFuncionarioModel.beneficio_id == beneficio_id,
+            BeneficioFuncionarioModel.funcionario_id == funcionario_id,
+            BeneficioFuncionarioModel.is_deleted == False,  # noqa: E712
+        )
+        row = (await self._session.execute(stmt)).scalars().first()
+        return row.to_domain() if row else None
+
+    async def save(self, vinculo: BeneficioFuncionario) -> BeneficioFuncionario:
+        return await self._save(vinculo, BeneficioFuncionarioModel, "Vinculo de beneficio nao encontrado para atualizacao")
 
 
 class RegistroPontoRepositoryImpl(_SoftDeleteRepository, RegistroPontoRepository):
