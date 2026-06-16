@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from uuid import UUID
 
 from app.http.schemas.obras import (
@@ -96,10 +96,11 @@ async def list_obras(
     pagination: Pagination,
     svc: ObraServiceDep,
     status: str = "all",
+    search: str | None = Query(None, min_length=1, max_length=200),
 ):
     """
-    Lista obras do time (paginado). Filtra por status opcional.
-    Cache Redis 5min.
+    Lista obras do time (paginado). Filtra por status e/ou busca por título (opcional).
+    Cache Redis 5min — desativado quando `search` é informado.
     """
     status_enum = None
     if status != "all":
@@ -109,23 +110,28 @@ async def list_obras(
             raise HTTPException(status_code=422, detail=f"Status inválido: {status}")
 
     redis = get_redis()
-    cache_key = obras_list_key(user.team.id, pagination.page, pagination.limit, status)
-    cached = await redis.get(cache_key)
-    if cached:
-        return PaginatedResponse[ObraListItem].model_validate_json(cached)
+    use_cache = search is None
+
+    if use_cache:
+        cache_key = obras_list_key(user.team.id, pagination.page, pagination.limit, status)
+        cached = await redis.get(cache_key)
+        if cached:
+            return PaginatedResponse[ObraListItem].model_validate_json(cached)
 
     if status_enum:
-        obras = await svc.list_by_status(user.team.id, status_enum, pagination.page, pagination.limit)
-        total = await svc.count_by_status(user.team.id, status_enum)
+        obras = await svc.list_by_status(user.team.id, status_enum, pagination.page, pagination.limit, search=search)
+        total = await svc.count_by_status(user.team.id, status_enum, search=search)
     else:
-        obras = await svc.list_obras(user.team.id, pagination.page, pagination.limit)
-        total = await svc.count_obras(user.team.id)
+        obras = await svc.list_obras(user.team.id, pagination.page, pagination.limit, search=search)
+        total = await svc.count_obras(user.team.id, search=search)
 
     items = [_obra_to_list_item(o) for o in obras]
     result = PaginatedResponse.build(
         items=items, page=pagination.page, limit=pagination.limit, total=total
     )
-    await redis.set(cache_key, result.model_dump_json(), ex=300)
+
+    if use_cache:
+        await redis.set(cache_key, result.model_dump_json(), ex=300)
     return result
 
 
