@@ -47,18 +47,21 @@ class ObraService():
     async def get_obra(self, obra_id: UUID, team_id: UUID | None = None) -> Obra:
         return await self.obra_repo.get_by_id(obra_id, team_id)
 
-    async def list_obras(self, team_id: UUID, page: int, limit: int) -> list[Obra]:
-        return await self.obra_repo.get_by_team(team_id, page, limit)
+    async def list_obras(self, team_id: UUID, page: int, limit: int,
+                         search: str | None = None) -> list[Obra]:
+        return await self.obra_repo.get_by_team(team_id, page, limit, search=search)
 
-    async def count_obras(self, team_id: UUID) -> int:
-        return await self.obra_repo.count_by_team(team_id)
+    async def count_obras(self, team_id: UUID, search: str | None = None) -> int:
+        return await self.obra_repo.count_by_team(team_id, search=search)
 
     async def list_by_status(self, team_id: UUID, status: Status,
-                             page: int, limit: int) -> list[Obra]:
-        return await self.obra_repo.get_by_status(team_id, status, limit, page)
+                             page: int, limit: int,
+                             search: str | None = None) -> list[Obra]:
+        return await self.obra_repo.get_by_status(team_id, status, limit, page, search=search)
 
-    async def count_by_status(self, team_id: UUID, status: Status) -> int:
-        return await self.obra_repo.count_by_status(team_id, status)
+    async def count_by_status(self, team_id: UUID, status: Status,
+                              search: str | None = None) -> int:
+        return await self.obra_repo.count_by_status(team_id, status, search=search)
 
     async def delete_obra(self, obra: Obra) -> None:
         obra.delete()
@@ -472,11 +475,13 @@ class CategoriaObraService():
         await self.uow.commit()
 
     async def list_obras_by_categoria(self, categoria_id: UUID, team_id: UUID,
-                                      page: int, limit: int) -> list[Obra]:
-        return await self.obra_repo.get_by_categoria(categoria_id, team_id, page, limit)
+                                      page: int, limit: int,
+                                      search: str | None = None) -> list[Obra]:
+        return await self.obra_repo.get_by_categoria(categoria_id, team_id, page, limit, search=search)
 
-    async def count_obras_by_categoria(self, categoria_id: UUID, team_id: UUID) -> int:
-        return await self.obra_repo.count_by_categoria(categoria_id, team_id)
+    async def count_obras_by_categoria(self, categoria_id: UUID, team_id: UUID,
+                                       search: str | None = None) -> int:
+        return await self.obra_repo.count_by_categoria(categoria_id, team_id, search=search)
 
 
 class RecebimentoService():
