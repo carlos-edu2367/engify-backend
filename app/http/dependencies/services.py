@@ -331,6 +331,8 @@ async def get_rh_folha_service(session: Session) -> RhFolhaService:
         folha_job_repo=RhFolhaJobRepositoryImpl(session),
         folha_queue=_rh_folha_queue,
         encargo_cache=_rh_encargo_cache,
+        beneficio_repo=BeneficioRepositoryImpl(session),
+        beneficio_funcionario_repo=BeneficioFuncionarioRepositoryImpl(session),
     )
 
 

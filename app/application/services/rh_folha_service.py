@@ -11,6 +11,8 @@ from uuid import UUID
 from app.application.providers.repo.financeiro_repo import PagamentoAgendadoRepository
 from app.application.providers.repo.rh_repo import (
     AtestadoRepository,
+    BeneficioRepository,
+    BeneficioFuncionarioRepository,
     FuncionarioRepository,
     HoleriteRepository,
     HoleriteItemRepository,
@@ -43,12 +45,18 @@ from app.domain.entities.rh import (
     RhFolhaJob,
     RhFolhaJobStatus,
     StatusAtestado,
+    StatusBeneficio,
     StatusFerias,
     StatusHolerite,
     StatusRegraEncargo,
     StatusPonto,
     TipoPonto,
     TurnoHorario,
+)
+from app.domain.services.rh_beneficio_calculo import (
+    contar_faltas,
+    dias_uteis_competencia,
+    valor_beneficio,
 )
 from app.domain.services.rh_folha_calculation_engine import FolhaCalculationEngine
 from app.domain.entities.user import Roles, User
@@ -75,6 +83,8 @@ class RhFolhaService:
         folha_job_repo: RhFolhaJobRepository | None = None,
         folha_queue: RhFolhaQueuePort | None = None,
         encargo_cache: RhEncargoCachePort | None = None,
+        beneficio_repo: BeneficioRepository | None = None,
+        beneficio_funcionario_repo: BeneficioFuncionarioRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.horario_repo = horario_repo
@@ -93,6 +103,8 @@ class RhFolhaService:
         self.folha_job_repo = folha_job_repo
         self.folha_queue = folha_queue
         self.encargo_cache = encargo_cache
+        self.beneficio_repo = beneficio_repo
+        self.beneficio_funcionario_repo = beneficio_funcionario_repo
 
     async def gerar_rascunho_folha(
         self,
@@ -127,6 +139,15 @@ class RhFolhaService:
         registros_por_funcionario = self._group_by_funcionario(registros)
         ferias_por_funcionario = self._group_by_funcionario(ferias_items)
         regras_ativas = await self._load_regras_ativas(team_id, mes, ano)
+        beneficios_por_id = {}
+        vinculos_por_funcionario = {}
+        if self.beneficio_repo is not None and self.beneficio_funcionario_repo is not None:
+            beneficios_lista = await self.beneficio_repo.list_by_filters(
+                team_id, 1, 10_000, status=StatusBeneficio.ATIVO
+            )
+            beneficios_por_id = {b.id: b for b in beneficios_lista}
+            for v in await self.beneficio_funcionario_repo.list_ativos_by_team(team_id):
+                vinculos_por_funcionario.setdefault(v.funcionario_id, []).append(v)
         holerites: list[Holerite] = []
 
         for funcionario in funcionarios:
@@ -173,7 +194,13 @@ class RhFolhaService:
                         calculation_version="encargos-v2",
                     )
                 )
-            await self._sync_holerite_items(saved, regras_ativas)
+            beneficio_items = self._build_beneficio_items(
+                saved,
+                vinculos_por_funcionario.get(funcionario.id, []),
+                beneficios_por_id,
+                registros_por_funcionario.get(funcionario.id, []),
+            )
+            await self._sync_holerite_items(saved, regras_ativas, beneficio_items)
             saved = await self.holerite_repo.save(saved)
             await self._record_audit(
                 current_user=current_user,
@@ -200,18 +227,59 @@ class RhFolhaService:
             await self.encargo_cache.set_active_rules(team_id, ano, mes, regras)
         return regras
 
-    async def _sync_holerite_items(self, holerite: Holerite, regras_ativas: list | None = None) -> None:
+    async def _sync_holerite_items(
+        self,
+        holerite: Holerite,
+        regras_ativas: list | None = None,
+        beneficio_items: list | None = None,
+    ) -> None:
         if self.holerite_item_repo is None:
             return
         itens_base = self._build_holerite_items(holerite)
         context = self._build_calculation_context(holerite, itens_base)
         regras = list(regras_ativas or [])
         result = self.calculation_engine.apply(context, regras)
-        await self.holerite_item_repo.replace_automaticos(holerite.team_id, holerite.id, result.itens)
-        holerite.atualizar_totais_por_itens(result.itens)
-        holerite.calculation_hash = self._build_calculation_hash(holerite, regras, result.itens)
+        itens_finais = list(result.itens) + list(beneficio_items or [])
+        await self.holerite_item_repo.replace_automaticos(holerite.team_id, holerite.id, itens_finais)
+        holerite.atualizar_totais_por_itens(itens_finais)
+        holerite.calculation_hash = self._build_calculation_hash(holerite, regras, itens_finais)
         holerite.calculation_version = "encargos-v2"
         holerite.calculated_at = datetime.now(timezone.utc)
+
+    def _build_beneficio_items(self, holerite, vinculos, beneficios_por_id, registros) -> list[HoleriteItem]:
+        if not vinculos:
+            return []
+        dias_presenca = {
+            r.timestamp.date()
+            for r in registros
+            if r.status in {StatusPonto.VALIDADO, StatusPonto.AJUSTADO}
+        }
+        dias_uteis = dias_uteis_competencia(holerite.mes_referencia, holerite.ano_referencia)
+        faltas = contar_faltas(holerite.mes_referencia, holerite.ano_referencia, dias_presenca)
+        itens: list[HoleriteItem] = []
+        ordem = 600
+        for vinculo in sorted(vinculos, key=lambda v: str(v.beneficio_id)):
+            beneficio = beneficios_por_id.get(vinculo.beneficio_id)
+            if beneficio is None or beneficio.status.value != "ativo" or beneficio.is_deleted:
+                continue
+            valor = valor_beneficio(beneficio.valor_dia, dias_uteis, faltas)
+            itens.append(
+                HoleriteItem(
+                    team_id=holerite.team_id,
+                    holerite_id=holerite.id,
+                    funcionario_id=holerite.funcionario_id,
+                    tipo=HoleriteItemTipo.BENEFICIO_AUTOMATICO,
+                    origem="beneficio",
+                    codigo=f"BENEFICIO_{str(beneficio.id)[:8]}",
+                    descricao=beneficio.nome,
+                    natureza=HoleriteItemNatureza.PROVENTO,
+                    ordem=ordem,
+                    base=beneficio.valor_dia,
+                    valor=valor,
+                )
+            )
+            ordem += 1
+        return itens
 
     def _build_holerite_items(self, holerite: Holerite) -> list[HoleriteItem]:
         itens = [
