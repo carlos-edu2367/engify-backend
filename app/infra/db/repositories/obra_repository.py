@@ -36,11 +36,26 @@ class ObraRepositoryImpl(ObraRepository):
             raise DomainError("Obra não encontrada")
         return model.to_domain()
 
-    async def get_by_team(self, team_id: UUID, page: int, limit: int) -> list[Obra]:
+    @staticmethod
+    def _normalize_search(search: str | None) -> str | None:
+        if search is None:
+            return None
+        term = search.strip()
+        return term or None
+
+    async def get_by_team(self, team_id: UUID, page: int, limit: int,
+                          search: str | None = None) -> list[Obra]:
         offset = (page - 1) * limit
+        conditions = [
+            ObraModel.team_id == team_id,
+            ObraModel.is_deleted == False,  # noqa: E712
+        ]
+        term = self._normalize_search(search)
+        if term is not None:
+            conditions.append(ObraModel.title.ilike(f"%{term}%"))
         stmt = (
             select(ObraModel)
-            .where(ObraModel.team_id == team_id, ObraModel.is_deleted == False)  # noqa: E712
+            .where(*conditions)
             .order_by(ObraModel.created_date.desc())
             .limit(limit)
             .offset(offset)
@@ -48,24 +63,32 @@ class ObraRepositoryImpl(ObraRepository):
         result = await self._session.execute(stmt)
         return [m.to_domain() for m in result.scalars().all()]
 
-    async def count_by_team(self, team_id: UUID) -> int:
-        stmt = select(func.count()).select_from(ObraModel).where(
+    async def count_by_team(self, team_id: UUID, search: str | None = None) -> int:
+        conditions = [
             ObraModel.team_id == team_id,
             ObraModel.is_deleted == False,  # noqa: E712
-        )
+        ]
+        term = self._normalize_search(search)
+        if term is not None:
+            conditions.append(ObraModel.title.ilike(f"%{term}%"))
+        stmt = select(func.count()).select_from(ObraModel).where(*conditions)
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
     async def get_by_status(self, team_id: UUID, status: Status,
-                            limit: int, page: int) -> list[Obra]:
+                            limit: int, page: int, search: str | None = None) -> list[Obra]:
         offset = (page - 1) * limit
+        conditions = [
+            ObraModel.team_id == team_id,
+            ObraModel.status == status.value,
+            ObraModel.is_deleted == False,  # noqa: E712
+        ]
+        term = self._normalize_search(search)
+        if term is not None:
+            conditions.append(ObraModel.title.ilike(f"%{term}%"))
         stmt = (
             select(ObraModel)
-            .where(
-                ObraModel.team_id == team_id,
-                ObraModel.status == status.value,
-                ObraModel.is_deleted == False,  # noqa: E712
-            )
+            .where(*conditions)
             .order_by(ObraModel.created_date.desc())
             .limit(limit)
             .offset(offset)
@@ -73,25 +96,33 @@ class ObraRepositoryImpl(ObraRepository):
         result = await self._session.execute(stmt)
         return [m.to_domain() for m in result.scalars().all()]
 
-    async def count_by_status(self, team_id: UUID, status: Status) -> int:
-        stmt = select(func.count()).select_from(ObraModel).where(
+    async def count_by_status(self, team_id: UUID, status: Status, search: str | None = None) -> int:
+        conditions = [
             ObraModel.team_id == team_id,
             ObraModel.status == status.value,
             ObraModel.is_deleted == False,  # noqa: E712
-        )
+        ]
+        term = self._normalize_search(search)
+        if term is not None:
+            conditions.append(ObraModel.title.ilike(f"%{term}%"))
+        stmt = select(func.count()).select_from(ObraModel).where(*conditions)
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
     async def get_by_categoria(self, categoria_id: UUID, team_id: UUID,
-                               page: int, limit: int) -> list[Obra]:
+                               page: int, limit: int, search: str | None = None) -> list[Obra]:
         offset = (page - 1) * limit
+        conditions = [
+            ObraModel.categoria_id == categoria_id,
+            ObraModel.team_id == team_id,
+            ObraModel.is_deleted == False,  # noqa: E712
+        ]
+        term = self._normalize_search(search)
+        if term is not None:
+            conditions.append(ObraModel.title.ilike(f"%{term}%"))
         stmt = (
             select(ObraModel)
-            .where(
-                ObraModel.categoria_id == categoria_id,
-                ObraModel.team_id == team_id,
-                ObraModel.is_deleted == False,  # noqa: E712
-            )
+            .where(*conditions)
             .order_by(ObraModel.created_date.desc())
             .limit(limit)
             .offset(offset)
@@ -99,12 +130,17 @@ class ObraRepositoryImpl(ObraRepository):
         result = await self._session.execute(stmt)
         return [m.to_domain() for m in result.scalars().all()]
 
-    async def count_by_categoria(self, categoria_id: UUID, team_id: UUID) -> int:
-        stmt = select(func.count()).select_from(ObraModel).where(
+    async def count_by_categoria(self, categoria_id: UUID, team_id: UUID,
+                                 search: str | None = None) -> int:
+        conditions = [
             ObraModel.categoria_id == categoria_id,
             ObraModel.team_id == team_id,
             ObraModel.is_deleted == False,  # noqa: E712
-        )
+        ]
+        term = self._normalize_search(search)
+        if term is not None:
+            conditions.append(ObraModel.title.ilike(f"%{term}%"))
+        stmt = select(func.count()).select_from(ObraModel).where(*conditions)
         result = await self._session.execute(stmt)
         return result.scalar_one()
 

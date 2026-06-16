@@ -11,27 +11,29 @@ class ObraRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_by_team(self, team_id: UUID, page: int, limit: int) -> list[Obra]:
+    async def get_by_team(self, team_id: UUID, page: int, limit: int, search: str | None = None) -> list[Obra]:
         pass
 
     @abstractmethod
-    async def count_by_team(self, team_id: UUID) -> int:
+    async def count_by_team(self, team_id: UUID, search: str | None = None) -> int:
         pass
 
     @abstractmethod
-    async def get_by_status(self, team_id: UUID, status: Status, limit: int, page: int) -> list[Obra]:
+    async def get_by_status(self, team_id: UUID, status: Status, limit: int, page: int,
+                            search: str | None = None) -> list[Obra]:
         pass
 
     @abstractmethod
-    async def count_by_status(self, team_id: UUID, status: Status) -> int:
+    async def count_by_status(self, team_id: UUID, status: Status, search: str | None = None) -> int:
         pass
 
     @abstractmethod
-    async def get_by_categoria(self, categoria_id: UUID, team_id: UUID, page: int, limit: int) -> list[Obra]:
+    async def get_by_categoria(self, categoria_id: UUID, team_id: UUID, page: int, limit: int,
+                               search: str | None = None) -> list[Obra]:
         pass
 
     @abstractmethod
-    async def count_by_categoria(self, categoria_id: UUID, team_id: UUID) -> int:
+    async def count_by_categoria(self, categoria_id: UUID, team_id: UUID, search: str | None = None) -> int:
         pass
 
     @abstractmethod
