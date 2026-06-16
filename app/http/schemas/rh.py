@@ -363,6 +363,7 @@ class RhBeneficioCreateRequest(BaseModel):
 
     nome: str
     descricao: str | None = None
+    valor_dia: Decimal = Decimal("0.00")
 
 
 class RhBeneficioUpdateRequest(BaseModel):
@@ -370,12 +371,25 @@ class RhBeneficioUpdateRequest(BaseModel):
 
     nome: str | None = None
     descricao: str | None = None
+    valor_dia: Decimal | None = None
 
 
 class RhBeneficioResponse(BaseModel):
     id: UUID
     nome: str
     descricao: str | None = None
+    status: StatusBeneficio
+    valor_dia: Decimal
+
+
+class RhBeneficioFuncionarioAssignRequest(BaseModel):
+    funcionario_id: UUID
+
+
+class RhBeneficioFuncionarioResponse(BaseModel):
+    id: UUID
+    beneficio_id: UUID
+    funcionario_id: UUID
     status: StatusBeneficio
 
 

@@ -58,6 +58,8 @@ from app.http.schemas.rh import (
     RhAtestadoUploadUrlResponse,
     RhAuditLogResponse,
     RhBeneficioCreateRequest,
+    RhBeneficioFuncionarioAssignRequest,
+    RhBeneficioFuncionarioResponse,
     RhBeneficioResponse,
     RhBeneficioUpdateRequest,
     RhDashboardSummaryResponse,
@@ -427,6 +429,7 @@ def _to_beneficio_response(beneficio: Beneficio) -> RhBeneficioResponse:
         nome=beneficio.nome,
         descricao=beneficio.descricao,
         status=beneficio.status,
+        valor_dia=beneficio.valor_dia.amount,
     )
 
 
@@ -702,6 +705,36 @@ async def reativar_beneficio(beneficio_id: UUID, body: RhMotivoRequest, user: RH
     except DomainError as exc:
         raise _map_rh_error(exc)
     return _to_beneficio_response(beneficio)
+
+
+@router.get("/beneficios/{beneficio_id}/funcionarios", response_model=PaginatedResponse[RhBeneficioFuncionarioResponse])
+async def list_beneficio_funcionarios(beneficio_id: UUID, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        items = await svc.listar_funcionarios_beneficio(user, beneficio_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    responses = [
+        RhBeneficioFuncionarioResponse(id=v.id, beneficio_id=v.beneficio_id, funcionario_id=v.funcionario_id, status=v.status)
+        for v in items
+    ]
+    return PaginatedResponse.build(items=responses, page=1, limit=len(responses) or 1, total=len(responses))
+
+
+@router.post("/beneficios/{beneficio_id}/funcionarios", response_model=RhBeneficioFuncionarioResponse, status_code=201)
+async def assign_beneficio_funcionario(beneficio_id: UUID, body: RhBeneficioFuncionarioAssignRequest, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        vinculo = await svc.atribuir_funcionario(user, beneficio_id, body.funcionario_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return RhBeneficioFuncionarioResponse(id=vinculo.id, beneficio_id=vinculo.beneficio_id, funcionario_id=vinculo.funcionario_id, status=vinculo.status)
+
+
+@router.delete("/beneficios/{beneficio_id}/funcionarios/{funcionario_id}", status_code=204)
+async def remove_beneficio_funcionario(beneficio_id: UUID, funcionario_id: UUID, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        await svc.remover_funcionario(user, beneficio_id, funcionario_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
 
 
 @router.post("/encargos/regras", response_model=RhRegraEncargoResponse, status_code=201)
