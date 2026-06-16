@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from uuid import UUID
 
 from app.http.schemas.obras import (
@@ -189,17 +189,18 @@ async def list_obras_by_categoria(
     user: CurrentUser,
     pagination: Pagination,
     svc: CategoriaObraServiceDep,
+    search: str | None = Query(None, min_length=1, max_length=200),
 ):
-    """Lista obras de uma categoria (paginado)."""
+    """Lista obras de uma categoria (paginado), com busca opcional por título."""
     try:
         await svc.get_categoria(categoria_id, user.team.id)
     except DomainError:
         raise HTTPException(status_code=404, detail="Categoria não encontrada")
 
     obras = await svc.list_obras_by_categoria(
-        categoria_id, user.team.id, pagination.page, pagination.limit
+        categoria_id, user.team.id, pagination.page, pagination.limit, search=search
     )
-    total = await svc.count_obras_by_categoria(categoria_id, user.team.id)
+    total = await svc.count_obras_by_categoria(categoria_id, user.team.id, search=search)
 
     items = [_obra_to_list_item(o) for o in obras]
     return PaginatedResponse.build(
