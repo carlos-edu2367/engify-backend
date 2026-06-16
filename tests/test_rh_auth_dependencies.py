@@ -5,7 +5,7 @@ from app.domain.entities.identities import CPF
 from app.domain.entities.team import Team, Plans
 from app.domain.entities.user import Roles, User
 from fastapi import HTTPException
-from app.http.dependencies.auth import require_funcionario, require_invite_actor, require_manager, require_rh_admin
+from app.http.dependencies.auth import require_admin, require_funcionario, require_invite_actor, require_manager, require_rh_admin
 
 
 def _make_user(role: Roles) -> User:
@@ -83,4 +83,23 @@ def test_require_invite_actor_blocks_other_roles(role: Roles):
     user = _make_user(role)
     with pytest.raises(HTTPException) as exc:
         require_invite_actor(user)
+    assert exc.value.status_code == 403
+
+
+def test_require_admin_allows_admin():
+    user = _make_user(Roles.ADMIN)
+    assert require_admin(user) is user
+
+
+@pytest.mark.parametrize("role", [
+    Roles.ENGENHEIRO,
+    Roles.FINANCEIRO,
+    Roles.CLIENTE,
+    Roles.FUNCIONARIO,
+    Roles.SUPER_ADMIN,
+])
+def test_require_admin_blocks_other_roles(role: Roles):
+    user = _make_user(role)
+    with pytest.raises(HTTPException) as exc:
+        require_admin(user)
     assert exc.value.status_code == 403
