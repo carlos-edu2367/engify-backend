@@ -1051,6 +1051,20 @@ async def get_ponto_registro(registro_id: UUID, user: RHAdminUser, svc: RhPontoS
     }
 
 
+@router.delete("/ponto/registros/{registro_id}", response_model=MessageResponse)
+async def excluir_registro_ponto(
+    registro_id: UUID,
+    body: RhMotivoRequest,
+    user: RHAdminUser,
+    svc: RhPontoServiceDep,
+):
+    try:
+        await svc.excluir_registro_ponto(registro_id, body.motivo, user)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return MessageResponse(message="Registro de ponto excluido com sucesso")
+
+
 @router.get("/me/ponto", response_model=PaginatedResponse[RhRegistroPontoListItem])
 async def list_meus_pontos(
     user: CurrentUser,

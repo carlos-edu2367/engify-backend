@@ -333,6 +333,32 @@ class RhPontoService:
             "auditoria_resumida": [],
         }
 
+    async def excluir_registro_ponto(self, registro_id: UUID, motivo: str, current_user: User) -> None:
+        if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
+            raise DomainError("Acesso restrito ao RH")
+        registro = await self.registro_ponto_repo.get_by_id(registro_id, current_user.team.id)
+        before = {
+            "tipo": registro.tipo.value,
+            "status": registro.status.value,
+            "funcionario_id": str(registro.funcionario_id),
+            "timestamp": registro.timestamp.isoformat(),
+        }
+        registro.delete()
+        await self.registro_ponto_repo.save(registro)
+        await self.audit_repo.save(
+            RhAuditLog(
+                team_id=current_user.team.id,
+                actor_user_id=current_user.id,
+                actor_role=current_user.role.value,
+                entity_type="registro_ponto",
+                entity_id=registro.id,
+                action="rh.ponto.deleted",
+                before=before,
+                after={"motivo": motivo},
+            )
+        )
+        await self.uow.commit()
+
     async def _ensure_not_replayed(self, team_id: UUID, funcionario_id: UUID, tipo: TipoPonto, key: str | None) -> None:
         if not key or self.idempotency_repo is None:
             return

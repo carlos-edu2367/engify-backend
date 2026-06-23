@@ -199,6 +199,10 @@ class _FakeRegistroPontoRepo:
         return validos[0] if validos else None
 
     async def save(self, registro):
+        for idx, item in enumerate(self.items):
+            if item.id == registro.id:
+                self.items[idx] = registro
+                return registro
         self.items.append(registro)
         return registro
 
@@ -703,3 +707,72 @@ async def test_obter_dia_ponto_enriches_registros_with_local_metadata_and_outsid
     assert detail["registros"][0].gps_accuracy_meters == 8.0
     assert detail["registros"][1].local_ponto_nome is None
     assert detail["registros"][1].fora_local_autorizado is True
+
+
+@pytest.mark.asyncio
+async def test_excluir_registro_ponto_soft_deletes_records_audit_and_commits():
+    from app.application.services.rh_ponto_service import RhPontoService
+
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    registro = RegistroPonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        tipo=TipoPonto.ENTRADA,
+        timestamp=datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc),
+        latitude=-16.6869,
+        longitude=-49.2648,
+    )
+    registro_repo = _FakeRegistroPontoRepo([registro])
+    audit_repo = _FakeAuditRepo()
+    uow = _FakeUow()
+    service = RhPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo(),
+        registro_ponto_repo=registro_repo,
+        audit_repo=audit_repo,
+        geofence_cache=_FakeGeofenceCache(),
+        idempotency_repo=None,
+        uow=uow,
+    )
+
+    await service.excluir_registro_ponto(registro.id, "Ponto batido no tipo errado", current_user)
+
+    assert registro_repo.items[0].is_deleted is True
+    assert uow.commits == 1
+    assert len(audit_repo.events) == 1
+    assert audit_repo.events[0].action == "rh.ponto.deleted"
+    assert audit_repo.events[0].entity_id == registro.id
+    assert audit_repo.events[0].after == {"motivo": "Ponto batido no tipo errado"}
+    assert audit_repo.events[0].before["tipo"] == "entrada"
+
+
+@pytest.mark.asyncio
+async def test_excluir_registro_ponto_denies_role_funcionario():
+    from app.application.services.rh_ponto_service import RhPontoService
+
+    current_user = _make_user(Roles.FUNCIONARIO)
+    funcionario = _make_funcionario(current_user.team.id, user_id=current_user.id)
+    registro = RegistroPonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        tipo=TipoPonto.ENTRADA,
+        timestamp=datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc),
+        latitude=-16.6869,
+        longitude=-49.2648,
+    )
+    registro_repo = _FakeRegistroPontoRepo([registro])
+    service = RhPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo(),
+        registro_ponto_repo=registro_repo,
+        audit_repo=_FakeAuditRepo(),
+        geofence_cache=_FakeGeofenceCache(),
+        idempotency_repo=None,
+        uow=_FakeUow(),
+    )
+
+    with pytest.raises(DomainError, match="Acesso restrito"):
+        await service.excluir_registro_ponto(registro.id, "motivo", current_user)
+
+    assert registro_repo.items[0].is_deleted is False
