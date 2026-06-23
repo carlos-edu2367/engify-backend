@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -7,6 +7,7 @@ import pytest
 from app.domain.entities.identities import CPF
 from app.domain.entities.money import Money
 from app.domain.entities.rh import (
+    HorarioTrabalho,
     Holerite,
     RegistroPonto,
     RhAuditLog,
@@ -16,6 +17,7 @@ from app.domain.entities.rh import (
     StatusHolerite,
     StatusPonto,
     TipoPonto,
+    TurnoHorario,
 )
 from app.domain.entities.team import Plans, Team
 from app.domain.entities.user import Roles, User
@@ -95,6 +97,9 @@ class _FakeAtestadoRepo:
 
 
 class _FakeRegistroRepo:
+    def __init__(self, registros=None) -> None:
+        self.registros = list(registros or [])
+
     async def count_by_team_periodo(self, team_id, start, end, status):
         if status == StatusPonto.NEGADO:
             return 4
@@ -103,6 +108,17 @@ class _FakeRegistroRepo:
         raise AssertionError(f"unexpected status {status}")
 
     async def list_by_funcionario_periodo(self, team_id, funcionario_id, start, end, status=None, page=1, limit=1):
+        if self.registros:
+            items = [
+                item
+                for item in self.registros
+                if item.team_id == team_id
+                and item.funcionario_id == funcionario_id
+                and start <= item.timestamp <= end
+                and (status is None or item.status == status)
+            ]
+            items.sort(key=lambda item: item.timestamp, reverse=True)
+            return items[(page - 1) * limit : page * limit]
         return [
             RegistroPonto(
                 team_id=team_id,
@@ -114,6 +130,16 @@ class _FakeRegistroRepo:
                 status=StatusPonto.VALIDADO,
             )
         ]
+
+
+class _FakeHorarioRepo:
+    def __init__(self, horario=None) -> None:
+        self.horario = horario
+
+    async def get_by_funcionario_id(self, team_id, funcionario_id):
+        if self.horario and self.horario.team_id == team_id and self.horario.funcionario_id == funcionario_id:
+            return self.horario
+        return None
 
 
 class _FakeHoleriteRepo:
@@ -201,6 +227,29 @@ class _FuncionarioStub:
         self.is_deleted = False
 
 
+def _make_daily_horario(team_id, funcionario_id):
+    return HorarioTrabalho(
+        team_id=team_id,
+        funcionario_id=funcionario_id,
+        turnos=[
+            TurnoHorario(dia_semana=dia, hora_entrada=time(8, 0), hora_saida=time(17, 0))
+            for dia in range(7)
+        ],
+    )
+
+
+def _make_ponto(team_id, funcionario_id, timestamp, tipo, status=StatusPonto.VALIDADO):
+    return RegistroPonto(
+        team_id=team_id,
+        funcionario_id=funcionario_id,
+        tipo=tipo,
+        timestamp=timestamp,
+        latitude=-16.6869,
+        longitude=-49.2648,
+        status=status,
+    )
+
+
 @pytest.mark.asyncio
 async def test_obter_dashboard_returns_aggregated_counts():
     from app.application.services.rh_dashboard_service import RhDashboardService
@@ -208,6 +257,7 @@ async def test_obter_dashboard_returns_aggregated_counts():
     admin = _make_user(Roles.ADMIN)
     service = RhDashboardService(
         funcionario_repo=_FakeFuncionarioRepo(),
+        horario_repo=_FakeHorarioRepo(),
         ajuste_repo=_FakeAjusteRepo(),
         ferias_repo=_FakeFeriasRepo(),
         atestado_repo=_FakeAtestadoRepo(),
@@ -232,6 +282,7 @@ async def test_obter_meu_resumo_resolves_current_employee_only():
     funcionario = _FuncionarioStub(employee.team.id, employee.id)
     service = RhDashboardService(
         funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(_make_daily_horario(employee.team.id, funcionario.id)),
         ajuste_repo=_FakeAjusteRepo(),
         ferias_repo=_FakeFeriasRepo(),
         atestado_repo=_FakeAtestadoRepo(),
@@ -256,6 +307,7 @@ async def test_obter_meu_resumo_accepts_admin_when_linked_to_funcionario():
     funcionario = _FuncionarioStub(admin.team.id, admin.id)
     service = RhDashboardService(
         funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(_make_daily_horario(admin.team.id, funcionario.id)),
         ajuste_repo=_FakeAjusteRepo(),
         ferias_repo=_FakeFeriasRepo(),
         atestado_repo=_FakeAtestadoRepo(),
@@ -272,6 +324,56 @@ async def test_obter_meu_resumo_accepts_admin_when_linked_to_funcionario():
 
 
 @pytest.mark.asyncio
+async def test_obter_meu_resumo_includes_estado_ponto_ultimos_7_dias():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    employee = _make_user(Roles.FUNCIONARIO)
+    funcionario = _FuncionarioStub(employee.team.id, employee.id)
+    today = datetime.now(timezone.utc).date()
+    normal_day = today
+    missing_day = today - timedelta(days=1)
+    extra_day = today - timedelta(days=2)
+    short_day = today - timedelta(days=3)
+    inconsistent_day = today - timedelta(days=4)
+    registros = [
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(normal_day, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(normal_day, time(17, 0), tzinfo=timezone.utc), TipoPonto.SAIDA),
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(extra_day, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(extra_day, time(18, 0), tzinfo=timezone.utc), TipoPonto.SAIDA),
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(short_day, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(short_day, time(15, 0), tzinfo=timezone.utc), TipoPonto.SAIDA),
+        _make_ponto(
+            employee.team.id,
+            funcionario.id,
+            datetime.combine(inconsistent_day, time(8, 0), tzinfo=timezone.utc),
+            TipoPonto.ENTRADA,
+            StatusPonto.INCONSISTENTE,
+        ),
+    ]
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(_make_daily_horario(employee.team.id, funcionario.id)),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(registros),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    resumo = await service.obter_meu_resumo(employee)
+
+    assert resumo.estado_ponto_7_dias is not None
+    assert resumo.estado_ponto_7_dias.faltas == 4
+    assert resumo.estado_ponto_7_dias.horas_extras == Decimal("1.00")
+    assert resumo.estado_ponto_7_dias.horas_faltantes == Decimal("38.00")
+    assert resumo.estado_ponto_7_dias.pontos_inconsistentes == 1
+    assert resumo.estado_ponto_7_dias.inicio == missing_day - timedelta(days=5)
+    assert resumo.estado_ponto_7_dias.fim == today
+
+
+@pytest.mark.asyncio
 async def test_obter_meu_vinculo_returns_link_status_for_current_user():
     from app.application.services.rh_dashboard_service import RhDashboardService
 
@@ -279,6 +381,7 @@ async def test_obter_meu_vinculo_returns_link_status_for_current_user():
     funcionario = _FuncionarioStub(admin.team.id, admin.id)
     service = RhDashboardService(
         funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(),
         ajuste_repo=_FakeAjusteRepo(),
         ferias_repo=_FakeFeriasRepo(),
         atestado_repo=_FakeAtestadoRepo(),
@@ -301,6 +404,7 @@ async def test_listar_audit_logs_requires_rh_admin():
     employee = _make_user(Roles.FUNCIONARIO)
     service = RhDashboardService(
         funcionario_repo=_FakeFuncionarioRepo(),
+        horario_repo=_FakeHorarioRepo(),
         ajuste_repo=_FakeAjusteRepo(),
         ferias_repo=_FakeFeriasRepo(),
         atestado_repo=_FakeAtestadoRepo(),

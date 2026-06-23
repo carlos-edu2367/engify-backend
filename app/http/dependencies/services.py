@@ -351,6 +351,7 @@ async def get_rh_encargo_service(session: Session) -> RhEncargoService:
 async def get_rh_dashboard_service(session: Session) -> RhDashboardService:
     return RhDashboardService(
         funcionario_repo=FuncionarioRepositoryImpl(session),
+        horario_repo=HorarioTrabalhoRepositoryImpl(session),
         ajuste_repo=AjustePontoRepositoryImpl(session),
         ferias_repo=FeriasRepositoryImpl(session),
         atestado_repo=AtestadoRepositoryImpl(session),
@@ -491,6 +492,7 @@ async def get_arky_copilot(session: Session) -> ArkyOrchestrator:
         ),
         rh_dashboard_service=RhDashboardService(
             funcionario_repo=FuncionarioRepositoryImpl(session),
+            horario_repo=HorarioTrabalhoRepositoryImpl(session),
             ajuste_repo=AjustePontoRepositoryImpl(session),
             ferias_repo=FeriasRepositoryImpl(session),
             atestado_repo=AtestadoRepositoryImpl(session),

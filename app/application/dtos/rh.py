@@ -167,12 +167,22 @@ class RhUltimoHoleriteFechadoDTO(BaseModel):
     status: StatusHolerite
 
 
+class RhEstadoPonto7DiasDTO(BaseModel):
+    inicio: date
+    fim: date
+    faltas: int
+    horas_extras: Decimal
+    horas_faltantes: Decimal
+    pontos_inconsistentes: int
+
+
 class RhMeResumoDTO(BaseModel):
     ultimo_ponto: RhUltimoPontoDTO | None = None
     ajustes_pendentes: int
     ferias_pendentes: int
     atestados_pendentes: int
     ultimo_holerite_fechado: RhUltimoHoleriteFechadoDTO | None = None
+    estado_ponto_7_dias: RhEstadoPonto7DiasDTO | None = None
 
 
 class RhAuditLogFiltersDTO(BaseModel):

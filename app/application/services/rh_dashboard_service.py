@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import datetime, time, timezone
+from collections import defaultdict
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 
 import structlog
 
 from app.application.dtos.rh import (
+    RhEstadoPonto7DiasDTO,
     RhAuditLogFiltersDTO,
     RhAuditLogListItemDTO,
     RhDashboardSummaryDTO,
@@ -18,13 +21,14 @@ from app.application.providers.repo.rh_repo import (
     AtestadoRepository,
     FeriasRepository,
     FuncionarioRepository,
+    HorarioTrabalhoRepository,
     HoleriteRepository,
     RegistroPontoRepository,
     RhAuditLogRepository,
 )
 from app.application.providers.uow import UOWProvider
 from app.application.services.rh_audit_service import RhAuditService
-from app.domain.entities.rh import RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto
+from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoPonto, TurnoHorario
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
@@ -35,6 +39,7 @@ class RhDashboardService:
     def __init__(
         self,
         funcionario_repo: FuncionarioRepository,
+        horario_repo: HorarioTrabalhoRepository,
         ajuste_repo: AjustePontoRepository,
         ferias_repo: FeriasRepository,
         atestado_repo: AtestadoRepository,
@@ -44,6 +49,7 @@ class RhDashboardService:
         uow: UOWProvider,
     ) -> None:
         self.funcionario_repo = funcionario_repo
+        self.horario_repo = horario_repo
         self.ajuste_repo = ajuste_repo
         self.ferias_repo = ferias_repo
         self.atestado_repo = atestado_repo
@@ -144,6 +150,7 @@ class RhDashboardService:
             funcionario_id=funcionario.id,
             status=StatusAtestado.AGUARDANDO_ENTREGA,
         )
+        estado_ponto_7_dias = await self._calcular_estado_ponto_7_dias(team_id, funcionario.id)
 
         await self._record_event(current_user, "rh.employee_area.accessed", entity_type="employee_area")
         logger.info(
@@ -179,6 +186,7 @@ class RhDashboardService:
                 if ultimo_holerite is not None
                 else None
             ),
+            estado_ponto_7_dias=estado_ponto_7_dias,
         )
 
     async def obter_meu_vinculo(self, current_user: User) -> dict:
@@ -265,3 +273,81 @@ class RhDashboardService:
             datetime(ano, mes, 1, 0, 0, tzinfo=timezone.utc),
             datetime(ano, mes, last_day, 23, 59, 59, 999999, tzinfo=timezone.utc),
         )
+
+    async def _calcular_estado_ponto_7_dias(self, team_id, funcionario_id) -> RhEstadoPonto7DiasDTO:
+        hoje = datetime.now(timezone.utc).date()
+        inicio = hoje - timedelta(days=6)
+        start = datetime.combine(inicio, time.min, tzinfo=timezone.utc)
+        end = datetime.combine(hoje, time.max, tzinfo=timezone.utc)
+        horario = await self.horario_repo.get_by_funcionario_id(team_id, funcionario_id)
+        registros = await self.registro_ponto_repo.list_by_funcionario_periodo(
+            team_id,
+            funcionario_id,
+            start,
+            end,
+            page=1,
+            limit=500,
+        )
+        return self._summarize_estado_ponto_7_dias(inicio, hoje, horario, registros)
+
+    def _summarize_estado_ponto_7_dias(
+        self,
+        inicio: date,
+        fim: date,
+        horario: HorarioTrabalho | None,
+        registros: list[RegistroPonto],
+    ) -> RhEstadoPonto7DiasDTO:
+        registros_por_dia: dict[date, list[RegistroPonto]] = defaultdict(list)
+        pontos_inconsistentes = 0
+        for registro in registros:
+            registro_date = registro.timestamp.astimezone(timezone.utc).date()
+            registros_por_dia[registro_date].append(registro)
+            if registro.status == StatusPonto.INCONSISTENTE:
+                pontos_inconsistentes += 1
+
+        faltas = 0
+        extra_minutes = Decimal("0")
+        missing_minutes = Decimal("0")
+        current = inicio
+        while current <= fim:
+            turno = horario.turno_para_dia(current.weekday()) if horario is not None else None
+            if turno is not None:
+                expected_minutes = self._expected_minutes(turno)
+                worked_minutes = self._worked_minutes_for_day(registros_por_dia.get(current, []))
+                if worked_minutes == 0:
+                    faltas += 1
+                    missing_minutes += expected_minutes
+                elif worked_minutes > expected_minutes:
+                    extra_minutes += worked_minutes - expected_minutes
+                elif worked_minutes < expected_minutes:
+                    missing_minutes += expected_minutes - worked_minutes
+            current += timedelta(days=1)
+
+        return RhEstadoPonto7DiasDTO(
+            inicio=inicio,
+            fim=fim,
+            faltas=faltas,
+            horas_extras=(extra_minutes / Decimal("60")).quantize(Decimal("0.01")),
+            horas_faltantes=(missing_minutes / Decimal("60")).quantize(Decimal("0.01")),
+            pontos_inconsistentes=pontos_inconsistentes,
+        )
+
+    def _expected_minutes(self, turno: TurnoHorario) -> Decimal:
+        return Decimal(str(turno.horas_esperadas)) * Decimal("60")
+
+    def _worked_minutes_for_day(self, registros: list[RegistroPonto]) -> Decimal:
+        valid_statuses = {StatusPonto.VALIDADO, StatusPonto.AJUSTADO}
+        ordered = sorted(
+            [registro for registro in registros if registro.status in valid_statuses],
+            key=lambda item: item.timestamp,
+        )
+        total = Decimal("0")
+        entrada_atual: datetime | None = None
+        for registro in ordered:
+            if registro.tipo == TipoPonto.ENTRADA:
+                entrada_atual = registro.timestamp
+                continue
+            if registro.tipo == TipoPonto.SAIDA and entrada_atual is not None:
+                total += Decimal(str((registro.timestamp - entrada_atual).total_seconds() / 60))
+                entrada_atual = None
+        return total

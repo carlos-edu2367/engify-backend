@@ -596,12 +596,22 @@ class RhUltimoHoleriteResumoResponse(BaseModel):
     status: StatusHolerite
 
 
+class RhEstadoPonto7DiasResponse(BaseModel):
+    inicio: date
+    fim: date
+    faltas: int
+    horas_extras: Decimal
+    horas_faltantes: Decimal
+    pontos_inconsistentes: int
+
+
 class RhMeResumoResponse(BaseModel):
     ultimo_ponto: RhUltimoPontoResumoResponse | None = None
     ajustes_pendentes: int
     ferias_pendentes: int
     atestados_pendentes: int
     ultimo_holerite_fechado: RhUltimoHoleriteResumoResponse | None = None
+    estado_ponto_7_dias: RhEstadoPonto7DiasResponse | None = None
 
 
 class RhMeVinculoResponse(BaseModel):

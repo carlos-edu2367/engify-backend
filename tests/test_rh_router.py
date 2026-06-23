@@ -937,6 +937,43 @@ def test_get_meu_resumo_route_returns_200_for_funcionario():
     assert response.json()["ultimo_holerite_fechado"]["status"] == "fechado"
 
 
+def test_get_meu_resumo_route_serializes_estado_ponto_7_dias():
+    employee = _make_user(Roles.FUNCIONARIO)
+    client = _build_client(
+        employee,
+        _FakeRhService(funcionario=_make_funcionario(employee.team.id)),
+        dashboard_service=_FakeDashboardService(
+            resumo={
+                "ultimo_ponto": None,
+                "ajustes_pendentes": 0,
+                "ferias_pendentes": 0,
+                "atestados_pendentes": 0,
+                "ultimo_holerite_fechado": None,
+                "estado_ponto_7_dias": {
+                    "inicio": "2026-06-17",
+                    "fim": "2026-06-23",
+                    "faltas": 1,
+                    "horas_extras": "1.50",
+                    "horas_faltantes": "2.00",
+                    "pontos_inconsistentes": 2,
+                },
+            }
+        ),
+    )
+
+    response = client.get("/rh/me/resumo")
+
+    assert response.status_code == 200
+    assert response.json()["estado_ponto_7_dias"] == {
+        "inicio": "2026-06-17",
+        "fim": "2026-06-23",
+        "faltas": 1,
+        "horas_extras": "1.50",
+        "horas_faltantes": "2.00",
+        "pontos_inconsistentes": 2,
+    }
+
+
 def test_get_meu_resumo_route_accepts_admin_with_employee_link():
     admin = _make_user(Roles.ADMIN)
     client = _build_client(
