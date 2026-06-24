@@ -305,10 +305,13 @@ def _to_local_response(local: LocalPonto) -> RhLocalPontoResponse:
     )
 
 
-def _to_registro_item(registro: RegistroPonto) -> RhRegistroPontoListItem:
+def _to_registro_item(registro: RegistroPonto, funcionario: Funcionario | None = None) -> RhRegistroPontoListItem:
     return RhRegistroPontoListItem(
         id=registro.id,
         funcionario_id=registro.funcionario_id,
+        funcionario_nome=funcionario.nome if funcionario else None,
+        funcionario_cpf_mascarado=_mask_cpf(funcionario.cpf.value) if funcionario else None,
+        funcionario_cargo=funcionario.cargo if funcionario else None,
         tipo=registro.tipo,
         timestamp=registro.timestamp,
         status=registro.status,
@@ -875,6 +878,19 @@ async def inativar_tabela_progressiva(tabela_id: UUID, body: RhMotivoRequest, us
     return _to_tabela_progressiva_response(tabela)
 
 
+@router.get("/funcionarios/{funcionario_id}/beneficios", response_model=PaginatedResponse[RhBeneficioFuncionarioResponse])
+async def list_funcionario_beneficios(funcionario_id: UUID, user: RHAdminUser, svc: RhEncargoServiceDep):
+    try:
+        items = await svc.listar_beneficios_funcionario(user, funcionario_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    responses = [
+        RhBeneficioFuncionarioResponse(id=v.id, beneficio_id=v.beneficio_id, funcionario_id=v.funcionario_id, status=v.status)
+        for v in items
+    ]
+    return PaginatedResponse.build(items=responses, page=1, limit=len(responses) or 1, total=len(responses))
+
+
 @router.get("/funcionarios/{funcionario_id}/locais-ponto", response_model=PaginatedResponse[RhLocalPontoResponse])
 async def list_locais_ponto(
     funcionario_id: UUID,
@@ -970,7 +986,7 @@ async def list_pontos(
     status: StatusPonto | None = Query(default=None),
 ):
     try:
-        items, total = await svc.list_pontos(
+        items, funcionarios, total = await svc.list_pontos(
             user,
             pagination.page,
             pagination.limit,
@@ -982,7 +998,7 @@ async def list_pontos(
     except DomainError as exc:
         raise _map_rh_error(exc)
     return PaginatedResponse.build(
-        items=[_to_registro_item(item) for item in items],
+        items=[_to_registro_item(item, funcionarios.get(item.funcionario_id)) for item in items],
         page=pagination.page,
         limit=pagination.limit,
         total=total,
@@ -1000,11 +1016,11 @@ async def list_ponto_dias(
     status: StatusPonto | None = Query(default=None),
 ):
     try:
-        items, total = await svc.listar_dias_ponto(user, pagination.page, pagination.limit, funcionario_id=funcionario_id, start=start, end=end, status=status)
+        items, funcionarios, total = await svc.listar_dias_ponto(user, pagination.page, pagination.limit, funcionario_id=funcionario_id, start=start, end=end, status=status)
     except DomainError as exc:
         raise _map_rh_error(exc)
     return PaginatedResponse.build(
-        items=[_to_registro_item(item) for item in items],
+        items=[_to_registro_item(item, funcionarios.get(item.funcionario_id)) for item in items],
         page=pagination.page,
         limit=pagination.limit,
         total=total,

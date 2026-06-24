@@ -371,6 +371,11 @@ class RhEncargoService:
         repo = self._ensure_vinculo_repo()
         return await repo.list_by_beneficio(current_user.team.id, beneficio_id)
 
+    async def listar_beneficios_funcionario(self, current_user: User, funcionario_id: UUID):
+        self._ensure_rh_read(current_user)
+        repo = self._ensure_vinculo_repo()
+        return await repo.list_ativos_by_funcionario(current_user.team.id, funcionario_id)
+
     async def atribuir_funcionario(self, current_user: User, beneficio_id: UUID, funcionario_id: UUID) -> BeneficioFuncionario:
         self._ensure_rh_admin(current_user)
         await self._ensure_beneficio_repo().get_by_id(beneficio_id, current_user.team.id)

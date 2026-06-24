@@ -157,6 +157,9 @@ class RhPontoResponse(BaseModel):
 class RhRegistroPontoListItem(BaseModel):
     id: UUID
     funcionario_id: UUID
+    funcionario_nome: str | None = None
+    funcionario_cpf_mascarado: str | None = None
+    funcionario_cargo: str | None = None
     tipo: TipoPonto
     timestamp: datetime
     status: StatusPonto

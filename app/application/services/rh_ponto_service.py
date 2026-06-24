@@ -242,34 +242,45 @@ class RhPontoService:
             if start == datetime.min.replace(tzinfo=timezone.utc) and end == datetime.max.replace(tzinfo=timezone.utc) and status is None:
                 items = await self.registro_ponto_repo.list_by_team(current_user.team.id, page, limit)
                 total = await self.registro_ponto_repo.count_by_team(current_user.team.id)
-                return items, total
-            items = await self.registro_ponto_repo.list_by_team_periodo(
+            else:
+                items = await self.registro_ponto_repo.list_by_team_periodo(
+                    current_user.team.id,
+                    start,
+                    end,
+                    status=status,
+                    page=page,
+                    limit=limit,
+                )
+                total = await self.registro_ponto_repo.count_by_team_periodo(current_user.team.id, start, end, status=status)
+        else:
+            items = await self.registro_ponto_repo.list_by_funcionario_periodo(
                 current_user.team.id,
+                funcionario_id,
                 start,
                 end,
                 status=status,
                 page=page,
                 limit=limit,
             )
-            total = await self.registro_ponto_repo.count_by_team_periodo(current_user.team.id, start, end, status=status)
-            return items, total
-        items = await self.registro_ponto_repo.list_by_funcionario_periodo(
-            current_user.team.id,
-            funcionario_id,
-            start,
-            end,
-            status=status,
-            page=page,
-            limit=limit,
-        )
-        total = await self.registro_ponto_repo.count_by_funcionario_periodo(
-            current_user.team.id,
-            funcionario_id,
-            start,
-            end,
-            status=status,
-        )
-        return items, total
+            total = await self.registro_ponto_repo.count_by_funcionario_periodo(
+                current_user.team.id,
+                funcionario_id,
+                start,
+                end,
+                status=status,
+            )
+        funcionarios = await self._fetch_funcionarios_map(current_user.team.id, items)
+        return items, funcionarios, total
+
+    async def _fetch_funcionarios_map(self, team_id: UUID, items: list) -> dict:
+        unique_ids = {item.funcionario_id for item in items}
+        funcionarios = {}
+        for fid in unique_ids:
+            try:
+                funcionarios[fid] = await self.funcionario_repo.get_by_id(fid, team_id)
+            except DomainError:
+                pass
+        return funcionarios
 
     async def list_meus_pontos(self, current_user: User, page: int, limit: int, start=None, end=None, status=None):
         funcionario = await self.funcionario_repo.get_by_user_id(current_user.team.id, current_user.id)

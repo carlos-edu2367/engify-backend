@@ -127,7 +127,7 @@ class _FakePontoService:
     async def list_pontos(self, current_user, page, limit, funcionario_id=None, start=None, end=None, status=None):
         if self.error:
             raise self.error
-        return [self.registro], 1
+        return [self.registro], {}, 1
 
     async def list_meus_pontos(self, current_user, page, limit, start=None, end=None, status=None):
         if self.error:
