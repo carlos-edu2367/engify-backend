@@ -203,6 +203,72 @@ def test_ajuste_ponto_requires_justificativa_and_requested_time():
         )
 
 
+def test_registro_ponto_ajustar_timestamp_marks_adjusted():
+    from app.domain.entities.rh import RegistroPonto, StatusPonto, TipoPonto
+
+    registro = RegistroPonto(
+        team_id=uuid4(),
+        funcionario_id=uuid4(),
+        tipo=TipoPonto.ENTRADA,
+        timestamp=datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc),
+        latitude=-16.6869,
+        longitude=-49.2648,
+    )
+
+    novo = datetime(2026, 6, 23, 8, 15, tzinfo=timezone.utc)
+    registro.ajustar_timestamp(novo)
+
+    assert registro.timestamp == novo
+    assert registro.status == StatusPonto.AJUSTADO
+
+
+def test_ajuste_ponto_accepts_interval_times():
+    from app.domain.entities.rh import AjustePonto
+
+    ajuste = AjustePonto(
+        team_id=uuid4(),
+        funcionario_id=uuid4(),
+        data_referencia=datetime(2026, 6, 23, tzinfo=timezone.utc),
+        justificativa="Corrigir almoco",
+        hora_entrada_solicitada=datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc),
+        hora_saida_solicitada=datetime(2026, 6, 23, 18, 0, tzinfo=timezone.utc),
+        hora_intervalo_inicio_solicitada=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
+        hora_intervalo_fim_solicitada=datetime(2026, 6, 23, 13, 0, tzinfo=timezone.utc),
+    )
+
+    assert ajuste.hora_intervalo_inicio_solicitada.hour == 12
+    assert ajuste.hora_intervalo_fim_solicitada.hour == 13
+
+
+def test_ajuste_ponto_rejects_interval_with_only_start():
+    from app.domain.entities.rh import AjustePonto
+    from app.domain.errors import DomainError
+
+    with pytest.raises(DomainError, match="intervalo"):
+        AjustePonto(
+            team_id=uuid4(),
+            funcionario_id=uuid4(),
+            data_referencia=datetime(2026, 6, 23, tzinfo=timezone.utc),
+            justificativa="x",
+            hora_intervalo_inicio_solicitada=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
+        )
+
+
+def test_ajuste_ponto_allows_interval_only_request():
+    from app.domain.entities.rh import AjustePonto
+
+    ajuste = AjustePonto(
+        team_id=uuid4(),
+        funcionario_id=uuid4(),
+        data_referencia=datetime(2026, 6, 23, tzinfo=timezone.utc),
+        justificativa="so almoco",
+        hora_intervalo_inicio_solicitada=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
+        hora_intervalo_fim_solicitada=datetime(2026, 6, 23, 13, 0, tzinfo=timezone.utc),
+    )
+
+    assert ajuste.hora_entrada_solicitada is None
+
+
 def test_rejecting_requests_requires_reason():
     from app.domain.entities.rh import AjustePonto, Atestado, Ferias
 

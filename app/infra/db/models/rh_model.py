@@ -428,6 +428,8 @@ class AjustePontoModel(Base, TimestampMixin):
     justificativa: Mapped[str] = mapped_column(String(1000), nullable=False)
     hora_entrada_solicitada: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     hora_saida_solicitada: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hora_intervalo_inicio_solicitada: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hora_intervalo_fim_solicitada: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=StatusAjuste.PENDENTE.value)
     motivo_rejeicao: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -446,6 +448,8 @@ class AjustePontoModel(Base, TimestampMixin):
         ajuste.justificativa = self.justificativa
         ajuste.hora_entrada_solicitada = self.hora_entrada_solicitada
         ajuste.hora_saida_solicitada = self.hora_saida_solicitada
+        ajuste.hora_intervalo_inicio_solicitada = self.hora_intervalo_inicio_solicitada
+        ajuste.hora_intervalo_fim_solicitada = self.hora_intervalo_fim_solicitada
         ajuste.status = StatusAjuste(self.status)
         ajuste.motivo_rejeicao = self.motivo_rejeicao
         ajuste.created_at = self.created_at
@@ -462,6 +466,8 @@ class AjustePontoModel(Base, TimestampMixin):
             justificativa=ajuste.justificativa,
             hora_entrada_solicitada=ajuste.hora_entrada_solicitada,
             hora_saida_solicitada=ajuste.hora_saida_solicitada,
+            hora_intervalo_inicio_solicitada=ajuste.hora_intervalo_inicio_solicitada,
+            hora_intervalo_fim_solicitada=ajuste.hora_intervalo_fim_solicitada,
             status=ajuste.status.value,
             motivo_rejeicao=ajuste.motivo_rejeicao,
             is_deleted=ajuste.is_deleted,
@@ -472,6 +478,8 @@ class AjustePontoModel(Base, TimestampMixin):
         self.justificativa = ajuste.justificativa
         self.hora_entrada_solicitada = ajuste.hora_entrada_solicitada
         self.hora_saida_solicitada = ajuste.hora_saida_solicitada
+        self.hora_intervalo_inicio_solicitada = ajuste.hora_intervalo_inicio_solicitada
+        self.hora_intervalo_fim_solicitada = ajuste.hora_intervalo_fim_solicitada
         self.status = ajuste.status.value
         self.motivo_rejeicao = ajuste.motivo_rejeicao
         self.is_deleted = ajuste.is_deleted

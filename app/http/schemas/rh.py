@@ -192,6 +192,8 @@ class RhAjustePontoCreateRequest(BaseModel):
     justificativa: str
     hora_entrada_solicitada: datetime | None = None
     hora_saida_solicitada: datetime | None = None
+    hora_intervalo_inicio_solicitada: datetime | None = None
+    hora_intervalo_fim_solicitada: datetime | None = None
 
 
 class RhAjustePontoResponse(BaseModel):
@@ -201,6 +203,8 @@ class RhAjustePontoResponse(BaseModel):
     justificativa: str
     hora_entrada_solicitada: datetime | None = None
     hora_saida_solicitada: datetime | None = None
+    hora_intervalo_inicio_solicitada: datetime | None = None
+    hora_intervalo_fim_solicitada: datetime | None = None
     status: StatusAjuste
     motivo_rejeicao: str | None = None
 
@@ -209,6 +213,12 @@ class RhMotivoRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     motivo: str
+
+
+class RhRegistroPontoUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: datetime
 
 
 class RhTipoAtestadoCreateRequest(BaseModel):

@@ -87,6 +87,8 @@ class CreateAjustePontoDTO(BaseModel):
     justificativa: str
     hora_entrada_solicitada: datetime | None = None
     hora_saida_solicitada: datetime | None = None
+    hora_intervalo_inicio_solicitada: datetime | None = None
+    hora_intervalo_fim_solicitada: datetime | None = None
 
 
 class AjustePontoFiltersDTO(BaseModel):

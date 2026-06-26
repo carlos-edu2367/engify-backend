@@ -270,6 +270,10 @@ class RegistroPonto:
     def marcar_ajustado(self) -> None:
         self.status = StatusPonto.AJUSTADO
 
+    def ajustar_timestamp(self, novo_timestamp: datetime) -> None:
+        self.timestamp = novo_timestamp
+        self.status = StatusPonto.AJUSTADO
+
     def delete(self) -> None:
         self.is_deleted = True
 
@@ -289,13 +293,31 @@ class AjustePonto:
         justificativa: str,
         hora_entrada_solicitada: datetime | None = None,
         hora_saida_solicitada: datetime | None = None,
+        hora_intervalo_inicio_solicitada: datetime | None = None,
+        hora_intervalo_fim_solicitada: datetime | None = None,
         status: StatusAjuste = StatusAjuste.PENDENTE,
         motivo_rejeicao: str | None = None,
         id: UUID | None = None,
     ) -> None:
         if not justificativa.strip():
             raise DomainError("Justificativa do ajuste e obrigatoria")
-        if hora_entrada_solicitada is None and hora_saida_solicitada is None:
+        if (hora_intervalo_inicio_solicitada is None) != (hora_intervalo_fim_solicitada is None):
+            raise DomainError("Informe inicio e fim do intervalo juntos")
+        if (
+            hora_intervalo_inicio_solicitada is not None
+            and hora_intervalo_fim_solicitada is not None
+            and hora_intervalo_fim_solicitada <= hora_intervalo_inicio_solicitada
+        ):
+            raise DomainError("Fim do intervalo deve ser posterior ao inicio do intervalo")
+        if all(
+            value is None
+            for value in (
+                hora_entrada_solicitada,
+                hora_saida_solicitada,
+                hora_intervalo_inicio_solicitada,
+                hora_intervalo_fim_solicitada,
+            )
+        ):
             raise DomainError("Informe ao menos um horario solicitado")
         self.id = id or uuid4()
         self.team_id = team_id
@@ -304,6 +326,8 @@ class AjustePonto:
         self.justificativa = justificativa
         self.hora_entrada_solicitada = hora_entrada_solicitada
         self.hora_saida_solicitada = hora_saida_solicitada
+        self.hora_intervalo_inicio_solicitada = hora_intervalo_inicio_solicitada
+        self.hora_intervalo_fim_solicitada = hora_intervalo_fim_solicitada
         self.status = status
         self.motivo_rejeicao = motivo_rejeicao
         self.created_at = datetime.now(timezone.utc)

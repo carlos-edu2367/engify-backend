@@ -43,6 +43,7 @@ from app.http.schemas.rh import (
     RhPontoCreateRequest,
     RhPontoResponse,
     RhRegistroPontoListItem,
+    RhRegistroPontoUpdateRequest,
     RhFuncionarioUpdateRequest,
     RhHorarioTrabalhoRequest,
     RhHorarioTrabalhoResponse,
@@ -354,6 +355,8 @@ def _to_ajuste_response(ajuste: AjustePonto) -> RhAjustePontoResponse:
         justificativa=ajuste.justificativa,
         hora_entrada_solicitada=ajuste.hora_entrada_solicitada,
         hora_saida_solicitada=ajuste.hora_saida_solicitada,
+        hora_intervalo_inicio_solicitada=ajuste.hora_intervalo_inicio_solicitada,
+        hora_intervalo_fim_solicitada=ajuste.hora_intervalo_fim_solicitada,
         status=ajuste.status,
         motivo_rejeicao=ajuste.motivo_rejeicao,
     )
@@ -1079,6 +1082,20 @@ async def excluir_registro_ponto(
     except DomainError as exc:
         raise _map_rh_error(exc)
     return MessageResponse(message="Registro de ponto excluido com sucesso")
+
+
+@router.patch("/ponto/registros/{registro_id}", response_model=RhRegistroPontoListItem)
+async def atualizar_registro_ponto(
+    registro_id: UUID,
+    body: RhRegistroPontoUpdateRequest,
+    user: RHAdminUser,
+    svc: RhPontoServiceDep,
+):
+    try:
+        registro = await svc.ajustar_timestamp_registro(registro_id, body.timestamp, user)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_registro_item(registro)
 
 
 @router.get("/me/ponto", response_model=PaginatedResponse[RhRegistroPontoListItem])

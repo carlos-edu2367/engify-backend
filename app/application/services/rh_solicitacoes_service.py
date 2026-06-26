@@ -165,6 +165,8 @@ class RhSolicitacoesService:
             justificativa=dto.justificativa,
             hora_entrada_solicitada=self._as_utc(dto.hora_entrada_solicitada) if dto.hora_entrada_solicitada else None,
             hora_saida_solicitada=self._as_utc(dto.hora_saida_solicitada) if dto.hora_saida_solicitada else None,
+            hora_intervalo_inicio_solicitada=self._as_utc(dto.hora_intervalo_inicio_solicitada) if dto.hora_intervalo_inicio_solicitada else None,
+            hora_intervalo_fim_solicitada=self._as_utc(dto.hora_intervalo_fim_solicitada) if dto.hora_intervalo_fim_solicitada else None,
         )
         saved = await self.ajuste_repo.save(ajuste)
         await self._record_audit(current_user, "ajuste_ponto", saved.id, "rh.ajuste_ponto.requested", after=self._ajuste_snapshot(saved))
@@ -202,13 +204,17 @@ class RhSolicitacoesService:
         for registro in existing:
             registro.marcar_ajustado()
             await self.registro_ponto_repo.save(registro)
-        if ajuste.hora_entrada_solicitada is not None:
+        ordered_punches = [
+            (TipoPonto.ENTRADA, ajuste.hora_entrada_solicitada),
+            (TipoPonto.SAIDA, ajuste.hora_intervalo_inicio_solicitada),
+            (TipoPonto.ENTRADA, ajuste.hora_intervalo_fim_solicitada),
+            (TipoPonto.SAIDA, ajuste.hora_saida_solicitada),
+        ]
+        for tipo, timestamp in ordered_punches:
+            if timestamp is None:
+                continue
             await self.registro_ponto_repo.save(
-                self._build_adjusted_registro(ajuste, TipoPonto.ENTRADA, ajuste.hora_entrada_solicitada, coordinates)
-            )
-        if ajuste.hora_saida_solicitada is not None:
-            await self.registro_ponto_repo.save(
-                self._build_adjusted_registro(ajuste, TipoPonto.SAIDA, ajuste.hora_saida_solicitada, coordinates)
+                self._build_adjusted_registro(ajuste, tipo, timestamp, coordinates)
             )
         ajuste.aprovar()
         saved = await self.ajuste_repo.save(ajuste)
@@ -412,7 +418,12 @@ class RhSolicitacoesService:
 
     def _ensure_requested_times_match_reference_day(self, dto: CreateAjustePontoDTO) -> None:
         reference_day = self._as_utc(dto.data_referencia).date()
-        for value in [dto.hora_entrada_solicitada, dto.hora_saida_solicitada]:
+        for value in [
+            dto.hora_entrada_solicitada,
+            dto.hora_saida_solicitada,
+            dto.hora_intervalo_inicio_solicitada,
+            dto.hora_intervalo_fim_solicitada,
+        ]:
             if value is not None and self._as_utc(value).date() != reference_day:
                 raise DomainError("Horario solicitado deve estar na data de referencia")
 
@@ -488,6 +499,8 @@ class RhSolicitacoesService:
             "status": ajuste.status.value,
             "hora_entrada_solicitada": ajuste.hora_entrada_solicitada.isoformat() if ajuste.hora_entrada_solicitada else None,
             "hora_saida_solicitada": ajuste.hora_saida_solicitada.isoformat() if ajuste.hora_saida_solicitada else None,
+            "hora_intervalo_inicio_solicitada": ajuste.hora_intervalo_inicio_solicitada.isoformat() if ajuste.hora_intervalo_inicio_solicitada else None,
+            "hora_intervalo_fim_solicitada": ajuste.hora_intervalo_fim_solicitada.isoformat() if ajuste.hora_intervalo_fim_solicitada else None,
         }
 
     def _tipo_snapshot(self, tipo: TipoAtestado) -> dict:

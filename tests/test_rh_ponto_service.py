@@ -776,3 +776,72 @@ async def test_excluir_registro_ponto_denies_role_funcionario():
         await service.excluir_registro_ponto(registro.id, "motivo", current_user)
 
     assert registro_repo.items[0].is_deleted is False
+
+
+@pytest.mark.asyncio
+async def test_ajustar_timestamp_registro_updates_status_and_audits():
+    from app.application.services.rh_ponto_service import RhPontoService
+
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    registro = RegistroPonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        tipo=TipoPonto.SAIDA,
+        timestamp=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
+        latitude=-16.6869,
+        longitude=-49.2648,
+    )
+    registro_repo = _FakeRegistroPontoRepo([registro])
+    audit_repo = _FakeAuditRepo()
+    uow = _FakeUow()
+    service = RhPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo(),
+        registro_ponto_repo=registro_repo,
+        audit_repo=audit_repo,
+        geofence_cache=_FakeGeofenceCache(),
+        idempotency_repo=None,
+        uow=uow,
+    )
+
+    novo = datetime(2026, 6, 23, 12, 30, tzinfo=timezone.utc)
+    result = await service.ajustar_timestamp_registro(registro.id, novo, current_user)
+
+    assert result.timestamp == novo
+    assert result.status == StatusPonto.AJUSTADO
+    assert uow.commits == 1
+    assert audit_repo.events[-1].action == "rh.ponto.registro.updated"
+    assert audit_repo.events[-1].before["timestamp"] == "2026-06-23T12:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_ajustar_timestamp_registro_denies_role_funcionario():
+    from app.application.services.rh_ponto_service import RhPontoService
+
+    current_user = _make_user(Roles.FUNCIONARIO)
+    funcionario = _make_funcionario(current_user.team.id, user_id=current_user.id)
+    registro = RegistroPonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        tipo=TipoPonto.ENTRADA,
+        timestamp=datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc),
+        latitude=-16.6869,
+        longitude=-49.2648,
+    )
+    registro_repo = _FakeRegistroPontoRepo([registro])
+    service = RhPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo(),
+        registro_ponto_repo=registro_repo,
+        audit_repo=_FakeAuditRepo(),
+        geofence_cache=_FakeGeofenceCache(),
+        idempotency_repo=None,
+        uow=_FakeUow(),
+    )
+
+    with pytest.raises(DomainError, match="Acesso restrito"):
+        await service.ajustar_timestamp_registro(
+            registro.id, datetime(2026, 6, 23, 9, 0, tzinfo=timezone.utc), current_user
+        )
+    assert registro_repo.items[0].status == StatusPonto.VALIDADO

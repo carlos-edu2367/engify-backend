@@ -329,6 +329,55 @@ async def test_approve_ajuste_marks_existing_day_records_as_adjusted():
 
 
 @pytest.mark.asyncio
+async def test_approve_ajuste_with_interval_creates_four_ordered_registros():
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    ajuste = AjustePonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        data_referencia=datetime(2026, 6, 23, tzinfo=timezone.utc),
+        justificativa="Corrigir almoco",
+        hora_entrada_solicitada=datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc),
+        hora_saida_solicitada=datetime(2026, 6, 23, 18, 0, tzinfo=timezone.utc),
+        hora_intervalo_inicio_solicitada=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
+        hora_intervalo_fim_solicitada=datetime(2026, 6, 23, 13, 0, tzinfo=timezone.utc),
+    )
+    registro_repo = _FakeRegistroRepo()
+    service = _make_service(
+        funcionario,
+        ajuste_repo=_FakeAjusteRepo([ajuste]),
+        registro_repo=registro_repo,
+    )
+
+    await service.approve_ajuste(ajuste.id, current_user)
+
+    created = sorted(registro_repo.items, key=lambda r: r.timestamp)
+    assert [r.tipo for r in created] == [TipoPonto.ENTRADA, TipoPonto.SAIDA, TipoPonto.ENTRADA, TipoPonto.SAIDA]
+    assert [r.timestamp.hour for r in created] == [8, 12, 13, 18]
+    assert all(r.status == StatusPonto.AJUSTADO for r in created)
+
+
+@pytest.mark.asyncio
+async def test_approve_ajuste_without_interval_keeps_two_registros():
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    ajuste = AjustePonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        data_referencia=datetime(2026, 6, 23, tzinfo=timezone.utc),
+        justificativa="Corrigir",
+        hora_entrada_solicitada=datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc),
+        hora_saida_solicitada=datetime(2026, 6, 23, 18, 0, tzinfo=timezone.utc),
+    )
+    registro_repo = _FakeRegistroRepo()
+    service = _make_service(funcionario, ajuste_repo=_FakeAjusteRepo([ajuste]), registro_repo=registro_repo)
+
+    await service.approve_ajuste(ajuste.id, current_user)
+
+    assert len(registro_repo.items) == 2
+
+
+@pytest.mark.asyncio
 async def test_job_expires_only_overdue_atestados():
     admin = _make_user(Roles.ADMIN)
     funcionario = _make_funcionario(admin.team.id)

@@ -370,6 +370,38 @@ class RhPontoService:
         )
         await self.uow.commit()
 
+    async def ajustar_timestamp_registro(self, registro_id: UUID, novo_timestamp: datetime, current_user: User) -> RegistroPonto:
+        if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
+            raise DomainError("Acesso restrito ao RH")
+        registro = await self.registro_ponto_repo.get_by_id(registro_id, current_user.team.id)
+        before = {
+            "tipo": registro.tipo.value,
+            "status": registro.status.value,
+            "funcionario_id": str(registro.funcionario_id),
+            "timestamp": registro.timestamp.isoformat(),
+        }
+        normalized = novo_timestamp if novo_timestamp.tzinfo else novo_timestamp.replace(tzinfo=timezone.utc)
+        registro.ajustar_timestamp(normalized.astimezone(timezone.utc))
+        saved = await self.registro_ponto_repo.save(registro)
+        await self.audit_repo.save(
+            RhAuditLog(
+                team_id=current_user.team.id,
+                actor_user_id=current_user.id,
+                actor_role=current_user.role.value,
+                entity_type="registro_ponto",
+                entity_id=registro.id,
+                action="rh.ponto.registro.updated",
+                before=before,
+                after={
+                    "tipo": saved.tipo.value,
+                    "status": saved.status.value,
+                    "timestamp": saved.timestamp.isoformat(),
+                },
+            )
+        )
+        await self.uow.commit()
+        return saved
+
     async def _ensure_not_replayed(self, team_id: UUID, funcionario_id: UUID, tipo: TipoPonto, key: str | None) -> None:
         if not key or self.idempotency_repo is None:
             return
