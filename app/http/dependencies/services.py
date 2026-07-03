@@ -68,6 +68,12 @@ from app.infra.db.repositories.rh_repository import (
 )
 from app.infra.db.repositories.notificacao_repository import NotificacaoRepositoryImpl
 from app.infra.db.repositories.report_job_repository import ReportJobRepositoryImpl
+from app.infra.db.repositories.integracao_repository import (
+    ArcaikaConnectionRepositoryImpl, IntegrationEventRepositoryImpl,
+    OAuthAuthorizationCodeRepositoryImpl,
+)
+from app.application.services.integracao_service import IntegracaoArcaikaService
+from app.application.services.oauth_service import OAuthArcaikaService
 from app.application.use_cases.generate_monthly_commission_report import (
     GenerateMonthlyCommissionReportUseCase,
     GetCommissionReportJobStatusUseCase,
@@ -223,6 +229,27 @@ async def get_diarist_service(session: Session) -> DiaristService:
 async def get_obra_service(session: Session) -> ObraService:
     return ObraService(
         obra_repo=ObraRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+        # Emite eventos de outbox quando a obra é de origem Arcaika.
+        event_repo=IntegrationEventRepositoryImpl(session),
+    )
+
+
+async def get_integracao_service(session: Session) -> IntegracaoArcaikaService:
+    from app.core.config import settings
+    return IntegracaoArcaikaService(
+        obra_repo=ObraRepositoryImpl(session),
+        connection_repo=ArcaikaConnectionRepositoryImpl(session),
+        event_repo=IntegrationEventRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+        public_url_for=settings.obra_public_url,
+    )
+
+
+async def get_oauth_service(session: Session) -> OAuthArcaikaService:
+    return OAuthArcaikaService(
+        code_repo=OAuthAuthorizationCodeRepositoryImpl(session),
+        connection_repo=ArcaikaConnectionRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
     )
 
@@ -466,6 +493,9 @@ async def get_arky_copilot(session: Session) -> ArkyOrchestrator:
         obra_service=ObraService(
             obra_repo=ObraRepositoryImpl(session),
             uow=SQLAlchemyUOW(session),
+            # Sem isso, obras de origem Arcaika alteradas via Arky não emitem
+            # webhook (mesmo gap corrigido em get_obra_service acima).
+            event_repo=IntegrationEventRepositoryImpl(session),
         ),
         item_service=ItemService(
             item_repo=ItemRepositoryImpl(session),
@@ -529,6 +559,8 @@ MuralServiceDep = Annotated[MuralService, Depends(get_mural_service)]
 CategoriaObraServiceDep = Annotated[CategoriaObraService, Depends(get_categoria_obra_service)]
 RecebimentoServiceDep = Annotated[RecebimentoService, Depends(get_recebimento_service)]
 NotificacaoServiceDep = Annotated[NotificacaoService, Depends(get_notificacao_service)]
+IntegracaoServiceDep = Annotated[IntegracaoArcaikaService, Depends(get_integracao_service)]
+OAuthServiceDep = Annotated[OAuthArcaikaService, Depends(get_oauth_service)]
 StorageProviderDep = Annotated[S3StorageProvider, Depends(get_storage_provider)]
 GenerateCommissionReportUseCaseDep = Annotated[
     GenerateMonthlyCommissionReportUseCase, Depends(get_generate_commission_report_use_case)

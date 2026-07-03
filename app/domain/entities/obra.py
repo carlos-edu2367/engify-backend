@@ -14,6 +14,12 @@ class Status(Enum):
     FINALIZADO = "finalizado"
 
 
+class ObraOrigem(Enum):
+    """De onde a obra foi originada. `arcaika` = criada via integração de orçamentos."""
+    MANUAL = "manual"
+    ARCAIKA = "arcaika"
+
+
 class Obra():
     def __init__(self, title: str,
                  team_id: UUID, responsavel_id: UUID,
@@ -21,7 +27,10 @@ class Obra():
                  valor: Money = None, status: Status = Status.PLANEJAMENTO,
                  created_date: datetime = None, data_entrega: datetime = None,
                  categoria_id: UUID = None,
-                 total_recebido: Decimal = Decimal("0")):
+                 total_recebido: Decimal = Decimal("0"),
+                 origem: ObraOrigem = ObraOrigem.MANUAL,
+                 arcaika_orcamento_id: UUID = None,
+                 arcaika_solicitacao_id: UUID = None):
         self.id = id
         self.title = title
         self.team_id = team_id
@@ -34,6 +43,10 @@ class Obra():
         self.is_deleted = False
         self.categoria_id = categoria_id
         self.total_recebido = total_recebido
+        # Rastreabilidade da integração Arcaika (orçamento → obra)
+        self.origem = origem
+        self.arcaika_orcamento_id = arcaika_orcamento_id
+        self.arcaika_solicitacao_id = arcaika_solicitacao_id
 
         if not self.created_date:
             self.created_date = datetime.now(timezone.utc)

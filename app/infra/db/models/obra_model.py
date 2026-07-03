@@ -1,11 +1,11 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, DateTime, Numeric, Boolean, Float, ForeignKey, Index, Text
+from sqlalchemy import String, DateTime, Numeric, Boolean, Float, ForeignKey, Index, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infra.db.models.base import Base, TimestampMixin
-from app.domain.entities.obra import Obra, Status, Item, Image, ItemAttachment, Diaria, MuralPost, MuralAttachment, CategoriaObra
+from app.domain.entities.obra import Obra, Status, ObraOrigem, Item, Image, ItemAttachment, Diaria, MuralPost, MuralAttachment, CategoriaObra
 from app.domain.entities.money import Money
 
 
@@ -101,6 +101,16 @@ class ObraModel(Base, TimestampMixin):
     data_entrega: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     total_recebido: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False, default=Decimal("0"))
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Rastreabilidade da integração Arcaika (orçamento → obra)
+    origem: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ObraOrigem.MANUAL.value
+    )
+    arcaika_orcamento_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    arcaika_solicitacao_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
 
     team: Mapped["TeamModel"] = relationship(  # type: ignore[name-defined]
         back_populates="obras", lazy="raise"
@@ -131,6 +141,14 @@ class ObraModel(Base, TimestampMixin):
         Index("idx_obras_categoria_id", "categoria_id"),
         Index("idx_obras_team_categoria_deleted", "team_id", "categoria_id", "is_deleted"),
         Index("idx_obras_team_total_recebido", "team_id", "total_recebido"),
+        # Lookup reverso p/ webhooks e idempotência da criação por orçamento.
+        # Único parcial: no máximo 1 obra por orçamento Arcaika.
+        Index(
+            "uq_obras_arcaika_orcamento",
+            "arcaika_orcamento_id",
+            unique=True,
+            postgresql_where=text("arcaika_orcamento_id IS NOT NULL"),
+        ),
     )
 
     def to_domain(self) -> Obra:
@@ -147,6 +165,9 @@ class ObraModel(Base, TimestampMixin):
         obra.data_entrega = self.data_entrega
         obra.total_recebido = self.total_recebido if self.total_recebido is not None else Decimal("0")
         obra.is_deleted = self.is_deleted
+        obra.origem = ObraOrigem(self.origem)
+        obra.arcaika_orcamento_id = self.arcaika_orcamento_id
+        obra.arcaika_solicitacao_id = self.arcaika_solicitacao_id
         return obra
 
     @classmethod
@@ -165,6 +186,9 @@ class ObraModel(Base, TimestampMixin):
             data_entrega=obra.data_entrega,
             total_recebido=obra.total_recebido,
             is_deleted=obra.is_deleted,
+            origem=getattr(obra, "origem", ObraOrigem.MANUAL).value,
+            arcaika_orcamento_id=getattr(obra, "arcaika_orcamento_id", None),
+            arcaika_solicitacao_id=getattr(obra, "arcaika_solicitacao_id", None),
         )
 
     def update_from_domain(self, obra: Obra) -> None:

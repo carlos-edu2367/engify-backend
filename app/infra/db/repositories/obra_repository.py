@@ -159,6 +159,15 @@ class ObraRepositoryImpl(ObraRepository):
         await self._session.flush()
         return model.to_domain()
 
+    async def get_by_arcaika_orcamento(self, orcamento_id: UUID) -> Obra | None:
+        stmt = select(ObraModel).where(
+            ObraModel.arcaika_orcamento_id == orcamento_id,
+            ObraModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        return model.to_domain() if model else None
+
     async def list_monthly_commission_eligible(
         self,
         team_id: UUID,

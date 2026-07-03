@@ -59,6 +59,29 @@ class Settings(BaseSettings):
     # Trial period
     trial_days: int = 7
 
+    # ── Integração Arcaika (orçamentos → obras) ──────────────────────────────
+    # OAuth: o Arcaika é um client OAuth do Engify. client_secret é usado na
+    # autenticação do endpoint /oauth/token (client_credentials do próprio client).
+    arcaika_oauth_client_id: str = "arcaika"
+    arcaika_oauth_client_secret: str = ""
+    # Redirect URIs permitidas (allowlist, separadas por vírgula).
+    arcaika_oauth_redirect_uris: str = ""
+    # Tempo de vida dos tokens de integração (máquina-a-máquina).
+    integration_token_expire_minutes: int = 15
+    integration_refresh_token_expire_days: int = 90
+    # Vida do authorization code (curta, RFC 6749 recomenda <= 10 min).
+    oauth_auth_code_expire_seconds: int = 300
+    # Base pública usada para montar a url_acompanhamento das obras. Vazio => frontend_url.
+    public_obra_base_url: str = ""
+
+    @property
+    def arcaika_redirect_uri_allowlist(self) -> list[str]:
+        return [u.strip() for u in self.arcaika_oauth_redirect_uris.split(",") if u.strip()]
+
+    def obra_public_url(self, obra_id) -> str:
+        base = (self.public_obra_base_url or self.frontend_url).rstrip("/")
+        return f"{base}/obras/{obra_id}/cliente"
+
     # Arky Copilot — IA via OpenRouter (camada provider-agnostica)
     arky_openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"

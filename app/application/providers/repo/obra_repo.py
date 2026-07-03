@@ -41,6 +41,11 @@ class ObraRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_by_arcaika_orcamento(self, orcamento_id: UUID) -> Obra | None:
+        """Obra vinculada a um orçamento Arcaika (idempotência da criação). None se inexistente."""
+        pass
+
+    @abstractmethod
     async def list_monthly_commission_eligible(
         self,
         team_id: UUID,

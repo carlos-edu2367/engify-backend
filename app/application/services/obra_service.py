@@ -25,9 +25,34 @@ from datetime import datetime
 
 
 class ObraService():
-    def __init__(self, obra_repo: ObraRepository, uow: UOWProvider):
+    def __init__(self, obra_repo: ObraRepository, uow: UOWProvider,
+                 event_repo=None):
         self.obra_repo = obra_repo
         self.uow = uow
+        # Opcional: quando presente, mudanças em obras de origem Arcaika geram
+        # eventos de outbox (webhook) na MESMA transação. None = sem integração.
+        self.event_repo = event_repo
+
+    async def _emit_arcaika_event(self, obra, event_type, previous_status=None) -> None:
+        """Grava um evento de outbox se a obra for da integração Arcaika."""
+        from app.domain.entities.obra import ObraOrigem
+        if self.event_repo is None:
+            return
+        if getattr(obra, "origem", None) != ObraOrigem.ARCAIKA:
+            return
+        if not getattr(obra, "arcaika_orcamento_id", None):
+            return
+        from app.core.config import settings
+        from app.domain.entities.integracao import IntegrationEvent
+        from app.application.services.integracao_payload import build_event_data
+        data = build_event_data(obra, settings.obra_public_url(obra.id), previous_status)
+        event = IntegrationEvent(
+            team_id=obra.team_id,
+            obra_id=obra.id,
+            event_type=event_type,
+            payload=data,
+        )
+        await self.event_repo.save(event)
 
     async def create_obra(self, dto: CreateObraDTO) -> Obra:
         valor = Money(dto.valor) if dto.valor is not None else None
@@ -64,8 +89,10 @@ class ObraService():
         return await self.obra_repo.count_by_status(team_id, status, search=search)
 
     async def delete_obra(self, obra: Obra) -> None:
+        from app.domain.entities.integracao import IntegrationEventType
         obra.delete()
         await self.obra_repo.save(obra)
+        await self._emit_arcaika_event(obra, IntegrationEventType.OBRA_DELETED)
         await self.uow.commit()
 
     async def update_status(self, obra: Obra, status: Status, caller_role: str | None = None) -> Obra:
@@ -83,8 +110,13 @@ class ObraService():
                 "Apenas ADMIN ou FINANCEIRO podem finalizar uma obra em status Financeiro"
             )
             
+        previous_status = obra.status
         obra.status = status
         saved = await self.obra_repo.save(obra)
+        from app.domain.services.integracao_status import webhook_event_type_for
+        await self._emit_arcaika_event(
+            saved, webhook_event_type_for(status), previous_status=previous_status
+        )
         await self.uow.commit()
         return saved
 

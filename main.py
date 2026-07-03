@@ -18,6 +18,8 @@ from app.http.routers import categorias_obras
 from app.http.routers import notificacoes
 from app.http.routers import rh
 from app.http.routers import arky
+from app.http.routers import oauth
+from app.http.routers import integracao
 
 app = FastAPI(
     title=settings.app_name,
@@ -75,6 +77,8 @@ app.include_router(categorias_obras.router, prefix=settings.api_prefix)
 app.include_router(notificacoes.router, prefix=settings.api_prefix)
 app.include_router(rh.router, prefix=settings.api_prefix)
 app.include_router(arky.router, prefix=settings.api_prefix)
+app.include_router(oauth.router, prefix=settings.api_prefix)
+app.include_router(integracao.router, prefix=settings.api_prefix)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
