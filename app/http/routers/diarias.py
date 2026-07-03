@@ -10,7 +10,7 @@ from app.http.dependencies.services import DiaryServiceDep
 from app.application.dtos.obra import CreateDiary, EditDiary, DiariesResponse
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
-from app.infra.cache.keys import diarias_list_key, diarias_pattern, pagamentos_pattern
+from app.infra.cache.keys import diarias_list_key, diarias_pattern, pagamentos_version_key
 from app.core.limiter import limiter
 
 router = APIRouter(prefix="/diarias", tags=["Diárias"])
@@ -49,8 +49,7 @@ async def create_diary(body: CreateDiary, user: EngineerUser, svc: DiaryServiceD
 
     redis = get_redis()
     await _invalidate_diarias_cache(redis, user.team.id)
-    async for key in redis.scan_iter(match=pagamentos_pattern(user.team.id), count=100):
-        await redis.delete(key)
+    await redis.incr(pagamentos_version_key(user.team.id))
     return _diary_to_response(diary)
 
 

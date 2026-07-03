@@ -21,7 +21,7 @@ from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
 from app.infra.cache.keys import (
     obras_list_key, obra_detail_key, obras_pattern, obra_cliente_key,
-    pagamentos_pattern, public_obra_key, movimentacoes_pattern,
+    pagamentos_version_key, public_obra_key, movimentacoes_pattern,
     entradas_obra_key, entradas_obra_pattern,
 )
 
@@ -242,8 +242,7 @@ async def create_obra_pagamento(
         raise HTTPException(status_code=400, detail=str(e))
 
     redis = get_redis()
-    async for key in redis.scan_iter(match=pagamentos_pattern(user.team.id), count=100):
-        await redis.delete(key)
+    await redis.incr(pagamentos_version_key(user.team.id))
 
     return PagamentoResponse(
         id=pag.id,

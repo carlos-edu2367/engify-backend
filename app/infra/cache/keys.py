@@ -50,8 +50,15 @@ def movimentacoes_list_key(team_id: UUID, page: int, limit: int, filters_dict: d
     return base
 
 
-def pagamentos_list_key(team_id: UUID, page: int, limit: int, filters_dict: dict | None = None) -> str:
-    base = f"{team_id}:pagamentos:list:{page}:{limit}"
+def pagamentos_version_key(team_id: UUID) -> str:
+    """Contador incrementado a cada invalidacao. Entra na list_key para que
+    escritas de listagens em andamento nunca fiquem visiveis apos uma
+    invalidacao concorrente (evita cache poluido por race condition)."""
+    return f"{team_id}:pagamentos:version"
+
+
+def pagamentos_list_key(team_id: UUID, page: int, limit: int, version: int, filters_dict: dict | None = None) -> str:
+    base = f"{team_id}:pagamentos:list:v{version}:{page}:{limit}"
     if filters_dict:
         sorted_filters = {k: str(v) for k, v in sorted(filters_dict.items()) if v is not None}
         if sorted_filters:
@@ -96,10 +103,6 @@ def diarias_pattern(team_id: UUID) -> str:
 
 def movimentacoes_pattern(team_id: UUID) -> str:
     return f"{team_id}:movimentacoes:*"
-
-
-def pagamentos_pattern(team_id: UUID) -> str:
-    return f"{team_id}:pagamentos:*"
 
 
 def fluxo_caixa_pattern(team_id: UUID) -> str:

@@ -34,7 +34,7 @@ from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
 from app.infra.cache.keys import (
     movimentacoes_list_key, movimentacoes_pattern,
-    pagamentos_list_key, pagamentos_pattern,
+    pagamentos_list_key, pagamentos_version_key,
     movimentacao_attachments_key, movimentacao_attachments_pattern,
     movimentacao_delete_lock_key, movimentacao_deleted_tombstone_key,
     fluxo_caixa_key, fluxo_caixa_pattern, public_obra_key,
@@ -58,9 +58,12 @@ async def _invalidate_mov_attachments_cache(redis, team_id: UUID, mov_id: UUID) 
 
 
 async def _invalidate_pagamentos_cache(redis, team_id: UUID) -> None:
-    pattern = pagamentos_pattern(team_id)
-    async for key in redis.scan_iter(match=pattern, count=100):
-        await redis.delete(key)
+    # Incrementa a versao em vez de fazer SCAN+DEL: uma listagem em andamento
+    # que ainda vai escrever no cache usa a versao antiga (lida antes desta
+    # invalidacao), entao a escrita cai numa chave orfa que nenhuma leitura
+    # futura acessa e que expira sozinha pelo TTL. Isso fecha a race em que
+    # a escrita da listagem chega depois do SCAN+DEL e deixa dado stale.
+    await redis.incr(pagamentos_version_key(team_id))
 
 
 async def _invalidate_fluxo_caixa_cache(redis, team_id: UUID) -> None:
@@ -317,7 +320,9 @@ async def list_pagamentos(
     redis = get_redis()
     effective_filters = svc.get_pagamento_filters_for_actor(filters, user, scope)
     filters_dict = effective_filters.model_dump(exclude_none=True)
-    cache_key = pagamentos_list_key(user.team.id, pagination.page, pagination.limit, filters_dict)
+    version_raw = await redis.get(pagamentos_version_key(user.team.id))
+    version = int(version_raw) if version_raw else 0
+    cache_key = pagamentos_list_key(user.team.id, pagination.page, pagination.limit, version, filters_dict)
     cached = await redis.get(cache_key)
     if cached:
         return PaginatedResponse[PagamentoReadResponse].model_validate_json(cached)
