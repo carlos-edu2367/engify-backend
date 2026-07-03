@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from app.application.dtos.financeiro import CreatePagamentoDTO
+from app.application.dtos.financeiro import CreatePagamentoDTO, PagamentoFiltersDTO
 from app.application.services.financeiro_service import FinanceiroService
 from app.domain.entities.financeiro import MovClass
 from app.domain.entities.user import Roles
@@ -124,4 +124,50 @@ async def test_search_not_scoped_for_financeiro(team_id):
     svc, pag_repo = _make_service()
     actor = _make_user(team_id, role=Roles.FINANCEIRO)
     await svc.search_pagamentos(team_id, "pedro", actor_user=actor, limit=5)
+    assert pag_repo.search.await_args.args[3] is None
+
+
+# ── escopo mine/all (engenheiro ve pagamentos de outros engenheiros) ──────────
+
+@pytest.mark.asyncio
+async def test_filters_default_scope_mine_scopes_engineer_to_self(team_id):
+    svc, _ = _make_service()
+    actor = _make_user(team_id, role=Roles.ENGENHEIRO)
+    result = svc.get_pagamento_filters_for_actor(None, actor)
+    assert result.created_by_user_id == actor.id
+
+
+@pytest.mark.asyncio
+async def test_filters_scope_all_does_not_scope_engineer(team_id):
+    svc, _ = _make_service()
+    actor = _make_user(team_id, role=Roles.ENGENHEIRO)
+    result = svc.get_pagamento_filters_for_actor(None, actor, scope="all")
+    assert result.created_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_filters_scope_all_preserves_other_filters(team_id):
+    svc, _ = _make_service()
+    actor = _make_user(team_id, role=Roles.ENGENHEIRO)
+    obra_id = uuid4()
+    result = svc.get_pagamento_filters_for_actor(
+        PagamentoFiltersDTO(obra_id=obra_id), actor, scope="all"
+    )
+    assert result.obra_id == obra_id
+    assert result.created_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_overdue_scope_all_not_scoped_for_engineer(team_id):
+    svc, pag_repo = _make_service()
+    actor = _make_user(team_id, role=Roles.ENGENHEIRO)
+    await svc.list_pagamentos_overdue(team_id, actor_user=actor, limit=10, scope="all")
+    assert pag_repo.list_overdue.await_args.args[3] is None
+
+
+@pytest.mark.asyncio
+async def test_search_scope_all_not_scoped_for_engineer(team_id):
+    svc, pag_repo = _make_service()
+    actor = _make_user(team_id, role=Roles.ENGENHEIRO)
+    await svc.search_pagamentos(team_id, "pedro", actor_user=actor, limit=5, scope="all")
     assert pag_repo.search.await_args.args[3] is None

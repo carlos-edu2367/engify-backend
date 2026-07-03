@@ -91,6 +91,30 @@ async def test_overview_handles_service_error(team_id):
     assert "error" in out
 
 
+@pytest.mark.asyncio
+async def test_overview_defaults_to_scope_mine(team_id):
+    fin = SimpleNamespace(list_pagamentos_overdue=AsyncMock(return_value=[]))
+    ctx = _ctx(team_id, role=Roles.ENGENHEIRO, financeiro_service=fin)
+    await fin_tools.financeiro_pagamentos_overview({}, ctx)
+    assert fin.list_pagamentos_overdue.await_args.kwargs["scope"] == "mine"
+
+
+@pytest.mark.asyncio
+async def test_overview_passes_scope_all_to_service(team_id):
+    fin = SimpleNamespace(list_pagamentos_overdue=AsyncMock(return_value=[]))
+    ctx = _ctx(team_id, role=Roles.ENGENHEIRO, financeiro_service=fin)
+    await fin_tools.financeiro_pagamentos_overview({"escopo": "all"}, ctx)
+    assert fin.list_pagamentos_overdue.await_args.kwargs["scope"] == "all"
+
+
+@pytest.mark.asyncio
+async def test_overview_rejects_invalid_scope_falls_back_to_mine(team_id):
+    fin = SimpleNamespace(list_pagamentos_overdue=AsyncMock(return_value=[]))
+    ctx = _ctx(team_id, role=Roles.ENGENHEIRO, financeiro_service=fin)
+    await fin_tools.financeiro_pagamentos_overview({"escopo": "tudo"}, ctx)
+    assert fin.list_pagamentos_overdue.await_args.kwargs["scope"] == "mine"
+
+
 # ── buscar ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -113,6 +137,22 @@ async def test_buscar_identifies_last_paid_and_hides_pix(team_id):
     assert out["total"] == 2
     assert out["ultimo_pagamento_efetuado"]["status"] == "pago"
     assert "SECRETO" not in str(out)
+
+
+@pytest.mark.asyncio
+async def test_buscar_defaults_to_scope_mine(team_id):
+    fin = SimpleNamespace(search_pagamentos=AsyncMock(return_value=[]))
+    ctx = _ctx(team_id, role=Roles.ENGENHEIRO, financeiro_service=fin)
+    await fin_tools.financeiro_buscar_pagamentos({"query": "pedro"}, ctx)
+    assert fin.search_pagamentos.await_args.kwargs["scope"] == "mine"
+
+
+@pytest.mark.asyncio
+async def test_buscar_passes_scope_all_to_service(team_id):
+    fin = SimpleNamespace(search_pagamentos=AsyncMock(return_value=[]))
+    ctx = _ctx(team_id, role=Roles.ENGENHEIRO, financeiro_service=fin)
+    await fin_tools.financeiro_buscar_pagamentos({"query": "pedro", "escopo": "all"}, ctx)
+    assert fin.search_pagamentos.await_args.kwargs["scope"] == "all"
 
 
 # ── prepare (lista) ──────────────────────────────────────────────────────────

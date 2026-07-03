@@ -79,12 +79,18 @@ _TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
         description=(
             "Lista pagamentos agendados ATRASADOS (aguardando e vencidos) e o "
             "total em atraso. Use quando o usuário perguntar sobre pagamentos "
-            "atrasados/pendentes. Engenheiro vê apenas os próprios. Não expõe Pix."
+            "atrasados/pendentes. Engenheiro vê apenas os próprios por padrão; "
+            "use escopo='all' se o usuário pedir para ver os de todos os "
+            "engenheiros do time. Não expõe Pix."
         ),
         parameters={
             "type": "OBJECT",
             "properties": {
                 "limit": {"type": "INTEGER", "description": "Máximo de itens (padrão 15, máx 30)"},
+                "escopo": {
+                    "type": "STRING",
+                    "description": "'mine' (padrão, só os próprios do engenheiro) ou 'all' (todos os engenheiros do time)",
+                },
             },
             "required": [],
         },
@@ -95,13 +101,19 @@ _TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
             "Busca pagamentos agendados por nome/texto no título ou descrição. "
             "Use para responder 'quando foi o último pagamento para a pessoa X' "
             "ou consultar o histórico de pagamentos de alguém. Engenheiro vê "
-            "apenas os próprios. Não expõe Pix nem código do recebedor."
+            "apenas os próprios por padrão; use escopo='all' se o usuário pedir "
+            "para ver os de todos os engenheiros do time. Não expõe Pix nem "
+            "código do recebedor."
         ),
         parameters={
             "type": "OBJECT",
             "properties": {
                 "query": {"type": "STRING", "description": "Nome da pessoa ou texto a buscar (mín. 2 caracteres)"},
                 "limit": {"type": "INTEGER", "description": "Máximo de resultados (padrão 10, máx 20)"},
+                "escopo": {
+                    "type": "STRING",
+                    "description": "'mine' (padrão, só os próprios do engenheiro) ou 'all' (todos os engenheiros do time)",
+                },
             },
             "required": ["query"],
         },

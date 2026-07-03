@@ -138,7 +138,7 @@ async def delete_movimentacao(
         await redis.delete(lock_key)
 
 
-from app.http.dependencies.financeiro_filters import MovimentacaoFiltersDep, PagamentoFiltersDep
+from app.http.dependencies.financeiro_filters import MovimentacaoFiltersDep, PagamentoFiltersDep, PagamentoScopeDep
 
 @router.get("/movimentacoes", response_model=PaginatedResponse[MovimentacaoResponse])
 async def list_movimentacoes(
@@ -306,19 +306,24 @@ async def list_pagamentos(
     user: ManagerUser,
     pagination: Pagination,
     filters: PagamentoFiltersDep,
+    scope: PagamentoScopeDep,
     svc: FinanceiroServiceDep,
 ):
-    """Lista pagamentos agendados (paginado). Cache Redis 5min. Restrito a ADMIN e FIN."""
+    """Lista pagamentos agendados (paginado). Cache Redis 5min. Restrito a ADMIN e FIN.
+
+    Engenheiros veem só os próprios pagamentos por padrão (scope=mine);
+    scope=all mostra os pagamentos de todos os engenheiros do time.
+    """
     redis = get_redis()
-    effective_filters = svc.get_pagamento_filters_for_actor(filters, user)
+    effective_filters = svc.get_pagamento_filters_for_actor(filters, user, scope)
     filters_dict = effective_filters.model_dump(exclude_none=True)
     cache_key = pagamentos_list_key(user.team.id, pagination.page, pagination.limit, filters_dict)
     cached = await redis.get(cache_key)
     if cached:
         return PaginatedResponse[PagamentoReadResponse].model_validate_json(cached)
 
-    items = await svc.list_pagamentos(user.team.id, pagination.page, pagination.limit, effective_filters, actor_user=user)
-    total = await svc.count_pagamentos(user.team.id, effective_filters, actor_user=user)
+    items = await svc.list_pagamentos(user.team.id, pagination.page, pagination.limit, effective_filters, actor_user=user, scope=scope)
+    total = await svc.count_pagamentos(user.team.id, effective_filters, actor_user=user, scope=scope)
     result = PaginatedResponse.build(
         items=items, page=pagination.page, limit=pagination.limit, total=total
     )

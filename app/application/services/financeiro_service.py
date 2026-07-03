@@ -185,42 +185,43 @@ class FinanceiroService():
 
     async def list_pagamentos_overdue(
         self, team_id: UUID, actor_user: User | None = None, limit: int = 20,
-        reference: datetime | None = None,
+        reference: datetime | None = None, scope: str = "mine",
     ) -> list[PagamentoAgendado]:
-        """Pagamentos atrasados (AGUARDANDO e vencidos). Engenheiro vê só os seus."""
+        """Pagamentos atrasados (AGUARDANDO e vencidos). Engenheiro vê só os seus, a menos que scope="all"."""
         ref = reference or datetime.now(timezone.utc)
-        owner_id = actor_user.id if _is_engineer(actor_user) else None
+        owner_id = actor_user.id if (_is_engineer(actor_user) and scope != "all") else None
         return await self.pagamento_repo.list_overdue(team_id, ref, limit, owner_id)
 
     async def search_pagamentos(
         self, team_id: UUID, query: str, actor_user: User | None = None,
-        limit: int = 10,
+        limit: int = 10, scope: str = "mine",
     ) -> list[PagamentoAgendado]:
-        """Busca pagamentos por texto (nome/descrição). Engenheiro vê só os seus."""
-        owner_id = actor_user.id if _is_engineer(actor_user) else None
+        """Busca pagamentos por texto (nome/descrição). Engenheiro vê só os seus, a menos que scope="all"."""
+        owner_id = actor_user.id if (_is_engineer(actor_user) and scope != "all") else None
         return await self.pagamento_repo.search(team_id, query, limit, owner_id)
 
     def get_pagamento_filters_for_actor(
-        self, filters: PagamentoFiltersDTO | None, actor_user: User | None = None
+        self, filters: PagamentoFiltersDTO | None, actor_user: User | None = None,
+        scope: str = "mine",
     ) -> PagamentoFiltersDTO | None:
-        if not _is_engineer(actor_user):
+        if not _is_engineer(actor_user) or scope == "all":
             return filters or PagamentoFiltersDTO()
         base = filters or PagamentoFiltersDTO()
         return base.model_copy(update={"created_by_user_id": actor_user.id})
 
     async def list_pagamentos(
         self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None,
-        actor_user: User | None = None,
+        actor_user: User | None = None, scope: str = "mine",
     ) -> list[PagamentoReadResponse]:
-        filters = self.get_pagamento_filters_for_actor(filters, actor_user)
+        filters = self.get_pagamento_filters_for_actor(filters, actor_user, scope)
         pags = await self.pagamento_repo.list_by_team(team_id, page, limit, filters)
         return [_pag_to_response(p) for p in pags]
 
     async def count_pagamentos(
         self, team_id: UUID, filters: PagamentoFiltersDTO | None = None,
-        actor_user: User | None = None,
+        actor_user: User | None = None, scope: str = "mine",
     ) -> int:
-        filters = self.get_pagamento_filters_for_actor(filters, actor_user)
+        filters = self.get_pagamento_filters_for_actor(filters, actor_user, scope)
         return await self.pagamento_repo.count_by_team(team_id, filters)
 
     async def get_pagamento(

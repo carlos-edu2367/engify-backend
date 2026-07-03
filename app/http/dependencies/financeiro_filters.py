@@ -1,6 +1,6 @@
 import hashlib
 import json
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 from datetime import datetime
 from uuid import UUID
 from fastapi import Query, Depends
@@ -13,6 +13,15 @@ async def get_pagamento_filters(
     obra_id: Annotated[Optional[UUID], Query(description="Filtro por Obra ID")] = None,
 ) -> PagamentoFiltersDTO:
     return PagamentoFiltersDTO(status=status, obra_id=obra_id)
+
+
+async def get_pagamento_scope(
+    scope: Annotated[
+        Literal["mine", "all"],
+        Query(description="Escopo de visibilidade para engenheiros: 'mine' (padrão, só os próprios) ou 'all' (todos do time)"),
+    ] = "mine",
+) -> str:
+    return scope
 
 
 async def get_movimentacao_filters(
@@ -30,5 +39,6 @@ async def get_movimentacao_filters(
 
 
 PagamentoFiltersDep = Annotated[PagamentoFiltersDTO, Depends(get_pagamento_filters)]
+PagamentoScopeDep = Annotated[str, Depends(get_pagamento_scope)]
 MovimentacaoFiltersDep = Annotated[MovimentacaoFiltersDTO, Depends(get_movimentacao_filters)]
 

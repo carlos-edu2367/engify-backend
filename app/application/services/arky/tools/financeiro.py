@@ -20,6 +20,13 @@ _VALID_RANGES = {"6m", "12m", "24m"}
 
 _MAX_PREVIEW_ITENS = 20
 _VALID_CLASSES = {c.value for c in MovClass}
+_VALID_SCOPES = {"mine", "all"}
+
+
+def _read_scope(params: dict) -> str:
+    """Lê o escopo de visibilidade pedido ('mine' ou 'all'). Padrão: 'mine'."""
+    scope = params.get("escopo", "mine")
+    return scope if scope in _VALID_SCOPES else "mine"
 
 
 def _pagamento_summary(p, *, reference: datetime | None = None) -> dict:
@@ -90,16 +97,18 @@ async def financeiro_get_fluxo_caixa(params: dict, ctx: ArkyToolContext) -> dict
 
 
 async def financeiro_pagamentos_overview(params: dict, ctx: ArkyToolContext) -> dict:
-    """Pagamentos atrasados e resumo. Engenheiro vê apenas os próprios."""
+    """Pagamentos atrasados e resumo. Engenheiro vê apenas os próprios, a menos que
+    o parâmetro 'escopo' seja 'all' (mostra os de todos os engenheiros do time)."""
     try:
         limit = min(int(params.get("limit", 15)), 30)
     except (TypeError, ValueError):
         limit = 15
+    scope = _read_scope(params)
 
     now = datetime.now(timezone.utc)
     try:
         atrasados = await ctx.financeiro_service.list_pagamentos_overdue(
-            team_id=ctx.team_id, actor_user=ctx.user, limit=limit, reference=now,
+            team_id=ctx.team_id, actor_user=ctx.user, limit=limit, reference=now, scope=scope,
         )
     except Exception as e:
         logger.warning("Erro ao buscar pagamentos atrasados: %s", e)
@@ -117,7 +126,8 @@ async def financeiro_pagamentos_overview(params: dict, ctx: ArkyToolContext) -> 
 async def financeiro_buscar_pagamentos(params: dict, ctx: ArkyToolContext) -> dict:
     """Busca pagamentos por nome/texto (ex.: último pagamento para a pessoa X).
 
-    Engenheiro vê apenas os próprios. Não expõe Pix nem código do recebedor."""
+    Engenheiro vê apenas os próprios, a menos que o parâmetro 'escopo' seja 'all'
+    (mostra os de todos os engenheiros do time). Não expõe Pix nem código do recebedor."""
     query = (params.get("query") or "").strip()
     if len(query) < 2:
         return {"error": "Informe ao menos 2 caracteres para buscar"}
@@ -126,11 +136,12 @@ async def financeiro_buscar_pagamentos(params: dict, ctx: ArkyToolContext) -> di
         limit = min(int(params.get("limit", 10)), 20)
     except (TypeError, ValueError):
         limit = 10
+    scope = _read_scope(params)
 
     now = datetime.now(timezone.utc)
     try:
         pagamentos = await ctx.financeiro_service.search_pagamentos(
-            team_id=ctx.team_id, query=query[:120], actor_user=ctx.user, limit=limit,
+            team_id=ctx.team_id, query=query[:120], actor_user=ctx.user, limit=limit, scope=scope,
         )
     except Exception as e:
         logger.warning("Erro ao buscar pagamentos: %s", e)
