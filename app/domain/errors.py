@@ -10,3 +10,7 @@ class WeakArgument(DomainError):
 
 class ExpiredPlan(DomainError):
     pass
+
+class ConflictError(DomainError):
+    """Violação de invariante de unicidade (ex.: vínculo já existente)."""
+    pass

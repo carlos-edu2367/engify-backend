@@ -46,6 +46,16 @@ class ObraRepository(ABC):
         pass
 
     @abstractmethod
+    async def list_unlinked(self, team_id: UUID, page: int, limit: int,
+                            search: str | None = None) -> list[Obra]:
+        """Obras do team ainda sem orçamento Arcaika vinculado (arcaika_orcamento_id IS NULL)."""
+        pass
+
+    @abstractmethod
+    async def count_unlinked(self, team_id: UUID, search: str | None = None) -> int:
+        pass
+
+    @abstractmethod
     async def list_monthly_commission_eligible(
         self,
         team_id: UUID,

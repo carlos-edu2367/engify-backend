@@ -168,6 +168,40 @@ class ObraRepositoryImpl(ObraRepository):
         model = result.scalar_one_or_none()
         return model.to_domain() if model else None
 
+    async def list_unlinked(self, team_id: UUID, page: int, limit: int,
+                            search: str | None = None) -> list[Obra]:
+        offset = (page - 1) * limit
+        conditions = [
+            ObraModel.team_id == team_id,
+            ObraModel.arcaika_orcamento_id.is_(None),
+            ObraModel.is_deleted == False,  # noqa: E712
+        ]
+        term = self._normalize_search(search)
+        if term is not None:
+            conditions.append(ObraModel.title.ilike(f"%{term}%"))
+        stmt = (
+            select(ObraModel)
+            .where(*conditions)
+            .order_by(ObraModel.created_date.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
+    async def count_unlinked(self, team_id: UUID, search: str | None = None) -> int:
+        conditions = [
+            ObraModel.team_id == team_id,
+            ObraModel.arcaika_orcamento_id.is_(None),
+            ObraModel.is_deleted == False,  # noqa: E712
+        ]
+        term = self._normalize_search(search)
+        if term is not None:
+            conditions.append(ObraModel.title.ilike(f"%{term}%"))
+        stmt = select(func.count()).select_from(ObraModel).where(*conditions)
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
+
     async def list_monthly_commission_eligible(
         self,
         team_id: UUID,

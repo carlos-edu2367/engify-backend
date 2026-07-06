@@ -16,7 +16,7 @@ from app.domain.entities.money import Money
 from app.domain.entities.integracao import (
     ArcaikaConnection, ConnectionScope, IntegrationEvent, IntegrationEventType,
 )
-from app.domain.errors import DomainError
+from app.domain.errors import ConflictError, DomainError
 
 
 class IntegracaoArcaikaService:
@@ -68,6 +68,58 @@ class IntegracaoArcaikaService:
         saved = await self.obra_repo.save(obra)
 
         # Outbox: evento obra.created na MESMA transação.
+        data = build_event_data(saved, self.public_url_for(saved.id))
+        event = IntegrationEvent(
+            team_id=connection.team_id,
+            obra_id=saved.id,
+            event_type=IntegrationEventType.OBRA_CREATED,
+            payload=data,
+        )
+        await self.event_repo.save(event)
+        await self.uow.commit()
+        return saved, False
+
+    async def list_unlinked_obras(
+        self, connection: ArcaikaConnection, page: int, limit: int, search: str | None = None,
+    ) -> tuple[list[Obra], bool]:
+        """Obras do time ainda sem orçamento Arcaika vinculado, paginadas."""
+        connection.ensure_active()
+        if not connection.has_scope(ConnectionScope.OBRAS_READ):
+            raise DomainError("Conexão sem escopo obras:read")
+        itens = await self.obra_repo.list_unlinked(connection.team_id, page, limit, search)
+        total = await self.obra_repo.count_unlinked(connection.team_id, search)
+        has_more = page * limit < total
+        return itens, has_more
+
+    async def link_existing_obra(
+        self, connection: ArcaikaConnection, obra_id: UUID,
+        orcamento_id: UUID, solicitacao_id: UUID,
+    ) -> tuple[Obra, bool]:
+        """Vincula uma obra já existente a um orçamento aceito. Idempotente pelo par (obra, orçamento).
+
+        Retorna (obra, already_linked).
+        """
+        connection.ensure_active()
+        if not connection.has_scope(ConnectionScope.OBRAS_WRITE):
+            raise DomainError("Conexão sem escopo obras:write")
+
+        # get_by_id filtra por team_id → DomainError se de outro team / inexistente.
+        obra = await self.obra_repo.get_by_id(obra_id, connection.team_id)
+
+        if obra.arcaika_orcamento_id == orcamento_id:
+            return obra, True
+        if obra.arcaika_orcamento_id is not None:
+            raise ConflictError("Obra já vinculada a outro orçamento")
+
+        outra = await self.obra_repo.get_by_arcaika_orcamento(orcamento_id)
+        if outra is not None:
+            raise ConflictError("Orçamento já vinculado a outra obra")
+
+        obra.arcaika_orcamento_id = orcamento_id
+        obra.arcaika_solicitacao_id = solicitacao_id
+        obra.origem = ObraOrigem.ARCAIKA
+        saved = await self.obra_repo.save(obra)
+
         data = build_event_data(saved, self.public_url_for(saved.id))
         event = IntegrationEvent(
             team_id=connection.team_id,

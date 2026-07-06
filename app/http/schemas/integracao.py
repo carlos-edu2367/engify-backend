@@ -74,6 +74,30 @@ class ObraStatusResponse(BaseModel):
     updated_at: datetime | None = None
 
 
+class UnlinkedObraItem(BaseModel):
+    obra_id: UUID
+    title: str
+    status: str
+    valor: Decimal | None = None
+    data_entrega: datetime | None = None
+    created_at: datetime
+    public_url: str
+
+
+class UnlinkedObrasResponse(BaseModel):
+    items: list[UnlinkedObraItem]
+    page: int
+    has_more: bool
+
+
+class LinkObraRequest(BaseModel):
+    external_ref: ExternalRef
+
+
+class LinkObraResponse(CreateObraResponse):
+    already_linked: bool = False
+
+
 class RegisterWebhookRequest(BaseModel):
     url: str = Field(pattern=r"^https://.+")
 
