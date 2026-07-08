@@ -29,6 +29,7 @@ from app.application.providers.repo.rh_repo import (
 from app.application.providers.uow import UOWProvider
 from app.application.services.rh_audit_service import RhAuditService
 from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoPonto, TurnoHorario
+from app.domain.services.rh_ponto_calculo import resumir_periodo
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
@@ -297,57 +298,24 @@ class RhDashboardService:
         horario: HorarioTrabalho | None,
         registros: list[RegistroPonto],
     ) -> RhEstadoPonto7DiasDTO:
-        registros_por_dia: dict[date, list[RegistroPonto]] = defaultdict(list)
-        pontos_inconsistentes = 0
-        for registro in registros:
-            registro_date = registro.timestamp.astimezone(timezone.utc).date()
-            registros_por_dia[registro_date].append(registro)
-            if registro.status == StatusPonto.INCONSISTENTE:
-                pontos_inconsistentes += 1
+        if horario is None:
+            def turno_para_dia(_weekday: int) -> TurnoHorario | None:
+                return None
+        else:
+            turno_para_dia = horario.turno_para_dia
 
-        faltas = 0
-        extra_minutes = Decimal("0")
-        missing_minutes = Decimal("0")
-        current = inicio
-        while current <= fim:
-            turno = horario.turno_para_dia(current.weekday()) if horario is not None else None
-            if turno is not None:
-                expected_minutes = self._expected_minutes(turno)
-                worked_minutes = self._worked_minutes_for_day(registros_por_dia.get(current, []))
-                if worked_minutes == 0:
-                    faltas += 1
-                    missing_minutes += expected_minutes
-                elif worked_minutes > expected_minutes:
-                    extra_minutes += worked_minutes - expected_minutes
-                elif worked_minutes < expected_minutes:
-                    missing_minutes += expected_minutes - worked_minutes
-            current += timedelta(days=1)
-
+        resumo = resumir_periodo(
+            registros=registros,
+            turno_para_dia=turno_para_dia,
+            inicio=inicio,
+            fim=fim,
+            datas_abonadas=set(),
+        )
         return RhEstadoPonto7DiasDTO(
             inicio=inicio,
             fim=fim,
-            faltas=faltas,
-            horas_extras=(extra_minutes / Decimal("60")).quantize(Decimal("0.01")),
-            horas_faltantes=(missing_minutes / Decimal("60")).quantize(Decimal("0.01")),
-            pontos_inconsistentes=pontos_inconsistentes,
+            faltas=resumo.faltas,
+            horas_extras=(resumo.extra_min / Decimal("60")).quantize(Decimal("0.01")),
+            horas_faltantes=(resumo.falta_min / Decimal("60")).quantize(Decimal("0.01")),
+            pontos_inconsistentes=resumo.pontos_inconsistentes,
         )
-
-    def _expected_minutes(self, turno: TurnoHorario) -> Decimal:
-        return Decimal(str(turno.horas_esperadas)) * Decimal("60")
-
-    def _worked_minutes_for_day(self, registros: list[RegistroPonto]) -> Decimal:
-        valid_statuses = {StatusPonto.VALIDADO, StatusPonto.AJUSTADO}
-        ordered = sorted(
-            [registro for registro in registros if registro.status in valid_statuses],
-            key=lambda item: item.timestamp,
-        )
-        total = Decimal("0")
-        entrada_atual: datetime | None = None
-        for registro in ordered:
-            if registro.tipo == TipoPonto.ENTRADA:
-                entrada_atual = registro.timestamp
-                continue
-            if registro.tipo == TipoPonto.SAIDA and entrada_atual is not None:
-                total += Decimal(str((registro.timestamp - entrada_atual).total_seconds() / 60))
-                entrada_atual = None
-        return total
