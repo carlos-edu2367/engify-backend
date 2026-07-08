@@ -59,6 +59,12 @@ from app.domain.services.rh_beneficio_calculo import (
     valor_beneficio,
 )
 from app.domain.services.rh_folha_calculation_engine import FolhaCalculationEngine
+from app.domain.services.rh_ponto_calculo import (
+    JornadaConfig,
+    resumir_periodo,
+    valor_falta,
+    valor_hora_extra,
+)
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
@@ -726,71 +732,25 @@ class RhFolhaService:
         ferias_items: list[Ferias],
         abono_atestado: set[date],
     ) -> tuple[Money, Money]:
-        registros_por_dia: dict[date, list[RegistroPonto]] = defaultdict(list)
-        for registro in registros:
-            registros_por_dia[registro.timestamp.astimezone(timezone.utc).date()].append(registro)
-
-        expected_minutes_total = Decimal("0")
-        extra_minutes_total = Decimal("0")
-        falta_minutes_total = Decimal("0")
-
         start, end = self._competencia_bounds(mes, ano)
-        current = start.date()
-        last = end.date()
-        while current <= last:
-            turno = horario.turno_para_dia(current.weekday())
-            if turno is None:
-                current += timedelta(days=1)
-                continue
-            expected_minutes_day = Decimal(str(turno.horas_esperadas)) * Decimal("60")
-            expected_minutes_total += expected_minutes_day
-            if self._is_date_covered_by_ferias(current, ferias_items) or current in abono_atestado:
-                current += timedelta(days=1)
-                continue
-            worked_minutes = self._worked_minutes_for_day(registros_por_dia.get(current, []), turno)
-            if worked_minutes == 0:
-                falta_minutes_total += expected_minutes_day
-            elif worked_minutes > expected_minutes_day:
-                extra_minutes_total += worked_minutes - expected_minutes_day
-            current += timedelta(days=1)
+        datas_abonadas = set(abono_atestado)
+        dia = start.date()
+        while dia <= end.date():
+            if self._is_date_covered_by_ferias(dia, ferias_items):
+                datas_abonadas.add(dia)
+            dia += timedelta(days=1)
 
-        if expected_minutes_total == 0:
-            return Money(Decimal("0.00")), Money(Decimal("0.00"))
-        minute_rate = funcionario.salario_base.amount / expected_minutes_total
-        horas_extras = Money((minute_rate * extra_minutes_total).quantize(Decimal("0.01")))
-        descontos_falta = Money((minute_rate * falta_minutes_total).quantize(Decimal("0.01")))
+        config = JornadaConfig()
+        resumo = resumir_periodo(
+            registros=registros,
+            turno_para_dia=horario.turno_para_dia,
+            inicio=start.date(),
+            fim=end.date(),
+            datas_abonadas=datas_abonadas,
+        )
+        horas_extras = valor_hora_extra(funcionario.salario_base, resumo.extra_min, config)
+        descontos_falta = valor_falta(funcionario.salario_base, resumo.falta_min, config)
         return horas_extras, descontos_falta
-
-    def _worked_minutes_for_day(self, registros: list[RegistroPonto], turno: TurnoHorario | None = None) -> Decimal:
-        if not registros:
-            return Decimal("0")
-        ordered = sorted(registros, key=lambda item: item.timestamp)
-        total = Decimal("0")
-        entrada_atual: datetime | None = None
-        for registro in ordered:
-            if registro.status not in {StatusPonto.VALIDADO, StatusPonto.AJUSTADO}:
-                continue
-            if registro.tipo == TipoPonto.ENTRADA:
-                entrada_atual = registro.timestamp
-                continue
-            if registro.tipo == TipoPonto.SAIDA and entrada_atual is not None:
-                worked_minutes = Decimal(str((registro.timestamp - entrada_atual).total_seconds() / 60))
-                if turno is not None:
-                    worked_minutes -= self._interval_overlap_minutes(entrada_atual, registro.timestamp, turno)
-                total += max(worked_minutes, Decimal("0"))
-                entrada_atual = None
-        return total
-
-    def _interval_overlap_minutes(self, start: datetime, end: datetime, turno: TurnoHorario) -> Decimal:
-        total = Decimal("0")
-        for intervalo in turno.intervalos:
-            interval_start = datetime.combine(start.date(), intervalo.hora_inicio, tzinfo=start.tzinfo)
-            interval_end = datetime.combine(start.date(), intervalo.hora_fim, tzinfo=start.tzinfo)
-            overlap_start = max(start, interval_start)
-            overlap_end = min(end, interval_end)
-            if overlap_end > overlap_start:
-                total += Decimal(str((overlap_end - overlap_start).total_seconds() / 60))
-        return total
 
     def _is_date_covered_by_ferias(self, target: date, items: list[Ferias]) -> bool:
         for item in items:

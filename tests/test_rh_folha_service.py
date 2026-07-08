@@ -608,7 +608,56 @@ async def test_generate_draft_counts_absence_using_net_expected_hours_with_inter
 
     result = await service.gerar_rascunho_folha(admin, 4, 2026, funcionario_id=funcionario.id)
 
-    assert result[0].descontos_falta.amount == Decimal("1760.00")
+    # Divisor fixo (220h): 4 segundas ausentes em abril/2026 = 4*8h = 32h.
+    # 1760 / 220 * 32 = 256.00 (antes, com divisor mensal variavel, dava 1760).
+    assert result[0].descontos_falta.amount == Decimal("256.00")
+
+
+@pytest.mark.asyncio
+async def test_generate_draft_discounts_partial_day_when_leaving_early():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    funcionario.salario_base = Money(Decimal("2200.00"))
+    horario = HorarioTrabalho(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        turnos=[
+            TurnoHorario(
+                dia_semana=0,
+                hora_entrada=time(8, 0),
+                hora_saida=time(17, 0),
+                intervalos=[IntervaloHorario(hora_inicio=time(12, 0), hora_fim=time(13, 0))],
+            )
+        ],
+    )
+    # Uma unica segunda (06/04) sai as 15h: trabalha 6h de 8h esperadas -> 2h de falta parcial.
+    # As outras 3 segundas de abril ficam sem registro -> falta cheia (8h cada).
+    registros = [
+        RegistroPonto(
+            team_id=admin.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.ENTRADA,
+            timestamp=datetime(2026, 4, 6, 8, 0, tzinfo=timezone.utc),
+            latitude=0,
+            longitude=0,
+        ),
+        RegistroPonto(
+            team_id=admin.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.SAIDA,
+            timestamp=datetime(2026, 4, 6, 15, 0, tzinfo=timezone.utc),
+            latitude=0,
+            longitude=0,
+        ),
+    ]
+    service = _build_service([funcionario], {funcionario.id: horario}, registros=registros)
+
+    result = await service.gerar_rascunho_folha(admin, 4, 2026, funcionario_id=funcionario.id)
+
+    # falta_min = 2h (dia parcial) + 3*8h (dias sem registro) = 120 + 1440 = 1560 min.
+    # valor_minuto = 2200 / (220*60) = 0.1666...; desconto = 0.1666... * 1560 = 260.00.
+    assert result[0].descontos_falta.amount == Decimal("260.00")
+    assert result[0].horas_extras.amount == Decimal("0.00")
 
 
 @pytest.mark.asyncio
