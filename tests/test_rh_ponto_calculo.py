@@ -171,3 +171,41 @@ def test_resumir_periodo_pula_datas_abonadas():
     # dia abonado nao vira falta
     assert resumo.faltas == 0
     assert resumo.falta_min == Decimal("0")
+
+
+def test_liberacao_antecipada_reduz_esperado_e_evita_falta():
+    turno = _turno_8h()  # apenas segunda (dia_semana=0)
+
+    def turno_para_dia(weekday: int):
+        return turno if weekday == 0 else None
+
+    # 2026-07-06 e segunda. Trabalha 08:00-15:00 (6h liquidas apos 1h de intervalo).
+    registros = [_reg(time(8, 0), TipoPonto.ENTRADA), _reg(time(15, 0), TipoPonto.SAIDA)]
+    resumo = resumir_periodo(
+        registros=registros,
+        turno_para_dia=turno_para_dia,
+        inicio=date(2026, 7, 6),
+        fim=date(2026, 7, 6),
+        datas_abonadas=set(),
+        liberacoes={date(2026, 7, 6): Decimal("360")},
+    )
+    assert resumo.falta_min == Decimal("0")
+    assert resumo.extra_min == Decimal("0")
+    assert resumo.esperado_min == Decimal("360")
+
+
+def test_sem_liberacao_mesmo_horario_gera_falta_parcial():
+    turno = _turno_8h()
+
+    def turno_para_dia(weekday: int):
+        return turno if weekday == 0 else None
+
+    registros = [_reg(time(8, 0), TipoPonto.ENTRADA), _reg(time(15, 0), TipoPonto.SAIDA)]
+    resumo = resumir_periodo(
+        registros=registros,
+        turno_para_dia=turno_para_dia,
+        inicio=date(2026, 7, 6),
+        fim=date(2026, 7, 6),
+        datas_abonadas=set(),
+    )
+    assert resumo.falta_min == Decimal("120")

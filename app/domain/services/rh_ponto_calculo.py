@@ -56,8 +56,8 @@ def _esperado_min(turno: TurnoHorario) -> Decimal:
     return Decimal(str(turno.horas_esperadas)) * Decimal("60")
 
 
-def resultado_dia(registros: list[RegistroPonto], turno: TurnoHorario) -> ResultadoDia:
-    esperado = _esperado_min(turno)
+def resultado_dia(registros: list[RegistroPonto], turno: TurnoHorario, esperado_min_override: Decimal | None = None) -> ResultadoDia:
+    esperado = esperado_min_override if esperado_min_override is not None else _esperado_min(turno)
     validos = sorted(
         [r for r in registros if r.status in _STATUS_VALIDOS],
         key=lambda r: r.timestamp,
@@ -91,7 +91,15 @@ def resumir_periodo(
     inicio: date,
     fim: date,
     datas_abonadas: set[date],
+    liberacoes: dict[date, Decimal] | None = None,
 ) -> ResumoPeriodo:
+    """Agrega resultado_dia() para cada dia com turno no periodo.
+
+    liberacoes mapeia data -> minutos esperados reduzidos (ex.: liberacao
+    antecipada). Quando presente para uma data, substitui o esperado do turno
+    para aquele dia, evitando que a saida antecipada autorizada vire falta.
+    """
+    liberacoes = liberacoes or {}
     por_dia: dict[date, list[RegistroPonto]] = defaultdict(list)
     pontos_inconsistentes = 0
     for r in registros:
@@ -110,9 +118,10 @@ def resumir_periodo(
     while atual <= fim:
         turno = turno_para_dia(atual.weekday())
         if turno is not None:
-            esperado_total += _esperado_min(turno)
+            esperado_dia = liberacoes.get(atual, _esperado_min(turno))
+            esperado_total += esperado_dia
             if atual not in datas_abonadas:
-                r = resultado_dia(por_dia.get(atual, []), turno)
+                r = resultado_dia(por_dia.get(atual, []), turno, esperado_min_override=esperado_dia)
                 extra_total += r.extra_min
                 falta_total += r.falta_min
                 if r.incompleto:
