@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -416,3 +416,68 @@ async def test_listar_audit_logs_requires_rh_admin():
 
     with pytest.raises(DomainError):
         await service.listar_audit_logs(employee, page=1, limit=20, filters={})
+
+
+def test_summarize_estado_ponto_7_dias_aplica_liberacao_antecipada():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+    from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario_id = uuid4()
+    horario = _make_daily_horario(admin.team.id, funcionario_id)  # turno todo dia 08-17, sem intervalo (9h)
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(),
+        horario_repo=_FakeHorarioRepo(),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+    dia = date(2026, 7, 6)
+    registros = [
+        _make_ponto(admin.team.id, funcionario_id, datetime.combine(dia, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _make_ponto(admin.team.id, funcionario_id, datetime.combine(dia, time(15, 0), tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]
+    liberacao = EventoCalendarioRh(
+        team_id=admin.team.id,
+        tipo=TipoEventoCalendario.LIBERACAO_ANTECIPADA,
+        data=dia,
+        descricao="Liberacao antecipada",
+        hora_corte=time(15, 0),
+    )
+
+    resumo = service._summarize_estado_ponto_7_dias(dia, dia, horario, registros, funcionario_id, [liberacao])
+
+    assert resumo.horas_faltantes == Decimal("0.00")
+    assert resumo.horas_extras == Decimal("0.00")
+
+
+def test_summarize_estado_ponto_7_dias_sem_liberacao_gera_falta():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario_id = uuid4()
+    horario = _make_daily_horario(admin.team.id, funcionario_id)
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(),
+        horario_repo=_FakeHorarioRepo(),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+    dia = date(2026, 7, 6)
+    registros = [
+        _make_ponto(admin.team.id, funcionario_id, datetime.combine(dia, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _make_ponto(admin.team.id, funcionario_id, datetime.combine(dia, time(15, 0), tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]
+
+    resumo = service._summarize_estado_ponto_7_dias(dia, dia, horario, registros, funcionario_id, [])
+
+    assert resumo.horas_faltantes == Decimal("2.00")

@@ -12,6 +12,7 @@ from app.domain.entities.rh import (
 )
 from app.domain.services.rh_ponto_calculo import (
     JornadaConfig,
+    minutos_liberacao,
     resultado_dia,
     resumir_periodo,
     valor_minuto,
@@ -209,3 +210,22 @@ def test_sem_liberacao_mesmo_horario_gera_falta_parcial():
         datas_abonadas=set(),
     )
     assert resumo.falta_min == Decimal("120")
+
+
+def test_minutos_liberacao_desconta_intervalo_sobreposto():
+    turno = _turno_8h()  # 08-17, intervalo 12-13
+    minutos = minutos_liberacao(turno, time(15, 0))
+    assert minutos == Decimal("360")  # 08-15 = 7h, menos 1h de intervalo = 6h
+
+
+def test_minutos_liberacao_corte_antes_da_entrada_retorna_zero():
+    turno = _turno_8h()
+    minutos = minutos_liberacao(turno, time(7, 0))
+    assert minutos == Decimal("0")
+
+
+def test_minutos_liberacao_corte_dentro_do_intervalo():
+    turno = _turno_8h()
+    minutos = minutos_liberacao(turno, time(12, 30))
+    # bruto 08:00-12:30 = 270min; overlap com intervalo 12:00-13:00 clipado em 12:00-12:30 = 30min
+    assert minutos == Decimal("240")

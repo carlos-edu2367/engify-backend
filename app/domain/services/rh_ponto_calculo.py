@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta, timezone
+from datetime import date, time as Time, timedelta, timezone
 from decimal import Decimal
 from typing import Callable
 
@@ -54,6 +54,32 @@ class ResultadoDia:
 
 def _esperado_min(turno: TurnoHorario) -> Decimal:
     return Decimal(str(turno.horas_esperadas)) * Decimal("60")
+
+
+def _hhmm_to_minutes(value: Time) -> Decimal:
+    return Decimal(value.hour * 60 + value.minute)
+
+
+def minutos_liberacao(turno: TurnoHorario, hora_corte: Time) -> Decimal:
+    """Minutos esperados de trabalho entre a entrada do turno e a hora de corte.
+
+    Usado para liberacao antecipada: a jornada esperada do dia passa a
+    terminar em hora_corte em vez de hora_saida. Desconta os intervalos do
+    turno que caem dentro dessa janela, do mesmo jeito que resultado_dia
+    desconta o intervalo do span trabalhado.
+    """
+    entrada = _hhmm_to_minutes(turno.hora_entrada)
+    corte = _hhmm_to_minutes(hora_corte)
+    if corte <= entrada:
+        return Decimal("0")
+    bruto = corte - entrada
+    intervalo_min = Decimal("0")
+    for intervalo in turno.intervalos:
+        inicio = max(entrada, _hhmm_to_minutes(intervalo.hora_inicio))
+        fim = min(corte, _hhmm_to_minutes(intervalo.hora_fim))
+        if fim > inicio:
+            intervalo_min += fim - inicio
+    return max(Decimal("0"), bruto - intervalo_min)
 
 
 def resultado_dia(registros: list[RegistroPonto], turno: TurnoHorario, esperado_min_override: Decimal | None = None) -> ResultadoDia:

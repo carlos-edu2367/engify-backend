@@ -386,6 +386,7 @@ async def get_rh_folha_service(session: Session) -> RhFolhaService:
         encargo_cache=_rh_encargo_cache,
         beneficio_repo=BeneficioRepositoryImpl(session),
         beneficio_funcionario_repo=BeneficioFuncionarioRepositoryImpl(session),
+        evento_calendario_repo=EventoCalendarioRepositoryImpl(session),
     )
 
 
@@ -412,6 +413,7 @@ async def get_rh_dashboard_service(session: Session) -> RhDashboardService:
         holerite_repo=HoleriteRepositoryImpl(session),
         audit_repo=RhAuditLogRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
+        evento_calendario_repo=EventoCalendarioRepositoryImpl(session),
     )
 
 

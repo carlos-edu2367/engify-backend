@@ -18,6 +18,7 @@ from app.application.dtos.rh import (
 from app.application.providers.repo.rh_repo import (
     AjustePontoRepository,
     AtestadoRepository,
+    EventoCalendarioRepository,
     FeriasRepository,
     FuncionarioRepository,
     HorarioTrabalhoRepository,
@@ -28,7 +29,8 @@ from app.application.providers.repo.rh_repo import (
 from app.application.providers.uow import UOWProvider
 from app.application.services.rh_audit_service import RhAuditService
 from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TurnoHorario
-from app.domain.services.rh_ponto_calculo import resumir_periodo
+from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
+from app.domain.services.rh_ponto_calculo import minutos_liberacao, resumir_periodo
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
@@ -47,6 +49,7 @@ class RhDashboardService:
         holerite_repo: HoleriteRepository,
         audit_repo: RhAuditLogRepository,
         uow: UOWProvider,
+        evento_calendario_repo: EventoCalendarioRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.horario_repo = horario_repo
@@ -57,6 +60,7 @@ class RhDashboardService:
         self.holerite_repo = holerite_repo
         self.audit_repo = audit_repo
         self.uow = uow
+        self.evento_calendario_repo = evento_calendario_repo
 
     async def obter_dashboard(self, current_user: User, mes: int, ano: int) -> RhDashboardSummaryDTO:
         self._ensure_rh_admin(current_user)
@@ -288,7 +292,12 @@ class RhDashboardService:
             page=1,
             limit=500,
         )
-        return self._summarize_estado_ponto_7_dias(inicio, hoje, horario, registros)
+        eventos_calendario = (
+            await self.evento_calendario_repo.list_by_periodo(team_id, inicio, hoje)
+            if self.evento_calendario_repo is not None
+            else []
+        )
+        return self._summarize_estado_ponto_7_dias(inicio, hoje, horario, registros, funcionario_id, eventos_calendario)
 
     def _summarize_estado_ponto_7_dias(
         self,
@@ -296,6 +305,8 @@ class RhDashboardService:
         fim: date,
         horario: HorarioTrabalho | None,
         registros: list[RegistroPonto],
+        funcionario_id=None,
+        eventos_calendario: list[EventoCalendarioRh] | None = None,
     ) -> RhEstadoPonto7DiasDTO:
         if horario is None:
             def turno_para_dia(_weekday: int) -> TurnoHorario | None:
@@ -303,12 +314,25 @@ class RhDashboardService:
         else:
             turno_para_dia = horario.turno_para_dia
 
+        datas_abonadas: set = set()
+        liberacoes: dict = {}
+        for evento in eventos_calendario or []:
+            if not evento.aplica_a(funcionario_id):
+                continue
+            if evento.tipo in {TipoEventoCalendario.FERIADO, TipoEventoCalendario.PONTO_FACULTATIVO, TipoEventoCalendario.ABONO}:
+                datas_abonadas.add(evento.data)
+            elif evento.tipo == TipoEventoCalendario.LIBERACAO_ANTECIPADA and horario is not None:
+                turno_dia = horario.turno_para_dia(evento.data.weekday())
+                if turno_dia is not None:
+                    liberacoes[evento.data] = minutos_liberacao(turno_dia, evento.hora_corte)
+
         resumo = resumir_periodo(
             registros=registros,
             turno_para_dia=turno_para_dia,
             inicio=inicio,
             fim=fim,
-            datas_abonadas=set(),
+            datas_abonadas=datas_abonadas,
+            liberacoes=liberacoes,
         )
         return RhEstadoPonto7DiasDTO(
             inicio=inicio,

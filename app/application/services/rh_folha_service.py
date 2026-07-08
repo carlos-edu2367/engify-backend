@@ -13,6 +13,7 @@ from app.application.providers.repo.rh_repo import (
     AtestadoRepository,
     BeneficioRepository,
     BeneficioFuncionarioRepository,
+    EventoCalendarioRepository,
     FuncionarioRepository,
     HoleriteRepository,
     HoleriteItemRepository,
@@ -56,9 +57,11 @@ from app.domain.services.rh_beneficio_calculo import (
     dias_uteis_competencia,
     valor_beneficio,
 )
+from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
 from app.domain.services.rh_folha_calculation_engine import FolhaCalculationEngine
 from app.domain.services.rh_ponto_calculo import (
     JornadaConfig,
+    minutos_liberacao,
     resumir_periodo,
     valor_falta,
     valor_hora_extra,
@@ -89,6 +92,7 @@ class RhFolhaService:
         encargo_cache: RhEncargoCachePort | None = None,
         beneficio_repo: BeneficioRepository | None = None,
         beneficio_funcionario_repo: BeneficioFuncionarioRepository | None = None,
+        evento_calendario_repo: EventoCalendarioRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.horario_repo = horario_repo
@@ -109,6 +113,7 @@ class RhFolhaService:
         self.encargo_cache = encargo_cache
         self.beneficio_repo = beneficio_repo
         self.beneficio_funcionario_repo = beneficio_funcionario_repo
+        self.evento_calendario_repo = evento_calendario_repo
 
     async def gerar_rascunho_folha(
         self,
@@ -142,6 +147,11 @@ class RhFolhaService:
         abono_por_atestado = await self._build_atestado_abono_map(atestados)
         registros_por_funcionario = self._group_by_funcionario(registros)
         ferias_por_funcionario = self._group_by_funcionario(ferias_items)
+        eventos_calendario = (
+            await self.evento_calendario_repo.list_by_periodo(team_id, start.date(), end.date())
+            if self.evento_calendario_repo is not None
+            else []
+        )
         regras_ativas = await self._load_regras_ativas(team_id, mes, ano)
         beneficios_por_id = {}
         vinculos_por_funcionario = {}
@@ -168,6 +178,7 @@ class RhFolhaService:
                 registros=registros_por_funcionario.get(funcionario.id, []),
                 ferias_items=ferias_por_funcionario.get(funcionario.id, []),
                 abono_atestado=abono_por_atestado.get(funcionario.id, set()),
+                eventos_calendario=eventos_calendario,
             )
             acrescimos = existing.acrescimos_manuais if existing else Money(Decimal("0.00"))
             descontos = existing.descontos_manuais if existing else Money(Decimal("0.00"))
@@ -729,6 +740,7 @@ class RhFolhaService:
         registros: list[RegistroPonto],
         ferias_items: list[Ferias],
         abono_atestado: set[date],
+        eventos_calendario: list[EventoCalendarioRh] | None = None,
     ) -> tuple[Money, Money]:
         start, end = self._competencia_bounds(mes, ano)
         datas_abonadas = set(abono_atestado)
@@ -738,6 +750,8 @@ class RhFolhaService:
                 datas_abonadas.add(dia)
             dia += timedelta(days=1)
 
+        liberacoes = self._build_liberacoes(horario, funcionario.id, eventos_calendario or [], datas_abonadas)
+
         config = JornadaConfig()
         resumo = resumir_periodo(
             registros=registros,
@@ -745,10 +759,32 @@ class RhFolhaService:
             inicio=start.date(),
             fim=end.date(),
             datas_abonadas=datas_abonadas,
+            liberacoes=liberacoes,
         )
         horas_extras = valor_hora_extra(funcionario.salario_base, resumo.extra_min, config)
         descontos_falta = valor_falta(funcionario.salario_base, resumo.falta_min, config)
         return horas_extras, descontos_falta
+
+    def _build_liberacoes(
+        self,
+        horario: HorarioTrabalho,
+        funcionario_id: UUID,
+        eventos_calendario: list[EventoCalendarioRh],
+        datas_abonadas: set,
+    ) -> dict[date, Decimal]:
+        liberacoes: dict[date, Decimal] = {}
+        for evento in eventos_calendario:
+            if evento.tipo not in {TipoEventoCalendario.FERIADO, TipoEventoCalendario.PONTO_FACULTATIVO, TipoEventoCalendario.ABONO, TipoEventoCalendario.LIBERACAO_ANTECIPADA}:
+                continue
+            if not evento.aplica_a(funcionario_id):
+                continue
+            if evento.tipo in {TipoEventoCalendario.FERIADO, TipoEventoCalendario.PONTO_FACULTATIVO, TipoEventoCalendario.ABONO}:
+                datas_abonadas.add(evento.data)
+                continue
+            turno_dia = horario.turno_para_dia(evento.data.weekday())
+            if turno_dia is not None:
+                liberacoes[evento.data] = minutos_liberacao(turno_dia, evento.hora_corte)
+        return liberacoes
 
     def _is_date_covered_by_ferias(self, target: date, items: list[Ferias]) -> bool:
         for item in items:

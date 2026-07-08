@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -346,7 +346,15 @@ class _FakeEncargoCache:
         self.invalidated.append(team_id)
 
 
-def _build_service(funcionarios, horarios, registros=None, ferias_items=None, holerites=None, regras=None):
+class _FakeEventoCalendarioRepo:
+    def __init__(self, eventos=None) -> None:
+        self.eventos = list(eventos or [])
+
+    async def list_by_periodo(self, team_id, start, end):
+        return [item for item in self.eventos if item.team_id == team_id and start <= item.data <= end]
+
+
+def _build_service(funcionarios, horarios, registros=None, ferias_items=None, holerites=None, regras=None, eventos_calendario=None):
     from app.application.services.rh_folha_service import RhFolhaService
 
     item_repo = _FakeHoleriteItemRepo()
@@ -371,6 +379,7 @@ def _build_service(funcionarios, horarios, registros=None, ferias_items=None, ho
         folha_job_repo=job_repo,
         folha_queue=job_queue,
         encargo_cache=encargo_cache,
+        evento_calendario_repo=_FakeEventoCalendarioRepo(eventos_calendario),
     )
     service.holerite_item_repo = item_repo
     service.folha_job_repo = job_repo
@@ -538,6 +547,91 @@ async def test_generate_draft_does_not_discount_absence_covered_by_approved_feri
     result = await service.gerar_rascunho_folha(admin, 4, 2026, funcionario_id=funcionario.id)
 
     assert result[0].descontos_falta.amount == Decimal("0.00")
+
+
+@pytest.mark.asyncio
+async def test_generate_draft_does_not_discount_absence_covered_by_feriado_evento():
+    from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    horario = HorarioTrabalho(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        turnos=[TurnoHorario(dia_semana=3, hora_entrada=time(8, 0), hora_saida=time(17, 0))],
+    )
+    # 2026-04-02 e' quinta (dia_semana=3), unica quinta considerada pelo turno acima nesse mes de teste isolado.
+    feriado = EventoCalendarioRh(
+        team_id=admin.team.id,
+        tipo=TipoEventoCalendario.FERIADO,
+        data=date(2026, 4, 2),
+        descricao="Feriado municipal",
+    )
+    service = _build_service([funcionario], {funcionario.id: horario}, eventos_calendario=[feriado])
+
+    result = await service.gerar_rascunho_folha(admin, 4, 2026, funcionario_id=funcionario.id)
+
+    # Sem o feriado, cada quinta sem registro vira falta cheia; com o feriado cobrindo 02/04,
+    # essa data especifica nao gera desconto (mas as outras quintas de abril continuam gerando).
+    assert result[0].descontos_falta.amount < Decimal("1760.00")
+
+
+@pytest.mark.asyncio
+async def test_generate_draft_liberacao_antecipada_evita_falta_parcial():
+    from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    funcionario.salario_base = Money(Decimal("2200.00"))
+    horario = HorarioTrabalho(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        turnos=[
+            TurnoHorario(
+                dia_semana=0,
+                hora_entrada=time(8, 0),
+                hora_saida=time(17, 0),
+                intervalos=[IntervaloHorario(hora_inicio=time(12, 0), hora_fim=time(13, 0))],
+            )
+        ],
+    )
+    # 2026-04-06 e' segunda. Libera as 15h; funcionario sai as 15h nesse dia.
+    liberacao = EventoCalendarioRh(
+        team_id=admin.team.id,
+        tipo=TipoEventoCalendario.LIBERACAO_ANTECIPADA,
+        data=date(2026, 4, 6),
+        descricao="Liberacao antecipada",
+        hora_corte=time(15, 0),
+    )
+    registros = [
+        RegistroPonto(
+            team_id=admin.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.ENTRADA,
+            timestamp=datetime(2026, 4, 6, 8, 0, tzinfo=timezone.utc),
+            latitude=0,
+            longitude=0,
+        ),
+        RegistroPonto(
+            team_id=admin.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.SAIDA,
+            timestamp=datetime(2026, 4, 6, 15, 0, tzinfo=timezone.utc),
+            latitude=0,
+            longitude=0,
+        ),
+    ]
+    service = _build_service(
+        [funcionario], {funcionario.id: horario}, registros=registros, eventos_calendario=[liberacao]
+    )
+
+    result = await service.gerar_rascunho_folha(admin, 4, 2026, funcionario_id=funcionario.id)
+
+    # As outras 3 segundas de abril ficam sem registro -> 3 faltas cheias (8h cada) = 1440 min.
+    # O dia 06/04 (liberado) nao gera falta nem extra por causa da liberacao.
+    # valor_minuto = 2200/(220*60) = 0.1666...; desconto = 0.1666...*1440 = 240.00.
+    assert result[0].descontos_falta.amount == Decimal("240.00")
+    assert result[0].horas_extras.amount == Decimal("0.00")
 
 
 @pytest.mark.asyncio
