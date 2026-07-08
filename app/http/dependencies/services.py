@@ -316,6 +316,11 @@ async def get_rh_local_ponto_service(session: Session) -> RhLocalPontoService:
 
 
 async def get_rh_ponto_service(session: Session) -> RhPontoService:
+    folha_service = await get_rh_folha_service(session)
+
+    async def _folha_recalc(current_user, mes, ano, funcionario_id):
+        return await folha_service.gerar_rascunho_folha(current_user, mes, ano, funcionario_id=funcionario_id)
+
     return RhPontoService(
         funcionario_repo=FuncionarioRepositoryImpl(session),
         local_ponto_repo=LocalPontoRepositoryImpl(session),
@@ -326,6 +331,8 @@ async def get_rh_ponto_service(session: Session) -> RhPontoService:
         uow=SQLAlchemyUOW(session),
         horario_repo=HorarioTrabalhoRepositoryImpl(session),
         ajuste_repo=AjustePontoRepositoryImpl(session),
+        holerite_repo=HoleriteRepositoryImpl(session),
+        folha_recalc=_folha_recalc,
     )
 
 

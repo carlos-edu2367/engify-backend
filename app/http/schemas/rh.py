@@ -567,6 +567,20 @@ class RhHoleriteSnapshotResponse(BaseModel):
     snapshot_calculo: dict | str | None = None
 
 
+class RhBatidaDiaRequest(BaseModel):
+    tipo: TipoPonto
+    hora: time
+
+
+class RhEditarDiaRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    funcionario_id: UUID
+    data: date
+    batidas: list[RhBatidaDiaRequest]
+    motivo: str
+
+
 class RhPontoDiaDetalheResponse(BaseModel):
     funcionario_id: UUID
     funcionario_nome: str

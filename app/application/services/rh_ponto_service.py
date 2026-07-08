@@ -5,14 +5,16 @@ import math
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
+from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.application.dtos.rh import CreateLocalPontoDTO, RegistrarPontoDTO, UpdateLocalPontoDTO
+from app.application.dtos.rh import CreateLocalPontoDTO, EditarDiaPontoDTO, RegistrarPontoDTO, UpdateLocalPontoDTO
 from app.application.providers.repo.rh_repo import (
     AjustePontoRepository,
     FuncionarioRepository,
+    HoleriteRepository,
     HorarioTrabalhoRepository,
     LocalPontoRepository,
     RegistroPontoRepository,
@@ -22,7 +24,7 @@ from app.application.providers.repo.rh_repo import (
 from app.domain.services.rh_ponto_calculo import resultado_dia
 from app.application.providers.uow import UOWProvider
 from app.application.providers.utility.rh_geofence_cache import RhGeofenceCache
-from app.domain.entities.rh import LocalPonto, RegistroPonto, RhAuditLog, StatusPonto, TipoPonto
+from app.domain.entities.rh import LocalPonto, RegistroPonto, RhAuditLog, StatusHolerite, StatusPonto, TipoPonto
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
@@ -174,6 +176,8 @@ class RhPontoService:
         uow: UOWProvider,
         horario_repo: HorarioTrabalhoRepository | None = None,
         ajuste_repo: AjustePontoRepository | None = None,
+        holerite_repo: HoleriteRepository | None = None,
+        folha_recalc: Callable[[User, int, int, UUID], Awaitable[Any]] | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.local_ponto_repo = local_ponto_repo
@@ -184,6 +188,8 @@ class RhPontoService:
         self.uow = uow
         self.horario_repo = horario_repo
         self.ajuste_repo = ajuste_repo
+        self.holerite_repo = holerite_repo
+        self.folha_recalc = folha_recalc
 
     async def registrar_ponto(
         self,
@@ -433,6 +439,75 @@ class RhPontoService:
         )
         await self.uow.commit()
         return saved
+
+    async def editar_dia_ponto(self, dto: EditarDiaPontoDTO, current_user: User) -> dict:
+        if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
+            raise DomainError("Acesso restrito ao RH")
+        funcionario = await self.funcionario_repo.get_by_id(dto.funcionario_id, current_user.team.id)
+        await self._ensure_competencia_aberta(current_user.team.id, funcionario.id, dto.data)
+
+        day_start = datetime.combine(dto.data, time.min, tzinfo=timezone.utc)
+        day_end = datetime.combine(dto.data, time.max, tzinfo=timezone.utc)
+        existentes = await self.registro_ponto_repo.list_by_funcionario_day(current_user.team.id, funcionario.id, day_start, day_end)
+        before = [self._registro_snapshot(item) for item in existentes]
+        coordinates = (existentes[0].latitude, existentes[0].longitude) if existentes else (0.0, 0.0)
+
+        for registro in existentes:
+            registro.delete()
+            await self.registro_ponto_repo.save(registro)
+
+        criados: list[RegistroPonto] = []
+        for batida in dto.batidas:
+            timestamp = datetime.combine(dto.data, batida.hora, tzinfo=timezone.utc)
+            registro = RegistroPonto(
+                team_id=current_user.team.id,
+                funcionario_id=funcionario.id,
+                tipo=batida.tipo,
+                timestamp=timestamp,
+                latitude=coordinates[0],
+                longitude=coordinates[1],
+                status=StatusPonto.AJUSTADO,
+            )
+            saved = await self.registro_ponto_repo.save(registro)
+            criados.append(saved)
+
+        await self.audit_repo.save(
+            RhAuditLog(
+                team_id=current_user.team.id,
+                actor_user_id=current_user.id,
+                actor_role=current_user.role.value,
+                entity_type="registro_ponto",
+                entity_id=funcionario.id,
+                action="rh.ponto.dia.editado",
+                before={"registros": before},
+                after={"registros": [self._registro_snapshot(item) for item in criados], "motivo": dto.motivo},
+            )
+        )
+        await self.uow.commit()
+        await self._recalcular_folha_rascunho(current_user, funcionario.id, dto.data)
+        return await self.obter_dia_ponto(current_user, funcionario.id, dto.data)
+
+    async def _ensure_competencia_aberta(self, team_id: UUID, funcionario_id: UUID, data: date) -> None:
+        if self.holerite_repo is None:
+            return
+        holerite = await self.holerite_repo.get_by_competencia(team_id, funcionario_id, data.month, data.year)
+        if holerite is not None and holerite.status == StatusHolerite.FECHADO:
+            raise DomainError("Competencia fechada nao pode ser editada")
+
+    async def _recalcular_folha_rascunho(self, current_user: User, funcionario_id: UUID, data: date) -> None:
+        if self.holerite_repo is None or self.folha_recalc is None:
+            return
+        holerite = await self.holerite_repo.get_by_competencia(current_user.team.id, funcionario_id, data.month, data.year)
+        if holerite is None or holerite.status != StatusHolerite.RASCUNHO:
+            return
+        await self.folha_recalc(current_user, data.month, data.year, funcionario_id)
+
+    def _registro_snapshot(self, registro: RegistroPonto) -> dict:
+        return {
+            "tipo": registro.tipo.value,
+            "status": registro.status.value,
+            "timestamp": registro.timestamp.isoformat(),
+        }
 
     async def _ensure_not_replayed(self, team_id: UUID, funcionario_id: UUID, tipo: TipoPonto, key: str | None) -> None:
         if not key or self.idempotency_repo is None:

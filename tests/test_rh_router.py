@@ -148,6 +148,12 @@ class _FakePontoService:
             "auditoria_resumida": [],
         }
 
+    async def editar_dia_ponto(self, dto, current_user):
+        if self.error:
+            raise self.error
+        self.editar_dia_dto = dto
+        return await self.obter_dia_ponto(current_user, dto.funcionario_id, dto.data)
+
 
 class _FakeSolicitacoesService:
     def __init__(self, ferias=None, ajuste=None, tipo=None, atestado=None, error=None) -> None:
@@ -707,6 +713,41 @@ def test_get_ponto_dia_route_returns_frontend_aligned_location_contract():
     assert payload["registros"][0]["latitude"] == -16.6869
     assert payload["registros"][0]["longitude"] == -49.2648
     assert payload["registros"][0]["gps_accuracy_meters"] == 9.5
+
+
+def test_post_ponto_dia_route_edits_day_and_returns_detail():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    local = _make_local(admin.team.id, funcionario.id)
+    registro = _make_registro(admin.team.id, funcionario.id)
+    registro.local_ponto_id = local.id
+    ponto_service = _FakePontoService(registro=registro)
+    ponto_service.funcionario = funcionario
+    ponto_service.local = local
+    client = _build_client(
+        admin,
+        _FakeRhService(funcionario=funcionario),
+        ponto_service=ponto_service,
+    )
+
+    response = client.post(
+        "/rh/ponto/dia",
+        json={
+            "funcionario_id": str(funcionario.id),
+            "data": "2026-04-28",
+            "batidas": [
+                {"tipo": "entrada", "hora": "08:00:00"},
+                {"tipo": "saida", "hora": "17:00:00"},
+            ],
+            "motivo": "Funcionario esqueceu de bater o ponto",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "validado"
+    assert len(ponto_service.editar_dia_dto.batidas) == 2
+    assert ponto_service.editar_dia_dto.motivo == "Funcionario esqueceu de bater o ponto"
 
 
 def test_post_ferias_route_returns_200_for_funcionario():

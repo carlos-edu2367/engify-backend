@@ -8,12 +8,14 @@ from app.core.config import settings
 from app.application.dtos.rh import (
     AjustePontoFiltersDTO,
     AtestadoFiltersDTO,
+    BatidaDiaDTO,
     CreateFuncionarioDTO,
     CreateAjustePontoDTO,
     CreateAtestadoDTO,
     CreateFeriasDTO,
     CreateLocalPontoDTO,
     CreateTipoAtestadoDTO,
+    EditarDiaPontoDTO,
     FeriasFiltersDTO,
     RhAuditLogFiltersDTO,
     HoleriteFiltersDTO,
@@ -77,6 +79,7 @@ from app.http.schemas.rh import (
     RhMeResumoResponse,
     RhMeVinculoResponse,
     RhMotivoRequest,
+    RhEditarDiaRequest,
     RhPontoDiaDetalheResponse,
     RhRegraEncargoCreateRequest,
     RhRegraEncargoListItem,
@@ -1036,6 +1039,27 @@ async def get_ponto_dia(funcionario_id: UUID, data: date, user: RHAdminUser, svc
         detail = await svc.obter_dia_ponto(user, funcionario_id, data)
     except DomainError as exc:
         raise _map_rh_error(exc)
+    return _to_dia_detalhe_response(detail)
+
+
+@router.post("/ponto/dia", response_model=RhPontoDiaDetalheResponse)
+async def editar_dia_ponto(body: RhEditarDiaRequest, user: RHAdminUser, svc: RhPontoServiceDep):
+    try:
+        detail = await svc.editar_dia_ponto(
+            EditarDiaPontoDTO(
+                funcionario_id=body.funcionario_id,
+                data=body.data,
+                batidas=[BatidaDiaDTO(tipo=item.tipo, hora=item.hora) for item in body.batidas],
+                motivo=body.motivo,
+            ),
+            user,
+        )
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_dia_detalhe_response(detail)
+
+
+def _to_dia_detalhe_response(detail: dict) -> RhPontoDiaDetalheResponse:
     funcionario = detail["funcionario"]
     return RhPontoDiaDetalheResponse(
         funcionario_id=funcionario.id,

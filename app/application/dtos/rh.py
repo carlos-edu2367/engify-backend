@@ -91,6 +91,18 @@ class CreateAjustePontoDTO(BaseModel):
     hora_intervalo_fim_solicitada: datetime | None = None
 
 
+class BatidaDiaDTO(BaseModel):
+    tipo: TipoPonto
+    hora: time
+
+
+class EditarDiaPontoDTO(BaseModel):
+    funcionario_id: UUID
+    data: date
+    batidas: list[BatidaDiaDTO]
+    motivo: str
+
+
 class AjustePontoFiltersDTO(BaseModel):
     funcionario_id: UUID | None = None
     status: StatusAjuste | None = None
