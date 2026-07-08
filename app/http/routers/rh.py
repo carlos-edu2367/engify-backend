@@ -12,6 +12,7 @@ from app.application.dtos.rh import (
     CreateFuncionarioDTO,
     CreateAjustePontoDTO,
     CreateAtestadoDTO,
+    CreateEventoCalendarioDTO,
     CreateFeriasDTO,
     CreateLocalPontoDTO,
     CreateTipoAtestadoDTO,
@@ -30,10 +31,11 @@ from app.application.dtos.rh import (
 from app.application.services.rh_ponto_service import RequestContext, hash_ip
 from app.application.providers.utility.storage_provider import DirectUploadRequest
 from app.domain.entities.rh import AjustePonto, Atestado, Beneficio, FaixaEncargo, Ferias, Funcionario, Holerite, HoleriteItem, HorarioTrabalho, LocalPonto, RegistroPonto, RegraEncargo, RhAuditLog, RhFolhaJob, StatusAjuste, StatusAtestado, StatusBeneficio, StatusFerias, StatusHolerite, StatusPonto, StatusRegraEncargo, TabelaProgressiva, TipoAtestado
+from app.domain.entities.rh_calendario import EventoCalendarioRh
 from app.domain.errors import DomainError
 from app.http.dependencies.auth import CurrentUser, RHAdminUser
 from app.http.dependencies.pagination import Pagination
-from app.http.dependencies.services import RhDashboardServiceDep, RhEncargoServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
+from app.http.dependencies.services import RhCalendarioServiceDep, RhDashboardServiceDep, RhEncargoServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.schemas.rh import (
     RhFuncionarioCreateRequest,
@@ -66,6 +68,8 @@ from app.http.schemas.rh import (
     RhBeneficioResponse,
     RhBeneficioUpdateRequest,
     RhDashboardSummaryResponse,
+    RhEventoCalendarioCreateRequest,
+    RhEventoCalendarioResponse,
     RhFecharFolhaRequest,
     RhFeriasCreateRequest,
     RhFeriasResponse,
@@ -1267,6 +1271,60 @@ async def approve_ajuste_ponto(ajuste_id: UUID, user: RHAdminUser, svc: RhSolici
     except DomainError as exc:
         raise _map_rh_error(exc)
     return _to_ajuste_response(ajuste)
+
+
+@router.post("/calendario-eventos", response_model=RhEventoCalendarioResponse, status_code=201)
+async def create_evento_calendario(body: RhEventoCalendarioCreateRequest, user: RHAdminUser, svc: RhCalendarioServiceDep):
+    try:
+        evento = await svc.criar_evento(
+            CreateEventoCalendarioDTO(
+                tipo=body.tipo,
+                data=body.data,
+                descricao=body.descricao,
+                hora_corte=body.hora_corte,
+                aplica_todos=body.aplica_todos,
+                funcionario_ids=body.funcionario_ids,
+            ),
+            user,
+        )
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return _to_evento_calendario_response(evento)
+
+
+@router.get("/calendario-eventos", response_model=list[RhEventoCalendarioResponse])
+async def list_calendario_eventos(
+    user: RHAdminUser,
+    svc: RhCalendarioServiceDep,
+    start: date = Query(...),
+    end: date = Query(...),
+):
+    try:
+        eventos = await svc.list_eventos(user, start, end)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return [_to_evento_calendario_response(item) for item in eventos]
+
+
+@router.delete("/calendario-eventos/{evento_id}", response_model=MessageResponse)
+async def delete_evento_calendario(evento_id: UUID, user: RHAdminUser, svc: RhCalendarioServiceDep):
+    try:
+        await svc.remover_evento(evento_id, user)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return MessageResponse(message="Evento de calendario removido com sucesso")
+
+
+def _to_evento_calendario_response(evento: EventoCalendarioRh) -> RhEventoCalendarioResponse:
+    return RhEventoCalendarioResponse(
+        id=evento.id,
+        tipo=evento.tipo.value,
+        data=evento.data,
+        descricao=evento.descricao,
+        hora_corte=evento.hora_corte,
+        aplica_todos=evento.aplica_todos,
+        funcionario_ids=evento.funcionario_ids,
+    )
 
 
 @router.post("/ajustes-ponto/{ajuste_id}/rejeitar", response_model=RhAjustePontoResponse)

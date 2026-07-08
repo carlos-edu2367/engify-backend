@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import date
 from uuid import UUID
 
 from app.domain.entities.rh import (
@@ -22,6 +23,7 @@ from app.domain.entities.rh import (
     TabelaProgressiva,
     TipoAtestado,
 )
+from app.domain.entities.rh_calendario import EventoCalendarioRh
 
 
 class FuncionarioRepository(ABC):
@@ -507,4 +509,18 @@ class RhFolhaJobRepository(ABC):
 
     @abstractmethod
     async def count_by_team(self, team_id: UUID) -> int:
+        pass
+
+
+class EventoCalendarioRepository(ABC):
+    @abstractmethod
+    async def save(self, evento: EventoCalendarioRh) -> EventoCalendarioRh:
+        pass
+
+    @abstractmethod
+    async def get_by_id(self, id: UUID, team_id: UUID) -> EventoCalendarioRh:
+        pass
+
+    @abstractmethod
+    async def list_by_periodo(self, team_id: UUID, start: date, end: date) -> list[EventoCalendarioRh]:
         pass

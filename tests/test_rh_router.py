@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -14,6 +14,7 @@ from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 from app.http.dependencies.auth import get_current_user
 from app.http.dependencies.services import (
+    get_rh_calendario_service,
     get_rh_dashboard_service,
     get_rh_encargo_service,
     get_rh_funcionario_service,
@@ -479,6 +480,7 @@ def _build_client(
     dashboard_service=None,
     encargo_service=None,
     storage_provider=None,
+    calendario_service=None,
 ):
     app = FastAPI()
     app.include_router(router)
@@ -493,7 +495,30 @@ def _build_client(
     app.dependency_overrides[get_rh_dashboard_service] = lambda: dashboard_service or _FakeDashboardService()
     app.dependency_overrides[get_rh_encargo_service] = lambda: encargo_service or _FakeEncargoService()
     app.dependency_overrides[get_storage_provider] = lambda: storage_provider or _FakeStorageProvider()
+    app.dependency_overrides[get_rh_calendario_service] = lambda: calendario_service or _FakeCalendarioService()
     return TestClient(app)
+
+
+class _FakeCalendarioService:
+    def __init__(self, evento=None, error=None) -> None:
+        self.evento = evento
+        self.error = error
+
+    async def criar_evento(self, dto, current_user):
+        if self.error:
+            raise self.error
+        self.dto = dto
+        return self.evento
+
+    async def list_eventos(self, current_user, start, end):
+        if self.error:
+            raise self.error
+        return [self.evento] if self.evento else []
+
+    async def remover_evento(self, evento_id, current_user):
+        if self.error:
+            raise self.error
+        self.removed_id = evento_id
 
 
 def test_create_funcionario_route_returns_201_and_masked_cpf():
@@ -1183,3 +1208,61 @@ def test_create_regra_encargo_route_requires_admin_and_sanitizes_internal_errors
     assert response.status_code == 400
     assert "constraint" not in response.json()["detail"].lower()
     assert "sql" not in response.json()["detail"].lower()
+
+
+def test_post_calendario_evento_route_creates_and_returns_201():
+    from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
+
+    admin = _make_user(Roles.ADMIN)
+    evento = EventoCalendarioRh(
+        team_id=admin.team.id,
+        tipo=TipoEventoCalendario.FERIADO,
+        data=date(2026, 12, 25),
+        descricao="Natal",
+    )
+    calendario_service = _FakeCalendarioService(evento=evento)
+    client = _build_client(admin, _FakeRhService(), calendario_service=calendario_service)
+
+    response = client.post(
+        "/rh/calendario-eventos",
+        json={"tipo": "feriado", "data": "2026-12-25", "descricao": "Natal"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["tipo"] == "feriado"
+    assert payload["aplica_todos"] is True
+
+
+def test_get_calendario_eventos_route_lists_by_period():
+    from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
+
+    admin = _make_user(Roles.ADMIN)
+    evento = EventoCalendarioRh(
+        team_id=admin.team.id,
+        tipo=TipoEventoCalendario.FERIADO,
+        data=date(2026, 12, 25),
+        descricao="Natal",
+    )
+    calendario_service = _FakeCalendarioService(evento=evento)
+    client = _build_client(admin, _FakeRhService(), calendario_service=calendario_service)
+
+    response = client.get(
+        "/rh/calendario-eventos",
+        params={"start": "2026-12-01", "end": "2026-12-31"},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
+def test_delete_calendario_evento_route_removes():
+    admin = _make_user(Roles.ADMIN)
+    calendario_service = _FakeCalendarioService()
+    client = _build_client(admin, _FakeRhService(), calendario_service=calendario_service)
+    evento_id = uuid4()
+
+    response = client.delete(f"/rh/calendario-eventos/{evento_id}")
+
+    assert response.status_code == 200
+    assert calendario_service.removed_id == evento_id

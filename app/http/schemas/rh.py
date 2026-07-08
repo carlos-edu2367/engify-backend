@@ -661,3 +661,24 @@ class RhAuditLogResponse(BaseModel):
     ip_hash: str | None = None
     user_agent: str | None = None
     created_at: datetime
+
+
+class RhEventoCalendarioCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: str
+    data: date
+    descricao: str
+    hora_corte: time | None = None
+    aplica_todos: bool = True
+    funcionario_ids: list[UUID] = Field(default_factory=list)
+
+
+class RhEventoCalendarioResponse(BaseModel):
+    id: UUID
+    tipo: str
+    data: date
+    descricao: str
+    hora_corte: time | None = None
+    aplica_todos: bool
+    funcionario_ids: list[UUID]

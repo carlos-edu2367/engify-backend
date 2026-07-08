@@ -12,6 +12,7 @@ from app.application.providers.repo.rh_repo import (
     AtestadoRepository,
     BeneficioRepository,
     BeneficioFuncionarioRepository,
+    EventoCalendarioRepository,
     FaixaEncargoRepository,
     FeriasRepository,
     FuncionarioRepository,
@@ -56,12 +57,14 @@ from app.domain.entities.rh import (
     TabelaProgressiva,
     TipoAtestado,
 )
+from app.domain.entities.rh_calendario import EventoCalendarioRh
 from app.domain.errors import DomainError
 from app.infra.db.models.rh_model import (
     AjustePontoModel,
     AtestadoModel,
     BeneficioModel,
     BeneficioFuncionarioModel,
+    EventoCalendarioRhModel,
     FaixaEncargoModel,
     FeriasModel,
     FuncionarioModel,
@@ -1493,3 +1496,25 @@ class RhSalarioHistoricoRepositoryImpl(RhSalarioHistoricoRepository):
         self._session.add(model)
         await self._session.flush()
         return model.to_domain()
+
+
+class EventoCalendarioRepositoryImpl(_SoftDeleteRepository, EventoCalendarioRepository):
+    async def save(self, evento: EventoCalendarioRh) -> EventoCalendarioRh:
+        return await self._save(evento, EventoCalendarioRhModel, "Evento de calendario nao encontrado para atualizacao")
+
+    async def get_by_id(self, id: UUID, team_id: UUID) -> EventoCalendarioRh:
+        return (await self._get_by_id(EventoCalendarioRhModel, id, team_id, "Evento de calendario nao encontrado")).to_domain()
+
+    async def list_by_periodo(self, team_id: UUID, start, end) -> list[EventoCalendarioRh]:
+        stmt = (
+            select(EventoCalendarioRhModel)
+            .where(
+                EventoCalendarioRhModel.team_id == team_id,
+                EventoCalendarioRhModel.data >= start,
+                EventoCalendarioRhModel.data <= end,
+                EventoCalendarioRhModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(EventoCalendarioRhModel.data.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]

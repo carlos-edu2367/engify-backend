@@ -1320,3 +1320,12 @@ class EventoCalendarioRhModel(Base, TimestampMixin):
             funcionario_ids=evento.funcionario_ids,
             is_deleted=evento.is_deleted,
         )
+
+    def update_from_domain(self, evento: EventoCalendarioRh) -> None:
+        self.tipo = evento.tipo.value
+        self.data = evento.data
+        self.hora_corte = evento.hora_corte
+        self.descricao = evento.descricao
+        self.aplica_todos = evento.aplica_todos
+        self.funcionario_ids = evento.funcionario_ids
+        self.is_deleted = evento.is_deleted
