@@ -1,9 +1,9 @@
 import uuid
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, Time, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.entities.money import Money
@@ -47,6 +47,7 @@ from app.domain.entities.rh import (
     TurnoHorario,
 )
 from app.domain.entities.identities import CPF
+from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
 from app.infra.db.models.base import Base, TimestampMixin
 
 
@@ -1274,3 +1275,48 @@ class RhSalarioHistoricoModel(Base):
         historico.reason = self.reason
         historico.created_at = self.created_at
         return historico
+
+
+class EventoCalendarioRhModel(Base, TimestampMixin):
+    __tablename__ = "rh_eventos_calendario"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(30), nullable=False)
+    data: Mapped[date] = mapped_column(Date, nullable=False)
+    hora_corte: Mapped[time | None] = mapped_column(Time, nullable=True)
+    descricao: Mapped[str] = mapped_column(String(255), nullable=False)
+    aplica_todos: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    funcionario_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(PG_UUID(as_uuid=True)), nullable=False, default=list)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index("idx_rh_eventos_calendario_team_data", "team_id", "data", "is_deleted"),
+    )
+
+    def to_domain(self) -> EventoCalendarioRh:
+        evento = object.__new__(EventoCalendarioRh)
+        evento.id = self.id
+        evento.team_id = self.team_id
+        evento.tipo = TipoEventoCalendario(self.tipo)
+        evento.data = self.data
+        evento.hora_corte = self.hora_corte
+        evento.descricao = self.descricao
+        evento.aplica_todos = self.aplica_todos
+        evento.funcionario_ids = list(self.funcionario_ids or [])
+        evento.is_deleted = self.is_deleted
+        return evento
+
+    @classmethod
+    def from_domain(cls, evento: EventoCalendarioRh) -> "EventoCalendarioRhModel":
+        return cls(
+            id=evento.id or uuid.uuid4(),
+            team_id=evento.team_id,
+            tipo=evento.tipo.value,
+            data=evento.data,
+            hora_corte=evento.hora_corte,
+            descricao=evento.descricao,
+            aplica_todos=evento.aplica_todos,
+            funcionario_ids=evento.funcionario_ids,
+            is_deleted=evento.is_deleted,
+        )
