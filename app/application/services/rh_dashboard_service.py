@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
@@ -28,7 +27,7 @@ from app.application.providers.repo.rh_repo import (
 )
 from app.application.providers.uow import UOWProvider
 from app.application.services.rh_audit_service import RhAuditService
-from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TipoPonto, TurnoHorario
+from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TurnoHorario
 from app.domain.services.rh_ponto_calculo import resumir_periodo
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError

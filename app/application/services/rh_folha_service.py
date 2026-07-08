@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import json
@@ -50,8 +50,6 @@ from app.domain.entities.rh import (
     StatusHolerite,
     StatusRegraEncargo,
     StatusPonto,
-    TipoPonto,
-    TurnoHorario,
 )
 from app.domain.services.rh_beneficio_calculo import (
     contar_faltas,
