@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -13,6 +13,7 @@ from app.domain.entities.rh import (
 from app.domain.services.rh_ponto_calculo import (
     JornadaConfig,
     resultado_dia,
+    resumir_periodo,
     valor_minuto,
     valor_hora_extra,
 )
@@ -131,3 +132,42 @@ def test_ignora_status_negado_ou_inconsistente():
     # negado ignorado -> par valido = 08:00/17:00
     assert r.trabalhado_min == Decimal("480")
     assert r.incompleto is False
+
+
+def test_resumir_periodo_soma_extra_falta_incompleto():
+    turno = _turno_8h()  # apenas segunda (dia_semana=0)
+
+    def turno_para_dia(weekday: int):
+        return turno if weekday == 0 else None
+
+    # 2026-07-06 e' segunda. Cria um dia com 2h extra.
+    registros = [_reg(time(8, 0), TipoPonto.ENTRADA), _reg(time(19, 0), TipoPonto.SAIDA)]
+    resumo = resumir_periodo(
+        registros=registros,
+        turno_para_dia=turno_para_dia,
+        inicio=date(2026, 7, 6),
+        fim=date(2026, 7, 6),
+        datas_abonadas=set(),
+    )
+    assert resumo.extra_min == Decimal("120")
+    assert resumo.falta_min == Decimal("0")
+    assert resumo.faltas == 0
+    assert resumo.dias_incompletos == 0
+
+
+def test_resumir_periodo_pula_datas_abonadas():
+    turno = _turno_8h()
+
+    def turno_para_dia(weekday: int):
+        return turno if weekday == 0 else None
+
+    resumo = resumir_periodo(
+        registros=[],  # sem batidas
+        turno_para_dia=turno_para_dia,
+        inicio=date(2026, 7, 6),
+        fim=date(2026, 7, 6),
+        datas_abonadas={date(2026, 7, 6)},
+    )
+    # dia abonado nao vira falta
+    assert resumo.faltas == 0
+    assert resumo.falta_min == Decimal("0")

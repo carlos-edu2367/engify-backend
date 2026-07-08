@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import date, timedelta, timezone
 from decimal import Decimal
+from typing import Callable
 
 from app.domain.entities.money import Money
 from app.domain.entities.rh import RegistroPonto, StatusPonto, TurnoHorario
@@ -71,3 +73,59 @@ def resultado_dia(registros: list[RegistroPonto], turno: TurnoHorario) -> Result
     extra = max(Decimal("0"), trabalhado - esperado)
     falta = max(Decimal("0"), esperado - trabalhado)
     return ResultadoDia(esperado, trabalhado, extra, falta, incompleto=False)
+
+
+@dataclass(frozen=True)
+class ResumoPeriodo:
+    esperado_min: Decimal
+    extra_min: Decimal
+    falta_min: Decimal
+    faltas: int
+    dias_incompletos: int
+    pontos_inconsistentes: int
+
+
+def resumir_periodo(
+    registros: list[RegistroPonto],
+    turno_para_dia: Callable[[int], TurnoHorario | None],
+    inicio: date,
+    fim: date,
+    datas_abonadas: set[date],
+) -> ResumoPeriodo:
+    por_dia: dict[date, list[RegistroPonto]] = defaultdict(list)
+    pontos_inconsistentes = 0
+    for r in registros:
+        dia = r.timestamp.astimezone(timezone.utc).date()
+        por_dia[dia].append(r)
+        if r.status == StatusPonto.INCONSISTENTE:
+            pontos_inconsistentes += 1
+
+    esperado_total = Decimal("0")
+    extra_total = Decimal("0")
+    falta_total = Decimal("0")
+    faltas = 0
+    dias_incompletos = 0
+
+    atual = inicio
+    while atual <= fim:
+        turno = turno_para_dia(atual.weekday())
+        if turno is not None:
+            esperado_total += _esperado_min(turno)
+            if atual not in datas_abonadas:
+                r = resultado_dia(por_dia.get(atual, []), turno)
+                extra_total += r.extra_min
+                falta_total += r.falta_min
+                if r.incompleto:
+                    dias_incompletos += 1
+                elif r.trabalhado_min == Decimal("0"):
+                    faltas += 1
+        atual += timedelta(days=1)
+
+    return ResumoPeriodo(
+        esperado_min=esperado_total,
+        extra_min=extra_total,
+        falta_min=falta_total,
+        faltas=faltas,
+        dias_incompletos=dias_incompletos,
+        pontos_inconsistentes=pontos_inconsistentes,
+    )
