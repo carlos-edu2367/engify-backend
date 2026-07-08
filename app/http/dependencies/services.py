@@ -329,6 +329,11 @@ async def get_rh_ponto_service(session: Session) -> RhPontoService:
 
 
 async def get_rh_solicitacoes_service(session: Session) -> RhSolicitacoesService:
+    folha_service = await get_rh_folha_service(session)
+
+    async def _folha_recalc(current_user, mes, ano, funcionario_id):
+        return await folha_service.gerar_rascunho_folha(current_user, mes, ano, funcionario_id=funcionario_id)
+
     return RhSolicitacoesService(
         funcionario_repo=FuncionarioRepositoryImpl(session),
         ferias_repo=FeriasRepositoryImpl(session),
@@ -338,6 +343,8 @@ async def get_rh_solicitacoes_service(session: Session) -> RhSolicitacoesService
         atestado_repo=AtestadoRepositoryImpl(session),
         audit_repo=RhAuditLogRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
+        holerite_repo=HoleriteRepositoryImpl(session),
+        folha_recalc=_folha_recalc,
     )
 
 

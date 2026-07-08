@@ -22,6 +22,7 @@ from app.domain.entities.rh import (
     StatusAjuste,
     StatusAtestado,
     StatusFerias,
+    StatusHolerite,
     StatusPonto,
     TipoAtestado,
     TipoPonto,
@@ -236,6 +237,8 @@ def _make_service(funcionario, **overrides):
         atestado_repo=overrides.get("atestado_repo", _FakeAtestadoRepo()),
         audit_repo=overrides.get("audit_repo", _FakeAuditRepo()),
         uow=overrides.get("uow", _FakeUow()),
+        holerite_repo=overrides.get("holerite_repo"),
+        folha_recalc=overrides.get("folha_recalc"),
     )
 
 
@@ -491,3 +494,76 @@ async def test_obter_atestado_para_download_rejects_missing_file():
 
     with pytest.raises(DomainError):
         await service.obter_atestado_para_download(atestado.id, admin)
+
+
+class _StubHolerite:
+    def __init__(self, status):
+        self.status = status
+
+
+class _FakeHoleriteCompetenciaRepo:
+    def __init__(self, holerite=None):
+        self._holerite = holerite
+        self.queries = []
+
+    async def get_by_competencia(self, team_id, funcionario_id, mes, ano):
+        self.queries.append((team_id, funcionario_id, mes, ano))
+        return self._holerite
+
+
+@pytest.mark.asyncio
+async def test_approve_ajuste_recalcula_folha_quando_ha_rascunho():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    ajuste = AjustePonto(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        data_referencia=datetime(2026, 4, 28, tzinfo=timezone.utc),
+        justificativa="Esqueci a saida",
+        hora_saida_solicitada=datetime(2026, 4, 28, 17, 0, tzinfo=timezone.utc),
+    )
+    calls = []
+
+    async def _recalc(current_user, mes, ano, funcionario_id):
+        calls.append((mes, ano, funcionario_id))
+
+    service = _make_service(
+        funcionario,
+        ajuste_repo=_FakeAjusteRepo([ajuste]),
+        registro_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteCompetenciaRepo(_StubHolerite(StatusHolerite.RASCUNHO)),
+        folha_recalc=_recalc,
+    )
+
+    await service.approve_ajuste(ajuste.id, admin)
+
+    assert calls == [(4, 2026, funcionario.id)]
+
+
+@pytest.mark.asyncio
+async def test_approve_ajuste_nao_recalcula_quando_nao_ha_rascunho():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    ajuste = AjustePonto(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        data_referencia=datetime(2026, 4, 28, tzinfo=timezone.utc),
+        justificativa="Esqueci a saida",
+        hora_saida_solicitada=datetime(2026, 4, 28, 17, 0, tzinfo=timezone.utc),
+    )
+    calls = []
+
+    async def _recalc(current_user, mes, ano, funcionario_id):
+        calls.append((mes, ano, funcionario_id))
+
+    service = _make_service(
+        funcionario,
+        ajuste_repo=_FakeAjusteRepo([ajuste]),
+        registro_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteCompetenciaRepo(None),  # sem holerite na competencia
+        folha_recalc=_recalc,
+    )
+
+    await service.approve_ajuste(ajuste.id, admin)
+
+    assert calls == []

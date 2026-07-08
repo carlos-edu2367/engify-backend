@@ -1,5 +1,6 @@
 from datetime import datetime, time, timedelta, timezone
 from pathlib import PurePosixPath
+from typing import Any, Awaitable, Callable
 from uuid import UUID
 from uuid import uuid4
 
@@ -18,6 +19,7 @@ from app.application.providers.repo.rh_repo import (
     AtestadoRepository,
     FeriasRepository,
     FuncionarioRepository,
+    HoleriteRepository,
     RegistroPontoRepository,
     RhAuditLogRepository,
     TipoAtestadoRepository,
@@ -30,6 +32,7 @@ from app.domain.entities.rh import (
     RegistroPonto,
     RhAuditLog,
     StatusFerias,
+    StatusHolerite,
     StatusPonto,
     TipoAtestado,
     TipoPonto,
@@ -49,6 +52,8 @@ class RhSolicitacoesService:
         atestado_repo: AtestadoRepository,
         audit_repo: RhAuditLogRepository,
         uow: UOWProvider,
+        holerite_repo: HoleriteRepository | None = None,
+        folha_recalc: Callable[[User, int, int, UUID], Awaitable[Any]] | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.ferias_repo = ferias_repo
@@ -57,6 +62,8 @@ class RhSolicitacoesService:
         self.tipo_atestado_repo = tipo_atestado_repo
         self.atestado_repo = atestado_repo
         self.audit_repo = audit_repo
+        self.holerite_repo = holerite_repo
+        self.folha_recalc = folha_recalc
         self.uow = uow
 
     async def request_ferias(self, dto: CreateFeriasDTO, current_user: User) -> Ferias:
@@ -220,7 +227,23 @@ class RhSolicitacoesService:
         saved = await self.ajuste_repo.save(ajuste)
         await self._record_audit(current_user, "ajuste_ponto", saved.id, "rh.ajuste_ponto.approved", before=before, after=self._ajuste_snapshot(saved))
         await self.uow.commit()
+        await self._recalcular_folha_rascunho(current_user, saved)
         return saved
+
+    async def _recalcular_folha_rascunho(self, current_user: User, ajuste: AjustePonto) -> None:
+        """Se a competencia do ajuste tem holerite em rascunho, recalcula-o.
+
+        Nao cria holerite novo: so recalcula quando ja existe um rascunho, para
+        que a aprovacao do ajuste reflita na folha aberta sem efeitos colaterais.
+        """
+        if self.holerite_repo is None or self.folha_recalc is None:
+            return
+        referencia = self._as_utc(ajuste.data_referencia)
+        mes, ano = referencia.month, referencia.year
+        existing = await self.holerite_repo.get_by_competencia(current_user.team.id, ajuste.funcionario_id, mes, ano)
+        if existing is None or existing.status != StatusHolerite.RASCUNHO:
+            return
+        await self.folha_recalc(current_user, mes, ano, ajuste.funcionario_id)
 
     async def reject_ajuste(self, ajuste_id: UUID, motivo: str, current_user: User) -> AjustePonto:
         self._ensure_rh_admin(current_user)
