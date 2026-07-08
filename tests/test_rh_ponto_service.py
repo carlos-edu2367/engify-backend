@@ -9,6 +9,7 @@ from app.domain.entities.money import Money
 from app.domain.entities.rh import (
     Funcionario,
     HorarioTrabalho,
+    IntervaloHorario,
     LocalPonto,
     RegistroPonto,
     RhAuditLog,
@@ -845,3 +846,46 @@ async def test_ajustar_timestamp_registro_denies_role_funcionario():
             registro.id, datetime(2026, 6, 23, 9, 0, tzinfo=timezone.utc), current_user
         )
     assert registro_repo.items[0].status == StatusPonto.VALIDADO
+
+
+def _impacto_service():
+    from app.application.services.rh_ponto_service import RhPontoService
+
+    return object.__new__(RhPontoService)
+
+
+def _turno_impacto():
+    return TurnoHorario(
+        dia_semana=0,
+        hora_entrada=time(8, 0),
+        hora_saida=time(17, 0),
+        intervalos=[IntervaloHorario(time(12, 0), time(13, 0))],
+    )
+
+
+def _reg_impacto(hora, tipo):
+    return RegistroPonto(
+        team_id=uuid4(),
+        funcionario_id=uuid4(),
+        tipo=tipo,
+        timestamp=datetime.combine(datetime(2026, 7, 6).date(), hora, tzinfo=timezone.utc),
+        latitude=0.0,
+        longitude=0.0,
+        status=StatusPonto.VALIDADO,
+    )
+
+
+def test_impacto_estimado_calcula_horas_extras_reais():
+    service = _impacto_service()
+    registros = [_reg_impacto(time(8, 0), TipoPonto.ENTRADA), _reg_impacto(time(19, 0), TipoPonto.SAIDA)]
+    impacto = service._impacto_estimado(registros, _turno_impacto())
+    assert impacto["horas_extras"] == "2.00"
+    assert impacto["horas_faltantes"] == "0.00"
+    assert impacto["faltas"] == "0"
+    assert impacto["incompleto"] is False
+
+
+def test_impacto_estimado_sem_turno_retorna_zeros():
+    service = _impacto_service()
+    impacto = service._impacto_estimado([], None)
+    assert impacto == {"horas_extras": "0.00", "horas_faltantes": "0.00", "faltas": "0", "incompleto": False}

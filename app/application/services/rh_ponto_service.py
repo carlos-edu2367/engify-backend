@@ -4,6 +4,7 @@ import hashlib
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -11,11 +12,13 @@ from pydantic import BaseModel
 from app.application.dtos.rh import CreateLocalPontoDTO, RegistrarPontoDTO, UpdateLocalPontoDTO
 from app.application.providers.repo.rh_repo import (
     FuncionarioRepository,
+    HorarioTrabalhoRepository,
     LocalPontoRepository,
     RegistroPontoRepository,
     RhAuditLogRepository,
     RhIdempotencyKeyRepository,
 )
+from app.domain.services.rh_ponto_calculo import resultado_dia
 from app.application.providers.uow import UOWProvider
 from app.application.providers.utility.rh_geofence_cache import RhGeofenceCache
 from app.domain.entities.rh import LocalPonto, RegistroPonto, RhAuditLog, StatusPonto, TipoPonto
@@ -168,6 +171,7 @@ class RhPontoService:
         geofence_cache: RhGeofenceCache,
         idempotency_repo: RhIdempotencyKeyRepository | None,
         uow: UOWProvider,
+        horario_repo: HorarioTrabalhoRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.local_ponto_repo = local_ponto_repo
@@ -176,6 +180,7 @@ class RhPontoService:
         self.geofence_cache = geofence_cache
         self.idempotency_repo = idempotency_repo
         self.uow = uow
+        self.horario_repo = horario_repo
 
     async def registrar_ponto(
         self,
@@ -319,6 +324,7 @@ class RhPontoService:
         locais = await self.local_ponto_repo.list_by_funcionario(current_user.team.id, funcionario.id)
         self._enrich_registros_with_locais(registros, locais)
         status_dia = self._status_dia(registros)
+        turno = await self._turno_do_dia(current_user.team.id, funcionario.id, data)
         return {
             "funcionario": funcionario,
             "registros": registros,
@@ -327,9 +333,15 @@ class RhPontoService:
             "local_autorizado_nome": self._first_matched_local_nome(registros, locais),
             "locais_autorizados": locais,
             "ajustes_relacionados": [],
-            "impacto_estimado": self._impacto_estimado(registros),
+            "impacto_estimado": self._impacto_estimado(registros, turno),
             "auditoria_resumida": [],
         }
+
+    async def _turno_do_dia(self, team_id: UUID, funcionario_id: UUID, data: date):
+        if self.horario_repo is None:
+            return None
+        horario = await self.horario_repo.get_by_funcionario_id(team_id, funcionario_id)
+        return horario.turno_para_dia(data.weekday()) if horario is not None else None
 
     async def obter_registro_ponto(self, current_user: User, registro_id: UUID) -> dict:
         if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
@@ -469,10 +481,15 @@ class RhPontoService:
             return "incompleto"
         return "validado"
 
-    def _impacto_estimado(self, registros: list[RegistroPonto]) -> dict:
+    def _impacto_estimado(self, registros: list[RegistroPonto], turno=None) -> dict:
+        if turno is None:
+            return {"horas_extras": "0.00", "horas_faltantes": "0.00", "faltas": "0", "incompleto": False}
+        r = resultado_dia(registros, turno)
         return {
-            "horas_extras_estimadas": "0.00",
-            "faltas_estimadas": "0.00" if registros else "1.00",
+            "horas_extras": str((r.extra_min / Decimal("60")).quantize(Decimal("0.01"))),
+            "horas_faltantes": str((r.falta_min / Decimal("60")).quantize(Decimal("0.01"))),
+            "faltas": "1" if (not r.incompleto and r.trabalhado_min == Decimal("0")) else "0",
+            "incompleto": r.incompleto,
         }
 
     async def _record_audit(self, current_user: User, registro: RegistroPonto, request_context: RequestContext) -> None:

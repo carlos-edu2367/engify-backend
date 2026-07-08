@@ -324,6 +324,7 @@ async def get_rh_ponto_service(session: Session) -> RhPontoService:
         geofence_cache=_rh_geofence_cache,
         idempotency_repo=RhIdempotencyKeyRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
+        horario_repo=HorarioTrabalhoRepositoryImpl(session),
     )
 
 
