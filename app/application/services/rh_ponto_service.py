@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.application.dtos.rh import CreateLocalPontoDTO, RegistrarPontoDTO, UpdateLocalPontoDTO
 from app.application.providers.repo.rh_repo import (
+    AjustePontoRepository,
     FuncionarioRepository,
     HorarioTrabalhoRepository,
     LocalPontoRepository,
@@ -172,6 +173,7 @@ class RhPontoService:
         idempotency_repo: RhIdempotencyKeyRepository | None,
         uow: UOWProvider,
         horario_repo: HorarioTrabalhoRepository | None = None,
+        ajuste_repo: AjustePontoRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.local_ponto_repo = local_ponto_repo
@@ -181,6 +183,7 @@ class RhPontoService:
         self.idempotency_repo = idempotency_repo
         self.uow = uow
         self.horario_repo = horario_repo
+        self.ajuste_repo = ajuste_repo
 
     async def registrar_ponto(
         self,
@@ -325,6 +328,8 @@ class RhPontoService:
         self._enrich_registros_with_locais(registros, locais)
         status_dia = self._status_dia(registros)
         turno = await self._turno_do_dia(current_user.team.id, funcionario.id, data)
+        ajustes_relacionados = await self._ajustes_relacionados_do_dia(current_user.team.id, funcionario.id, day_start, day_end)
+        auditoria_resumida = await self._auditoria_resumida_do_dia(current_user.team.id, registros, ajustes_relacionados)
         return {
             "funcionario": funcionario,
             "registros": registros,
@@ -332,9 +337,9 @@ class RhPontoService:
             "status_dia": status_dia,
             "local_autorizado_nome": self._first_matched_local_nome(registros, locais),
             "locais_autorizados": locais,
-            "ajustes_relacionados": [],
+            "ajustes_relacionados": ajustes_relacionados,
             "impacto_estimado": self._impacto_estimado(registros, turno),
-            "auditoria_resumida": [],
+            "auditoria_resumida": auditoria_resumida,
         }
 
     async def _turno_do_dia(self, team_id: UUID, funcionario_id: UUID, data: date):
@@ -342,6 +347,21 @@ class RhPontoService:
             return None
         horario = await self.horario_repo.get_by_funcionario_id(team_id, funcionario_id)
         return horario.turno_para_dia(data.weekday()) if horario is not None else None
+
+    async def _ajustes_relacionados_do_dia(self, team_id: UUID, funcionario_id: UUID, day_start: datetime, day_end: datetime):
+        if self.ajuste_repo is None:
+            return []
+        return await self.ajuste_repo.list_by_filters(
+            team_id, page=1, limit=50, funcionario_id=funcionario_id, start=day_start, end=day_end
+        )
+
+    async def _auditoria_resumida_do_dia(self, team_id: UUID, registros: list[RegistroPonto], ajustes_relacionados: list) -> list[RhAuditLog]:
+        entity_ids = [registro.id for registro in registros] + [ajuste.id for ajuste in ajustes_relacionados]
+        eventos: list[RhAuditLog] = []
+        for entity_id in entity_ids:
+            eventos.extend(await self.audit_repo.list_by_filters(team_id, page=1, limit=20, entity_id=entity_id))
+        eventos.sort(key=lambda item: item.created_at, reverse=True)
+        return eventos
 
     async def obter_registro_ponto(self, current_user: User, registro_id: UUID) -> dict:
         if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:

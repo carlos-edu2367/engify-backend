@@ -230,6 +230,15 @@ class _FakeAuditRepo:
         self.events.append(audit_log)
         return audit_log
 
+    async def list_by_filters(self, team_id, page, limit, **filters):
+        entity_id = filters.get("entity_id")
+        result = [
+            event
+            for event in self.events
+            if event.team_id == team_id and (entity_id is None or event.entity_id == entity_id)
+        ]
+        return result[(page - 1) * limit : page * limit]
+
 
 class _FakeIdempotencyRepo:
     def __init__(self) -> None:
@@ -889,3 +898,75 @@ def test_impacto_estimado_sem_turno_retorna_zeros():
     service = _impacto_service()
     impacto = service._impacto_estimado([], None)
     assert impacto == {"horas_extras": "0.00", "horas_faltantes": "0.00", "faltas": "0", "incompleto": False}
+
+
+class _FakeAjusteRepoDia:
+    def __init__(self, items=None) -> None:
+        self.items = list(items or [])
+
+    async def list_by_filters(self, team_id, page, limit, **filters):
+        funcionario_id = filters.get("funcionario_id")
+        start = filters.get("start")
+        end = filters.get("end")
+        result = [
+            item
+            for item in self.items
+            if item.team_id == team_id
+            and (funcionario_id is None or item.funcionario_id == funcionario_id)
+            and (start is None or item.data_referencia >= start)
+            and (end is None or item.data_referencia <= end)
+        ]
+        return result[(page - 1) * limit : page * limit]
+
+
+@pytest.mark.asyncio
+async def test_obter_dia_ponto_retorna_ajustes_relacionados_e_auditoria():
+    from app.domain.entities.rh import AjustePonto
+    from app.application.services.rh_ponto_service import RhPontoService
+
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    registro = RegistroPonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        tipo=TipoPonto.ENTRADA,
+        timestamp=datetime(2026, 4, 28, 8, 0, tzinfo=timezone.utc),
+        latitude=0.0,
+        longitude=0.0,
+    )
+    ajuste = AjustePonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        data_referencia=datetime(2026, 4, 28, tzinfo=timezone.utc),
+        justificativa="Esqueci a saida",
+        hora_saida_solicitada=datetime(2026, 4, 28, 17, 0, tzinfo=timezone.utc),
+    )
+    audit_repo = _FakeAuditRepo()
+    audit_repo.events.append(
+        RhAuditLog(
+            team_id=current_user.team.id,
+            actor_user_id=current_user.id,
+            actor_role="admin",
+            entity_type="registro_ponto",
+            entity_id=registro.id,
+            action="rh.ponto.created",
+        )
+    )
+
+    service = RhPontoService(
+        funcionario_repo=_FakeFuncionarioRepo([funcionario]),
+        local_ponto_repo=_FakeLocalPontoRepo([]),
+        registro_ponto_repo=_FakeRegistroPontoRepo([registro]),
+        audit_repo=audit_repo,
+        geofence_cache=_FakeGeofenceCache(),
+        idempotency_repo=None,
+        uow=_FakeUow(),
+        ajuste_repo=_FakeAjusteRepoDia([ajuste]),
+    )
+
+    detail = await service.obter_dia_ponto(current_user, funcionario.id, datetime(2026, 4, 28).date())
+
+    assert len(detail["ajustes_relacionados"]) == 1
+    assert detail["ajustes_relacionados"][0].id == ajuste.id
+    assert len(detail["auditoria_resumida"]) == 1
+    assert detail["auditoria_resumida"][0].entity_id == registro.id

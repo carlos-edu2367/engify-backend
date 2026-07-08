@@ -325,6 +325,7 @@ async def get_rh_ponto_service(session: Session) -> RhPontoService:
         idempotency_repo=RhIdempotencyKeyRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
         horario_repo=HorarioTrabalhoRepositoryImpl(session),
+        ajuste_repo=AjustePontoRepositoryImpl(session),
     )
 
 

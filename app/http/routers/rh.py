@@ -27,7 +27,7 @@ from app.application.dtos.rh import (
 )
 from app.application.services.rh_ponto_service import RequestContext, hash_ip
 from app.application.providers.utility.storage_provider import DirectUploadRequest
-from app.domain.entities.rh import AjustePonto, Atestado, Beneficio, FaixaEncargo, Ferias, Funcionario, Holerite, HoleriteItem, HorarioTrabalho, LocalPonto, RegistroPonto, RegraEncargo, RhFolhaJob, StatusAjuste, StatusAtestado, StatusBeneficio, StatusFerias, StatusHolerite, StatusPonto, StatusRegraEncargo, TabelaProgressiva, TipoAtestado
+from app.domain.entities.rh import AjustePonto, Atestado, Beneficio, FaixaEncargo, Ferias, Funcionario, Holerite, HoleriteItem, HorarioTrabalho, LocalPonto, RegistroPonto, RegraEncargo, RhAuditLog, RhFolhaJob, StatusAjuste, StatusAtestado, StatusBeneficio, StatusFerias, StatusHolerite, StatusPonto, StatusRegraEncargo, TabelaProgressiva, TipoAtestado
 from app.domain.errors import DomainError
 from app.http.dependencies.auth import CurrentUser, RHAdminUser
 from app.http.dependencies.pagination import Pagination
@@ -1046,10 +1046,20 @@ async def get_ponto_dia(funcionario_id: UUID, data: date, user: RHAdminUser, svc
         local_autorizado_nome=detail.get("local_autorizado_nome"),
         registros=[_to_registro_item(item) for item in detail["registros"]],
         locais_autorizados=[_to_local_response(item) for item in detail["locais_autorizados"]],
-        ajustes_relacionados=detail["ajustes_relacionados"],
+        ajustes_relacionados=[_to_ajuste_response(item) for item in detail["ajustes_relacionados"]],
         impacto_estimado=detail["impacto_estimado"],
-        auditoria_resumida=detail["auditoria_resumida"],
+        auditoria_resumida=[_to_auditoria_resumida_item(item) for item in detail["auditoria_resumida"]],
     )
+
+
+def _to_auditoria_resumida_item(evento: RhAuditLog) -> dict:
+    return {
+        "entity_type": evento.entity_type,
+        "entity_id": str(evento.entity_id) if evento.entity_id else None,
+        "action": evento.action,
+        "actor_role": evento.actor_role,
+        "created_at": evento.created_at.isoformat(),
+    }
 
 
 @router.get("/ponto/registros/{registro_id}")

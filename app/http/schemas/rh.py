@@ -576,7 +576,7 @@ class RhPontoDiaDetalheResponse(BaseModel):
     local_autorizado_nome: str | None = None
     registros: list[RhRegistroPontoListItem] = Field(default_factory=list)
     locais_autorizados: list[RhLocalPontoResponse] = Field(default_factory=list)
-    ajustes_relacionados: list[dict] = Field(default_factory=list)
+    ajustes_relacionados: list[RhAjustePontoResponse] = Field(default_factory=list)
     impacto_estimado: dict
     auditoria_resumida: list[dict] = Field(default_factory=list)
 
