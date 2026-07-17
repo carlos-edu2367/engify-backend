@@ -202,6 +202,9 @@ class ObraModel(Base, TimestampMixin):
         self.data_entrega = obra.data_entrega
         self.total_recebido = obra.total_recebido
         self.is_deleted = obra.is_deleted
+        self.origem = obra.origem.value
+        self.arcaika_orcamento_id = obra.arcaika_orcamento_id
+        self.arcaika_solicitacao_id = obra.arcaika_solicitacao_id
 
 
 class ItemModel(Base, TimestampMixin):
