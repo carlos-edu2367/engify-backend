@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 from datetime import datetime
-from app.domain.entities.financeiro import Movimentacao, PagamentoAgendado, MovimentacaoAttachment
+from app.domain.entities.financeiro import Movimentacao, PagamentoAgendado, MovimentacaoAttachment, PagamentoAttachment
 from app.application.dtos.financeiro import MovimentacaoFiltersDTO, PagamentoFiltersDTO
 
 
@@ -102,4 +102,23 @@ class MovimentacaoAttachmentRepository(ABC):
 
     @abstractmethod
     async def save(self, attachment: MovimentacaoAttachment) -> MovimentacaoAttachment:
+        pass
+
+
+class PagamentoAttachmentRepository(ABC):
+    @abstractmethod
+    async def get_by_id(self, id: UUID) -> PagamentoAttachment:
+        pass
+
+    @abstractmethod
+    async def list_by_pagamento(self, pagamento_id: UUID) -> list[PagamentoAttachment]:
+        pass
+
+    @abstractmethod
+    async def list_by_pagamentos(self, pagamento_ids: list[UUID]) -> list[PagamentoAttachment]:
+        """Anexos ativos de múltiplos pagamentos numa única query (usado na baixa em lote)."""
+        pass
+
+    @abstractmethod
+    async def save(self, attachment: PagamentoAttachment) -> PagamentoAttachment:
         pass

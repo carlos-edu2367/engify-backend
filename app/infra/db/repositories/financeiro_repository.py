@@ -4,7 +4,8 @@ from sqlalchemy import select, func, case, text, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.providers.repo.financeiro_repo import (
-    MovimentacaoRepository, PagamentoAgendadoRepository, MovimentacaoAttachmentRepository
+    MovimentacaoRepository, PagamentoAgendadoRepository, MovimentacaoAttachmentRepository,
+    PagamentoAttachmentRepository,
 )
 from app.application.dtos.financeiro import MovimentacaoFiltersDTO, PagamentoFiltersDTO
 from app.domain.entities.financeiro import (
@@ -13,10 +14,11 @@ from app.domain.entities.financeiro import (
     PagamentoAgendado,
     PaymentStatus,
     MovimentacaoAttachment,
+    PagamentoAttachment,
 )
 from app.domain.errors import DomainError
 from app.infra.db.models.financeiro_model import (
-    MovimentacaoModel, PagamentoAgendadoModel, MovimentacaoAttachmentModel
+    MovimentacaoModel, PagamentoAgendadoModel, MovimentacaoAttachmentModel, PagamentoAttachmentModel
 )
 
 
@@ -341,6 +343,65 @@ class MovimentacaoAttachmentRepositoryImpl(MovimentacaoAttachmentRepository):
         else:
             stmt = select(MovimentacaoAttachmentModel).where(
                 MovimentacaoAttachmentModel.id == attachment.id
+            )
+            result = await self._session.execute(stmt)
+            model = result.scalar_one_or_none()
+            if not model:
+                raise DomainError("Anexo nao encontrado para atualizacao")
+            model.update_from_domain(attachment)
+        await self._session.flush()
+        return model.to_domain()
+
+
+class PagamentoAttachmentRepositoryImpl(PagamentoAttachmentRepository):
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_by_id(self, id: UUID) -> PagamentoAttachment:
+        stmt = select(PagamentoAttachmentModel).where(
+            PagamentoAttachmentModel.id == id,
+            PagamentoAttachmentModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model:
+            raise DomainError("Anexo nao encontrado")
+        return model.to_domain()
+
+    async def list_by_pagamento(self, pagamento_id: UUID) -> list[PagamentoAttachment]:
+        stmt = (
+            select(PagamentoAttachmentModel)
+            .where(
+                PagamentoAttachmentModel.pagamento_id == pagamento_id,
+                PagamentoAttachmentModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(PagamentoAttachmentModel.created_at.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
+    async def list_by_pagamentos(self, pagamento_ids: list[UUID]) -> list[PagamentoAttachment]:
+        if not pagamento_ids:
+            return []
+        stmt = (
+            select(PagamentoAttachmentModel)
+            .where(
+                PagamentoAttachmentModel.pagamento_id.in_(pagamento_ids),
+                PagamentoAttachmentModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(PagamentoAttachmentModel.created_at.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
+    async def save(self, attachment: PagamentoAttachment) -> PagamentoAttachment:
+        if attachment.id is None:
+            attachment.id = uuid4()
+            model = PagamentoAttachmentModel.from_domain(attachment)
+            self._session.add(model)
+        else:
+            stmt = select(PagamentoAttachmentModel).where(
+                PagamentoAttachmentModel.id == attachment.id
             )
             result = await self._session.execute(stmt)
             model = result.scalar_one_or_none()
