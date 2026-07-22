@@ -296,6 +296,37 @@ class FinanceiroService():
         await self.uow.commit()
         return saved
 
+    async def add_pagamento_attachment(
+        self, pagamento: PagamentoAgendado, dto: AddPagamentoAttachmentDTO,
+    ) -> PagamentoAttachment:
+        if pagamento.status == PaymentStatus.PAGO:
+            raise errors.DomainError("Pagamento ja foi efetuado")
+        attachment = PagamentoAttachment(
+            pagamento_id=pagamento.id,
+            team_id=pagamento.team_id,
+            file_path=dto.file_path,
+            file_name=dto.file_name,
+            content_type=dto.content_type,
+        )
+        saved = await self.pagamento_attachment_repo.save(attachment)
+        await self.uow.commit()
+        return saved
+
+    async def get_pagamento_attachments(self, pagamento_id: UUID) -> list[PagamentoAttachment]:
+        return await self.pagamento_attachment_repo.list_by_pagamento(pagamento_id)
+
+    async def delete_pagamento_attachment(
+        self, attachment_id: UUID, pagamento: PagamentoAgendado,
+    ) -> None:
+        if pagamento.status == PaymentStatus.PAGO:
+            raise errors.DomainError("Pagamento ja foi efetuado")
+        attachment = await self.pagamento_attachment_repo.get_by_id(attachment_id)
+        if attachment.pagamento_id != pagamento.id:
+            raise errors.DomainError("Anexo nao encontrado")
+        attachment.delete()
+        await self.pagamento_attachment_repo.save(attachment)
+        await self.uow.commit()
+
     async def pay_pagamento(
         self, pagamento: PagamentoAgendado
     ) -> Movimentacao:
