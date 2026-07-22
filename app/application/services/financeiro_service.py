@@ -327,6 +327,20 @@ class FinanceiroService():
         await self.pagamento_attachment_repo.save(attachment)
         await self.uow.commit()
 
+    async def _copy_pagamento_attachments_to_movimentacao(
+        self, pagamento_ids: list[UUID], movimentacao_id: UUID, team_id: UUID,
+    ) -> None:
+        origem = await self.pagamento_attachment_repo.list_by_pagamentos(pagamento_ids)
+        for anexo in origem:
+            copia = MovimentacaoAttachment(
+                movimentacao_id=movimentacao_id,
+                team_id=team_id,
+                file_path=anexo.file_path,
+                file_name=anexo.file_name,
+                content_type=anexo.content_type,
+            )
+            await self.mov_attachment_repo.save(copia)
+
     async def pay_pagamento(
         self, pagamento: PagamentoAgendado
     ) -> Movimentacao:
@@ -349,6 +363,9 @@ class FinanceiroService():
             pagamento_id=pagamento.id,
         )
         saved_mov = await self.mov_repo.save(mov)
+        await self._copy_pagamento_attachments_to_movimentacao(
+            [pagamento.id], saved_mov.id, pagamento.team_id,
+        )
         await self.uow.commit()
         return saved_mov
 
@@ -407,6 +424,9 @@ class FinanceiroService():
         mov.title = descricao[:255]
 
         saved_mov = await self.mov_repo.save(mov)
+        await self._copy_pagamento_attachments_to_movimentacao(
+            [p.id for p in pagamentos], saved_mov.id, dto.team_id,
+        )
         await self.uow.commit()
 
         return LotePagamentoResultDTO(

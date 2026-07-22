@@ -190,3 +190,62 @@ async def test_cannot_delete_attachment_of_paid_pagamento(team_id):
 
     with pytest.raises(DomainError, match="ja foi efetuado"):
         await svc.delete_pagamento_attachment(attachment.id, pagamento)
+
+
+# ── carry-over na baixa ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_pay_pagamento_copies_attachments_to_movimentacao(team_id):
+    pagamento = _make_pagamento(team_id, created_by_user_id=uuid4())
+    attachment = _make_attachment(pagamento.id, team_id)
+    attachment.id = uuid4()
+    svc, _, _, mov_repo, mov_att_repo = _make_service([pagamento], [attachment])
+
+    mov = await svc.pay_pagamento(pagamento)
+
+    mov_att_repo.save.assert_awaited_once()
+    copia = mov_att_repo.save.await_args.args[0]
+    assert copia.movimentacao_id == mov.id
+    assert copia.file_path == attachment.file_path
+    assert copia.file_name == attachment.file_name
+
+
+@pytest.mark.asyncio
+async def test_pay_pagamento_sem_anexos_nao_copia_nada(team_id):
+    pagamento = _make_pagamento(team_id, created_by_user_id=uuid4())
+    svc, _, _, mov_repo, mov_att_repo = _make_service([pagamento])
+
+    await svc.pay_pagamento(pagamento)
+
+    mov_att_repo.save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pay_pagamento_nao_copia_anexo_removido(team_id):
+    pagamento = _make_pagamento(team_id, created_by_user_id=uuid4())
+    attachment = _make_attachment(pagamento.id, team_id)
+    attachment.id = uuid4()
+    attachment.is_deleted = True
+    svc, _, _, mov_repo, mov_att_repo = _make_service([pagamento], [attachment])
+
+    await svc.pay_pagamento(pagamento)
+
+    mov_att_repo.save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pay_lote_copia_anexos_de_todos_os_pagamentos(team_id):
+    p1 = _make_pagamento(team_id, created_by_user_id=uuid4())
+    p2 = _make_pagamento(team_id, created_by_user_id=uuid4())
+    att1 = _make_attachment(p1.id, team_id, "boleto1.pdf")
+    att1.id = uuid4()
+    att2 = _make_attachment(p2.id, team_id, "boleto2.pdf")
+    att2.id = uuid4()
+    svc, _, _, mov_repo, mov_att_repo = _make_service([p1, p2], [att1, att2])
+
+    dto = BaixaLoteDTO(pagamento_ids=[p1.id, p2.id], team_id=team_id)
+    await svc.pay_lote(dto)
+
+    assert mov_att_repo.save.await_count == 2
+    nomes_copiados = {c.args[0].file_name for c in mov_att_repo.save.await_args_list}
+    assert nomes_copiados == {"boleto1.pdf", "boleto2.pdf"}
