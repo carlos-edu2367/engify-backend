@@ -8,6 +8,7 @@ from app.infra.db.models.base import Base, TimestampMixin
 from app.domain.entities.financeiro import (
     Movimentacao, MovimentacaoTypes, Natureza, MovClass,
     PagamentoAgendado, PaymentStatus, MovimentacaoAttachment,
+    PagamentoAttachment,
 )
 from app.domain.entities.money import Money
 
@@ -305,4 +306,60 @@ class MovimentacaoAttachmentModel(Base, TimestampMixin):
         )
 
     def update_from_domain(self, a: MovimentacaoAttachment) -> None:
+        self.is_deleted = a.is_deleted
+
+
+class PagamentoAttachmentModel(Base, TimestampMixin):
+    __tablename__ = "pagamento_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    pagamento_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("pagamentos_agendados.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Denormalizado para RLS por tenant
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Suporta image/* e application/pdf
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index("idx_pagamento_attachments_pagamento", "pagamento_id", "is_deleted"),
+        Index("idx_pagamento_attachments_team", "team_id"),
+    )
+
+    def to_domain(self) -> PagamentoAttachment:
+        a = object.__new__(PagamentoAttachment)
+        a.id = self.id
+        a.pagamento_id = self.pagamento_id
+        a.team_id = self.team_id
+        a.file_path = self.file_path
+        a.file_name = self.file_name
+        a.content_type = self.content_type
+        a.is_deleted = self.is_deleted
+        a.created_at = self.created_at
+        return a
+
+    @classmethod
+    def from_domain(cls, a: PagamentoAttachment) -> "PagamentoAttachmentModel":
+        return cls(
+            id=a.id or uuid.uuid4(),
+            pagamento_id=a.pagamento_id,
+            team_id=a.team_id,
+            file_path=a.file_path,
+            file_name=a.file_name,
+            content_type=a.content_type,
+            is_deleted=a.is_deleted,
+        )
+
+    def update_from_domain(self, a: PagamentoAttachment) -> None:
         self.is_deleted = a.is_deleted
