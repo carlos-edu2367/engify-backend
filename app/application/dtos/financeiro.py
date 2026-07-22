@@ -76,6 +76,12 @@ class AddMovimentacaoAttachmentDTO(BaseModel):
     content_type: str
 
 
+class AddPagamentoAttachmentDTO(BaseModel):
+    file_path: str
+    file_name: str
+    content_type: str
+
+
 class PagamentoFiltersDTO(BaseModel):
     status: Optional[PaymentStatus] = None
     obra_id: Optional[UUID] = None

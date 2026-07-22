@@ -152,6 +152,14 @@ def movimentacao_attachments_pattern(team_id: UUID, mov_id: UUID) -> str:
     return f"{team_id}:movimentacoes:{mov_id}:attachments*"
 
 
+def pagamento_attachments_key(team_id: UUID, pagamento_id: UUID) -> str:
+    return f"{team_id}:pagamentos:{pagamento_id}:attachments"
+
+
+def pagamento_attachments_pattern(team_id: UUID, pagamento_id: UUID) -> str:
+    return f"{team_id}:pagamentos:{pagamento_id}:attachments*"
+
+
 def movimentacao_delete_lock_key(team_id: UUID, mov_id: UUID) -> str:
     return f"{team_id}:movimentacoes:{mov_id}:delete:lock"
 

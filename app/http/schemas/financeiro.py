@@ -113,6 +113,21 @@ class MovimentacaoAttachmentResponse(BaseModel):
     created_at: datetime
 
 
+class CreatePagamentoAttachmentRequest(BaseModel):
+    file_path: str
+    file_name: str
+    content_type: str
+
+
+class PagamentoAttachmentResponse(BaseModel):
+    id: UUID
+    pagamento_id: UUID
+    file_path: str
+    file_name: str
+    content_type: str
+    created_at: datetime
+
+
 # ── Fluxo de Caixa ────────────────────────────────────────────────────────────
 
 class FluxoCaixaItemResponse(BaseModel):
