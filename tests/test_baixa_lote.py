@@ -72,6 +72,7 @@ def _make_service(pagamentos_retornados, movimentacao_salva=None):
         mov_repo=mov_repo,
         pagamento_repo=pag_repo,
         mov_attachment_repo=AsyncMock(),
+        pagamento_attachment_repo=AsyncMock(),
         diarist_repo=AsyncMock(),
         uow=uow,
     )

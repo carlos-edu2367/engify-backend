@@ -45,7 +45,7 @@ from app.infra.db.repositories.obra_repository import (
 from app.infra.db.repositories.mural_repository import MuralRepositoryImpl
 from app.infra.db.repositories.financeiro_repository import (
     MovimentacaoRepositoryImpl, PagamentoAgendadoRepositoryImpl,
-    MovimentacaoAttachmentRepositoryImpl
+    MovimentacaoAttachmentRepositoryImpl, PagamentoAttachmentRepositoryImpl
 )
 from app.infra.db.repositories.rh_repository import (
     FuncionarioRepositoryImpl,
@@ -278,6 +278,7 @@ async def get_financeiro_service(session: Session) -> FinanceiroService:
         mov_repo=MovimentacaoRepositoryImpl(session),
         pagamento_repo=PagamentoAgendadoRepositoryImpl(session),
         mov_attachment_repo=MovimentacaoAttachmentRepositoryImpl(session),
+        pagamento_attachment_repo=PagamentoAttachmentRepositoryImpl(session),
         diarist_repo=DiaristRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
     )
@@ -540,6 +541,7 @@ async def get_arky_copilot(session: Session) -> ArkyOrchestrator:
             mov_repo=MovimentacaoRepositoryImpl(session),
             pagamento_repo=PagamentoAgendadoRepositoryImpl(session),
             mov_attachment_repo=MovimentacaoAttachmentRepositoryImpl(session),
+            pagamento_attachment_repo=PagamentoAttachmentRepositoryImpl(session),
             diarist_repo=DiaristRepositoryImpl(session),
             uow=SQLAlchemyUOW(session),
         ),

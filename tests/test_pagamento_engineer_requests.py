@@ -60,6 +60,7 @@ def _make_service(pagamentos=None):
         mov_repo=AsyncMock(),
         pagamento_repo=pag_repo,
         mov_attachment_repo=AsyncMock(),
+        pagamento_attachment_repo=AsyncMock(),
         diarist_repo=AsyncMock(),
         uow=AsyncMock(),
     )

@@ -92,7 +92,8 @@ def _build_orchestrator(user, llm, preview_repo, pag_repo):
         "app.domain.errors", fromlist=["DomainError"]).DomainError("x"))
     financeiro_service = FinanceiroService(
         mov_repo=AsyncMock(), pagamento_repo=pag_repo,
-        mov_attachment_repo=AsyncMock(), diarist_repo=diarist_repo,
+        mov_attachment_repo=AsyncMock(), pagamento_attachment_repo=AsyncMock(),
+        diarist_repo=diarist_repo,
         uow=AsyncMock(),
     )
 

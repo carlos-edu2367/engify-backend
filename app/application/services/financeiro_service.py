@@ -2,20 +2,21 @@ from uuid import UUID
 from datetime import datetime, timezone
 
 from app.application.providers.repo.financeiro_repo import (
-    MovimentacaoRepository, PagamentoAgendadoRepository, MovimentacaoAttachmentRepository
+    MovimentacaoRepository, PagamentoAgendadoRepository, MovimentacaoAttachmentRepository,
+    PagamentoAttachmentRepository,
 )
 from app.application.providers.repo.team_repos import DiaristRepository
 from app.application.providers.uow import UOWProvider
 from app.application.dtos.financeiro import (
     CreateMovimentacaoDTO, MovimentacaoResponse,
     CreatePagamentoDTO, EditPagamentoDTO, PagamentoReadResponse, PagamentoResponse,
-    AddMovimentacaoAttachmentDTO, MovimentacaoFiltersDTO,
+    AddMovimentacaoAttachmentDTO, AddPagamentoAttachmentDTO, MovimentacaoFiltersDTO,
     PagamentoFiltersDTO, BaixaLoteDTO, LotePagamentoResultDTO,
 )
 from app.application.providers.utility.pix_provider import generate_pix_copy_and_past
 from app.domain.entities.financeiro import (
     Movimentacao, MovimentacaoTypes, MovClass, Natureza,
-    PagamentoAgendado, PaymentStatus, MovimentacaoAttachment
+    PagamentoAgendado, PaymentStatus, MovimentacaoAttachment, PagamentoAttachment
 )
 from app.domain.entities.money import Money
 from app.domain.entities.user import Roles, User
@@ -28,12 +29,14 @@ class FinanceiroService():
         mov_repo: MovimentacaoRepository,
         pagamento_repo: PagamentoAgendadoRepository,
         mov_attachment_repo: MovimentacaoAttachmentRepository,
+        pagamento_attachment_repo: PagamentoAttachmentRepository,
         diarist_repo: DiaristRepository,
         uow: UOWProvider,
     ):
         self.mov_repo = mov_repo
         self.pagamento_repo = pagamento_repo
         self.mov_attachment_repo = mov_attachment_repo
+        self.pagamento_attachment_repo = pagamento_attachment_repo
         self.diarist_repo = diarist_repo
         self.uow = uow
 
