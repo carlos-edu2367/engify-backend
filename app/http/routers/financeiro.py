@@ -6,6 +6,7 @@ from app.http.schemas.financeiro import (
     CreateMovimentacaoRequest, MovimentacaoResponse,
     CreatePagamentoRequest, UpdatePagamentoRequest, PagamentoReadResponse, PagamentoResponse,
     CreateMovimentacaoAttachmentRequest, MovimentacaoAttachmentResponse,
+    CreatePagamentoAttachmentRequest, PagamentoAttachmentResponse,
     BaixaLoteRequest, BaixaLoteResponse,
 )
 from app.http.schemas.commission_report import (
@@ -24,7 +25,7 @@ from app.http.dependencies.services import (
 )
 from app.application.dtos.financeiro import (
     CreateMovimentacaoDTO, CreatePagamentoDTO, EditPagamentoDTO,
-    AddMovimentacaoAttachmentDTO, BaixaLoteDTO,
+    AddMovimentacaoAttachmentDTO, AddPagamentoAttachmentDTO, BaixaLoteDTO,
 )
 from app.application.use_cases.generate_monthly_commission_report import (
     GenerateMonthlyCommissionReportInput,
@@ -36,6 +37,7 @@ from app.infra.cache.keys import (
     movimentacoes_list_key, movimentacoes_pattern,
     pagamentos_list_key, pagamentos_version_key,
     movimentacao_attachments_key, movimentacao_attachments_pattern,
+    pagamento_attachments_key, pagamento_attachments_pattern,
     movimentacao_delete_lock_key, movimentacao_deleted_tombstone_key,
     fluxo_caixa_key, fluxo_caixa_pattern, public_obra_key,
 )
@@ -53,6 +55,12 @@ async def _invalidate_movimentacoes_cache(redis, team_id: UUID) -> None:
 
 async def _invalidate_mov_attachments_cache(redis, team_id: UUID, mov_id: UUID) -> None:
     pattern = movimentacao_attachments_pattern(team_id, mov_id)
+    async for key in redis.scan_iter(match=pattern, count=100):
+        await redis.delete(key)
+
+
+async def _invalidate_pagamento_attachments_cache(redis, team_id: UUID, pagamento_id: UUID) -> None:
+    pattern = pagamento_attachments_pattern(team_id, pagamento_id)
     async for key in redis.scan_iter(match=pattern, count=100):
         await redis.delete(key)
 
@@ -516,6 +524,98 @@ async def get_commission_report_job_status(
         )
     except DomainError as e:
         raise HTTPException(status_code=404, detail=str(getattr(e, "detail", e)))
+
+
+# ── Pagamentos Agendados — Anexos ─────────────────────────────────────────────
+
+@router.post("/pagamentos/{pagamento_id}/attachments", response_model=PagamentoAttachmentResponse, status_code=201)
+async def add_pagamento_attachment(
+    pagamento_id: UUID,
+    body: CreatePagamentoAttachmentRequest,
+    user: ManagerUser,
+    svc: FinanceiroServiceDep,
+):
+    """Anexa um arquivo (PDF/imagem) a um pagamento agendado ainda não pago.
+
+    Engenheiro só anexa em pagamentos que ele mesmo criou; Admin/Financeiro em
+    qualquer pagamento do time.
+    """
+    try:
+        pag = await svc.get_pagamento(pagamento_id, user.team.id, actor_user=user)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Pagamento não encontrado")
+
+    dto = AddPagamentoAttachmentDTO(
+        file_path=body.file_path, file_name=body.file_name, content_type=body.content_type
+    )
+    try:
+        att = await svc.add_pagamento_attachment(pag, dto)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    redis = get_redis()
+    await _invalidate_pagamento_attachments_cache(redis, user.team.id, pagamento_id)
+    return PagamentoAttachmentResponse(
+        id=att.id, pagamento_id=att.pagamento_id,
+        file_path=att.file_path, file_name=att.file_name,
+        content_type=att.content_type, created_at=att.created_at,
+    )
+
+
+@router.get("/pagamentos/{pagamento_id}/attachments", response_model=list[PagamentoAttachmentResponse])
+async def list_pagamento_attachments(
+    pagamento_id: UUID,
+    user: ManagerUser,
+    svc: FinanceiroServiceDep,
+):
+    """Lista anexos de um pagamento agendado. Cache Redis 10min."""
+    redis = get_redis()
+    cache_key = pagamento_attachments_key(user.team.id, pagamento_id)
+    cached = await redis.get(cache_key)
+    if cached:
+        return [PagamentoAttachmentResponse.model_validate(a) for a in json.loads(cached)]
+
+    try:
+        await svc.get_pagamento(pagamento_id, user.team.id, actor_user=user)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Pagamento não encontrado")
+
+    atts = await svc.get_pagamento_attachments(pagamento_id)
+    result = [
+        PagamentoAttachmentResponse(
+            id=a.id, pagamento_id=a.pagamento_id,
+            file_path=a.file_path, file_name=a.file_name,
+            content_type=a.content_type, created_at=a.created_at,
+        ) for a in atts
+    ]
+    await redis.set(
+        cache_key,
+        json.dumps([r.model_dump(mode="json") for r in result]),
+        ex=600,
+    )
+    return result
+
+
+@router.delete("/pagamentos/{pagamento_id}/attachments/{attachment_id}")
+async def delete_pagamento_attachment(
+    pagamento_id: UUID,
+    attachment_id: UUID,
+    user: ManagerUser,
+    svc: FinanceiroServiceDep,
+):
+    try:
+        pag = await svc.get_pagamento(pagamento_id, user.team.id, actor_user=user)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Pagamento não encontrado")
+
+    try:
+        await svc.delete_pagamento_attachment(attachment_id, pag)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    redis = get_redis()
+    await _invalidate_pagamento_attachments_cache(redis, user.team.id, pagamento_id)
+    return MessageResponse(message="Anexo removido com sucesso")
 
 
 def _pag_response(p) -> PagamentoResponse:
