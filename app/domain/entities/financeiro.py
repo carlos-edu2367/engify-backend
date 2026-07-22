@@ -105,3 +105,22 @@ class MovimentacaoAttachment():
 
     def delete(self):
         self.is_deleted = True
+
+
+class PagamentoAttachment():
+    """Imagem ou PDF anexado a um pagamento agendado (nota de serviço, boleto etc.).
+    Upload feito pelo frontend via signed URL. Suporta: image/*, application/pdf.
+    """
+    def __init__(self, pagamento_id: UUID, team_id: UUID, file_path: str,
+                 file_name: str, content_type: str, id: UUID = None):
+        self.id = id  # None para novas entidades; o repositório gera o UUID
+        self.pagamento_id = pagamento_id
+        self.team_id = team_id
+        self.file_path = file_path
+        self.file_name = file_name
+        self.content_type = content_type
+        self.is_deleted = False
+        self.created_at = datetime.now(timezone.utc)
+
+    def delete(self):
+        self.is_deleted = True
