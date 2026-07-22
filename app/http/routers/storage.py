@@ -14,6 +14,7 @@ from app.http.dependencies.services import (
 )
 from app.application.providers.utility.storage_provider import DirectUploadRequest
 from app.core.config import settings
+from app.domain.entities.user import User
 from app.domain.errors import DomainError
 
 router = APIRouter(prefix="/storage", tags=["Storage"])
@@ -48,13 +49,14 @@ def _build_path(resource_type: str, resource_id, file_name: str, content_type: s
 async def _validate_resource_ownership(
     resource_type: str,
     resource_id: UUID,
-    team_id: UUID,
+    user: User,
     obra_svc: ObraServiceDep,
     item_svc: ItemServiceDep,
     fin_svc: FinanceiroServiceDep,
     mural_svc: MuralServiceDep,
 ) -> None:
-    """Verifica que o resource_id pertence ao team_id. Levanta 404 se não pertencer."""
+    """Verifica que o resource_id pertence ao time do usuário autenticado. Levanta 404 se não pertencer."""
+    team_id = user.team.id
     try:
         if resource_type == "obra":
             await obra_svc.get_obra(resource_id, team_id)
@@ -63,6 +65,10 @@ async def _validate_resource_ownership(
         elif resource_type == "financeiro":
             # resource_id é sempre um movimentacao_id para anexos financeiros
             await fin_svc.get_movimentacao_by_team(resource_id, team_id)
+        elif resource_type == "pagamento":
+            # resource_id é um pagamento_id; reaplica a mesma trava de
+            # ownership de engenheiro usada no resto do módulo financeiro
+            await fin_svc.get_pagamento(resource_id, team_id, actor_user=user)
         elif resource_type == "mural":
             await mural_svc.get_post(resource_id, team_id)
     except DomainError:
@@ -106,6 +112,7 @@ async def get_upload_url(
     - item: image/jpeg, image/png, image/webp
     - financeiro: image/jpeg, image/png, image/webp, application/pdf
     - mural: image/jpeg, image/png, image/webp, application/pdf
+    - pagamento: image/jpeg, image/png, image/webp, application/pdf
 
     Restrito a ADMIN, ENG e FINANCEIRO.
     """
@@ -118,7 +125,7 @@ async def get_upload_url(
         )
 
     await _validate_resource_ownership(
-        body.resource_type, body.resource_id, user.team.id,
+        body.resource_type, body.resource_id, user,
         obra_svc, item_svc, fin_svc, mural_svc,
     )
 
@@ -165,7 +172,7 @@ async def get_upload_urls_batch(
             )
 
     await _validate_resource_ownership(
-        body.resource_type, body.resource_id, user.team.id,
+        body.resource_type, body.resource_id, user,
         obra_svc, item_svc, fin_svc, mural_svc,
     )
 
@@ -206,14 +213,14 @@ async def get_download_url(
     if ".." in body.path or "//" in body.path or body.path.startswith("/"):
         raise HTTPException(status_code=422, detail="Path inválido")
 
-    valid_prefixes = ("obra/", "item/", "financeiro/", "mural/")
+    valid_prefixes = ("obra/", "item/", "financeiro/", "mural/", "pagamento/")
     if not any(body.path.startswith(p) for p in valid_prefixes):
         raise HTTPException(status_code=422, detail="Path inválido")
 
     resource_type, resource_id = _parse_resource_from_path(body.path)
 
     await _validate_resource_ownership(
-        resource_type, resource_id, user.team.id,
+        resource_type, resource_id, user,
         obra_svc, item_svc, fin_svc, mural_svc,
     )
 

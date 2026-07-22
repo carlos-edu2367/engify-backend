@@ -6,13 +6,14 @@ _IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _VIDEO_TYPES = {"video/mp4", "video/quicktime", "video/webm"}
 _DOC_TYPES   = {"application/pdf"}
 
-ResourceType = Literal["obra", "item", "financeiro", "mural"]
+ResourceType = Literal["obra", "item", "financeiro", "mural", "pagamento"]
 
 ALLOWED_UPLOAD_TYPES = {
     "obra":       _IMAGE_TYPES | _VIDEO_TYPES,
     "item":       _IMAGE_TYPES,
     "financeiro": _IMAGE_TYPES | _DOC_TYPES,
     "mural":      _IMAGE_TYPES | _DOC_TYPES,
+    "pagamento":  _IMAGE_TYPES | _DOC_TYPES,
 }
 
 
