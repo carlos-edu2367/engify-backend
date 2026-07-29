@@ -192,6 +192,7 @@ class RhSolicitacoesService:
                 await self.funcionario_repo.get_by_id(funcionario_id, team_id)
         items = await self.ajuste_repo.list_by_filters(team_id, page, limit, funcionario_id=funcionario_id, status=filters.status, start=filters.start, end=filters.end)
         total = await self.ajuste_repo.count_by_filters(team_id, funcionario_id=funcionario_id, status=filters.status, start=filters.start, end=filters.end)
+        await self._enrich_ajustes_with_funcionarios(team_id, items)
         return items, total
 
     async def approve_ajuste(self, ajuste_id: UUID, current_user: User) -> AjustePonto:
@@ -439,6 +440,19 @@ class RhSolicitacoesService:
             raise DomainError("Funcionario vinculado nao encontrado")
         return funcionario
 
+    async def _enrich_ajustes_with_funcionarios(self, team_id: UUID, items: list[AjustePonto]) -> None:
+        for ajuste in items:
+            try:
+                funcionario = await self.funcionario_repo.get_by_id(ajuste.funcionario_id, team_id)
+            except DomainError:
+                ajuste.funcionario_nome = None
+                ajuste.funcionario_cargo = None
+                ajuste.funcionario_cpf_mascarado = None
+                continue
+            ajuste.funcionario_nome = funcionario.nome
+            ajuste.funcionario_cargo = funcionario.cargo
+            ajuste.funcionario_cpf_mascarado = self._mask_cpf(funcionario.cpf.value)
+
     def _ensure_requested_times_match_reference_day(self, dto: CreateAjustePontoDTO) -> None:
         reference_day = self._as_utc(dto.data_referencia).date()
         for value in [
@@ -477,6 +491,12 @@ class RhSolicitacoesService:
 
     def _day_end(self, value: datetime) -> datetime:
         return datetime.combine(self._as_utc(value).date(), time.max, tzinfo=timezone.utc)
+
+    def _mask_cpf(self, cpf: str) -> str:
+        digits = "".join(ch for ch in cpf if ch.isdigit())
+        if len(digits) != 11:
+            return "***"
+        return f"{digits[:3]}.***.***-{digits[-2:]}"
 
     async def _record_audit(self, current_user: User, entity_type: str, entity_id: UUID, action: str, before=None, after=None, reason: str | None = None) -> None:
         await self.audit_repo.save(

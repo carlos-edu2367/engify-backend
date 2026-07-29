@@ -358,6 +358,9 @@ def _to_ajuste_response(ajuste: AjustePonto) -> RhAjustePontoResponse:
     return RhAjustePontoResponse(
         id=ajuste.id,
         funcionario_id=ajuste.funcionario_id,
+        funcionario_nome=getattr(ajuste, "funcionario_nome", None),
+        funcionario_cargo=getattr(ajuste, "funcionario_cargo", None),
+        funcionario_cpf_mascarado=getattr(ajuste, "funcionario_cpf_mascarado", None),
         data_referencia=ajuste.data_referencia,
         justificativa=ajuste.justificativa,
         hora_entrada_solicitada=ajuste.hora_entrada_solicitada,

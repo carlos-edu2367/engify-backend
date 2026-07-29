@@ -381,6 +381,32 @@ async def test_approve_ajuste_without_interval_keeps_two_registros():
 
 
 @pytest.mark.asyncio
+async def test_list_ajustes_enriches_items_with_funcionario_identity():
+    current_user = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(current_user.team.id)
+    ajuste = AjustePonto(
+        team_id=current_user.team.id,
+        funcionario_id=funcionario.id,
+        data_referencia=datetime(2026, 6, 23, tzinfo=timezone.utc),
+        justificativa="Corrigir ponto",
+        hora_entrada_solicitada=datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc),
+    )
+    service = _make_service(funcionario, ajuste_repo=_FakeAjusteRepo([ajuste]))
+
+    items, total = await service.list_ajustes(
+        current_user,
+        type("Filters", (), {"funcionario_id": None, "status": None, "start": None, "end": None})(),
+        page=1,
+        limit=20,
+    )
+
+    assert total == 1
+    assert items[0].funcionario_nome == "Ana Souza"
+    assert items[0].funcionario_cargo == "Analista"
+    assert items[0].funcionario_cpf_mascarado == "111.***.***-35"
+
+
+@pytest.mark.asyncio
 async def test_job_expires_only_overdue_atestados():
     admin = _make_user(Roles.ADMIN)
     funcionario = _make_funcionario(admin.team.id)

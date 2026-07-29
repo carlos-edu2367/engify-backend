@@ -199,6 +199,9 @@ class RhAjustePontoCreateRequest(BaseModel):
 class RhAjustePontoResponse(BaseModel):
     id: UUID
     funcionario_id: UUID
+    funcionario_nome: str | None = None
+    funcionario_cargo: str | None = None
+    funcionario_cpf_mascarado: str | None = None
     data_referencia: datetime
     justificativa: str
     hora_entrada_solicitada: datetime | None = None

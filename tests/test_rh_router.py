@@ -818,6 +818,28 @@ def test_list_ferias_route_accepts_status_and_period_filters():
     assert response.json()["items"][0]["status"] == "solicitado"
 
 
+def test_list_ajustes_route_returns_enriched_funcionario_identity():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    ajuste = _make_ajuste(admin.team.id, funcionario.id)
+    ajuste.funcionario_nome = "Ana Souza"
+    ajuste.funcionario_cargo = "Analista"
+    ajuste.funcionario_cpf_mascarado = "111.***.***-35"
+    client = _build_client(
+        admin,
+        _FakeRhService(funcionario=funcionario),
+        solicitacoes_service=_FakeSolicitacoesService(ajuste=ajuste),
+    )
+
+    response = client.get("/rh/ajustes-ponto")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"][0]["funcionario_nome"] == "Ana Souza"
+    assert body["items"][0]["funcionario_cargo"] == "Analista"
+    assert body["items"][0]["funcionario_cpf_mascarado"] == "111.***.***-35"
+
+
 def test_approve_ajuste_route_returns_403_for_funcionario():
     employee = _make_user(Roles.FUNCIONARIO)
     funcionario = _make_funcionario(employee.team.id)
