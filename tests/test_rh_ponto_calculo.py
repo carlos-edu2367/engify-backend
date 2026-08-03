@@ -229,3 +229,141 @@ def test_minutos_liberacao_corte_dentro_do_intervalo():
     minutos = minutos_liberacao(turno, time(12, 30))
     # bruto 08:00-12:30 = 270min; overlap com intervalo 12:00-13:00 clipado em 12:00-12:30 = 30min
     assert minutos == Decimal("240")
+
+
+def test_resumir_periodo_classifica_dia_completo():
+    from app.domain.services.rh_ponto_calculo import SituacaoDia
+
+    turno = _turno_8h()
+    dia = date(2026, 7, 6)
+    registros = [_reg(time(8, 0), TipoPonto.ENTRADA), _reg(time(17, 0), TipoPonto.SAIDA)]
+
+    resumo = resumir_periodo(
+        registros=registros,
+        turno_para_dia=lambda weekday: turno if weekday == 0 else None,
+        inicio=dia,
+        fim=dia,
+        datas_abonadas=set(),
+    )
+
+    assert len(resumo.dias) == 1
+    assert resumo.dias[0].data == dia
+    assert resumo.dias[0].situacao == SituacaoDia.COMPLETO
+    assert resumo.dias[0].esperado_min == Decimal("480")
+    assert resumo.dias[0].trabalhado_min == Decimal("480")
+
+
+def test_resumir_periodo_classifica_falta_parcial_e_extra():
+    from app.domain.services.rh_ponto_calculo import SituacaoDia
+
+    turno = _turno_8h()
+    dia = date(2026, 7, 6)
+
+    parcial = resumir_periodo(
+        registros=[_reg(time(8, 0), TipoPonto.ENTRADA), _reg(time(15, 0), TipoPonto.SAIDA)],
+        turno_para_dia=lambda weekday: turno if weekday == 0 else None,
+        inicio=dia,
+        fim=dia,
+        datas_abonadas=set(),
+    )
+    assert parcial.dias[0].situacao == SituacaoDia.PARCIAL
+    assert parcial.dias[0].falta_min == Decimal("120")
+
+    extra = resumir_periodo(
+        registros=[_reg(time(8, 0), TipoPonto.ENTRADA), _reg(time(18, 0), TipoPonto.SAIDA)],
+        turno_para_dia=lambda weekday: turno if weekday == 0 else None,
+        inicio=dia,
+        fim=dia,
+        datas_abonadas=set(),
+    )
+    assert extra.dias[0].situacao == SituacaoDia.EXTRA
+    assert extra.dias[0].extra_min == Decimal("60")
+
+    falta = resumir_periodo(
+        registros=[],
+        turno_para_dia=lambda weekday: turno if weekday == 0 else None,
+        inicio=dia,
+        fim=dia,
+        datas_abonadas=set(),
+    )
+    assert falta.dias[0].situacao == SituacaoDia.FALTA
+    assert falta.dias[0].falta_min == Decimal("480")
+
+
+def test_resumir_periodo_classifica_batidas_impares_como_incompleto():
+    from app.domain.services.rh_ponto_calculo import SituacaoDia
+
+    turno = _turno_8h()
+    dia = date(2026, 7, 6)
+
+    resumo = resumir_periodo(
+        registros=[_reg(time(8, 0), TipoPonto.ENTRADA)],
+        turno_para_dia=lambda weekday: turno if weekday == 0 else None,
+        inicio=dia,
+        fim=dia,
+        datas_abonadas=set(),
+    )
+
+    assert resumo.dias[0].situacao == SituacaoDia.INCOMPLETO
+    assert resumo.dias_incompletos == 1
+
+
+def test_resumir_periodo_marca_dia_sem_turno_como_sem_expediente():
+    from app.domain.services.rh_ponto_calculo import SituacaoDia
+
+    dia = date(2026, 7, 6)
+
+    resumo = resumir_periodo(
+        registros=[],
+        turno_para_dia=lambda _weekday: None,
+        inicio=dia,
+        fim=dia,
+        datas_abonadas=set(),
+    )
+
+    assert resumo.dias[0].situacao == SituacaoDia.SEM_EXPEDIENTE
+    assert resumo.dias[0].esperado_min == Decimal("0")
+    assert resumo.faltas == 0
+
+
+def test_resumir_periodo_abonado_vence_a_classificacao_do_dia():
+    from app.domain.services.rh_ponto_calculo import SituacaoDia
+
+    turno = _turno_8h()
+    dia = date(2026, 7, 6)
+
+    resumo = resumir_periodo(
+        registros=[_reg(time(8, 0), TipoPonto.ENTRADA), _reg(time(17, 0), TipoPonto.SAIDA)],
+        turno_para_dia=lambda weekday: turno if weekday == 0 else None,
+        inicio=dia,
+        fim=dia,
+        datas_abonadas={dia},
+    )
+
+    assert resumo.dias[0].situacao == SituacaoDia.ABONADO
+    assert resumo.dias[0].esperado_min == Decimal("480")
+    assert resumo.extra_min == Decimal("0")
+
+
+def test_resumir_periodo_devolve_um_registro_por_dia_do_periodo():
+    turno = _turno_8h()
+    inicio = date(2026, 7, 6)
+    fim = date(2026, 7, 12)
+
+    resumo = resumir_periodo(
+        registros=[],
+        turno_para_dia=lambda weekday: turno if weekday == 0 else None,
+        inicio=inicio,
+        fim=fim,
+        datas_abonadas=set(),
+    )
+
+    assert [d.data for d in resumo.dias] == [
+        date(2026, 7, 6),
+        date(2026, 7, 7),
+        date(2026, 7, 8),
+        date(2026, 7, 9),
+        date(2026, 7, 10),
+        date(2026, 7, 11),
+        date(2026, 7, 12),
+    ]
