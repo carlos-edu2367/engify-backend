@@ -279,10 +279,14 @@ class RhDashboardService:
         )
 
     async def _calcular_estado_ponto_7_dias(self, team_id, funcionario_id) -> RhEstadoPonto7DiasDTO:
+        # A janela termina ONTEM de proposito: incluir o dia em andamento faz o
+        # saldo ainda nao cumprido aparecer como horas faltantes durante o
+        # proprio expediente. O dia corrente e mostrado no card "Hoje".
         hoje = datetime.now(timezone.utc).date()
-        inicio = hoje - timedelta(days=6)
+        fim = hoje - timedelta(days=1)
+        inicio = fim - timedelta(days=6)
         start = datetime.combine(inicio, time.min, tzinfo=timezone.utc)
-        end = datetime.combine(hoje, time.max, tzinfo=timezone.utc)
+        end = datetime.combine(fim, time.max, tzinfo=timezone.utc)
         horario = await self.horario_repo.get_by_funcionario_id(team_id, funcionario_id)
         registros = await self.registro_ponto_repo.list_by_funcionario_periodo(
             team_id,
@@ -293,11 +297,11 @@ class RhDashboardService:
             limit=500,
         )
         eventos_calendario = (
-            await self.evento_calendario_repo.list_by_periodo(team_id, inicio, hoje)
+            await self.evento_calendario_repo.list_by_periodo(team_id, inicio, fim)
             if self.evento_calendario_repo is not None
             else []
         )
-        return self._summarize_estado_ponto_7_dias(inicio, hoje, horario, registros, funcionario_id, eventos_calendario)
+        return self._summarize_estado_ponto_7_dias(inicio, fim, horario, registros, funcionario_id, eventos_calendario)
 
     def _summarize_estado_ponto_7_dias(
         self,
