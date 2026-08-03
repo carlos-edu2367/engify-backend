@@ -623,6 +623,15 @@ class RhUltimoHoleriteResumoResponse(BaseModel):
     status: StatusHolerite
 
 
+class RhResumoDiaPontoResponse(BaseModel):
+    data: date
+    situacao: str
+    minutos_esperados: int
+    minutos_trabalhados: int
+    minutos_extras: int
+    minutos_faltantes: int
+
+
 class RhEstadoPonto7DiasResponse(BaseModel):
     inicio: date
     fim: date
@@ -630,6 +639,7 @@ class RhEstadoPonto7DiasResponse(BaseModel):
     horas_extras: Decimal
     horas_faltantes: Decimal
     pontos_inconsistentes: int
+    dias: list[RhResumoDiaPontoResponse] = []
 
 
 class RhMeResumoResponse(BaseModel):

@@ -181,6 +181,15 @@ class RhUltimoHoleriteFechadoDTO(BaseModel):
     status: StatusHolerite
 
 
+class RhResumoDiaPontoDTO(BaseModel):
+    data: date
+    situacao: str
+    minutos_esperados: int
+    minutos_trabalhados: int
+    minutos_extras: int
+    minutos_faltantes: int
+
+
 class RhEstadoPonto7DiasDTO(BaseModel):
     inicio: date
     fim: date
@@ -188,6 +197,7 @@ class RhEstadoPonto7DiasDTO(BaseModel):
     horas_extras: Decimal
     horas_faltantes: Decimal
     pontos_inconsistentes: int
+    dias: list[RhResumoDiaPontoDTO] = []
 
 
 class RhMeResumoDTO(BaseModel):
