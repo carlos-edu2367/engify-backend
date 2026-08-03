@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, time as Time, timedelta, timezone
+from enum import Enum
 from decimal import Decimal
 from typing import Callable
 
@@ -50,6 +51,43 @@ class ResultadoDia:
     extra_min: Decimal
     falta_min: Decimal
     incompleto: bool
+
+
+class SituacaoDia(str, Enum):
+    SEM_EXPEDIENTE = "sem_expediente"
+    ABONADO = "abonado"
+    FALTA = "falta"
+    INCOMPLETO = "incompleto"
+    PARCIAL = "parcial"
+    COMPLETO = "completo"
+    EXTRA = "extra"
+
+
+@dataclass(frozen=True)
+class ResumoDia:
+    data: date
+    situacao: SituacaoDia
+    esperado_min: Decimal
+    trabalhado_min: Decimal
+    extra_min: Decimal
+    falta_min: Decimal
+
+
+def _classificar_dia(resultado: ResultadoDia) -> SituacaoDia:
+    """Traduz um ResultadoDia para a situacao exibida ao funcionario.
+
+    A ordem importa: dia incompleto (batidas impares) nao e falta, e um dia
+    com falta parcial nunca vira extra.
+    """
+    if resultado.incompleto:
+        return SituacaoDia.INCOMPLETO
+    if resultado.trabalhado_min == Decimal("0"):
+        return SituacaoDia.FALTA
+    if resultado.falta_min > Decimal("0"):
+        return SituacaoDia.PARCIAL
+    if resultado.extra_min > Decimal("0"):
+        return SituacaoDia.EXTRA
+    return SituacaoDia.COMPLETO
 
 
 def _esperado_min(turno: TurnoHorario) -> Decimal:
@@ -109,6 +147,7 @@ class ResumoPeriodo:
     faltas: int
     dias_incompletos: int
     pontos_inconsistentes: int
+    dias: tuple[ResumoDia, ...] = ()
 
 
 def resumir_periodo(
@@ -141,19 +180,54 @@ def resumir_periodo(
     dias_incompletos = 0
 
     atual = inicio
+    dias: list[ResumoDia] = []
     while atual <= fim:
         turno = turno_para_dia(atual.weekday())
-        if turno is not None:
-            esperado_dia = liberacoes.get(atual, _esperado_min(turno))
-            esperado_total += esperado_dia
-            if atual not in datas_abonadas:
-                r = resultado_dia(por_dia.get(atual, []), turno, esperado_min_override=esperado_dia)
-                extra_total += r.extra_min
-                falta_total += r.falta_min
-                if r.incompleto:
-                    dias_incompletos += 1
-                elif r.trabalhado_min == Decimal("0"):
-                    faltas += 1
+        if turno is None:
+            dias.append(
+                ResumoDia(
+                    data=atual,
+                    situacao=SituacaoDia.SEM_EXPEDIENTE,
+                    esperado_min=Decimal("0"),
+                    trabalhado_min=Decimal("0"),
+                    extra_min=Decimal("0"),
+                    falta_min=Decimal("0"),
+                )
+            )
+            atual += timedelta(days=1)
+            continue
+
+        esperado_dia = liberacoes.get(atual, _esperado_min(turno))
+        esperado_total += esperado_dia
+        if atual in datas_abonadas:
+            dias.append(
+                ResumoDia(
+                    data=atual,
+                    situacao=SituacaoDia.ABONADO,
+                    esperado_min=esperado_dia,
+                    trabalhado_min=Decimal("0"),
+                    extra_min=Decimal("0"),
+                    falta_min=Decimal("0"),
+                )
+            )
+        else:
+            r = resultado_dia(por_dia.get(atual, []), turno, esperado_min_override=esperado_dia)
+            extra_total += r.extra_min
+            falta_total += r.falta_min
+            if r.incompleto:
+                dias_incompletos += 1
+            elif r.trabalhado_min == Decimal("0"):
+                faltas += 1
+            dias.append(
+                ResumoDia(
+                    data=atual,
+                    situacao=_classificar_dia(r),
+                    esperado_min=esperado_dia,
+                    trabalhado_min=r.trabalhado_min,
+                    extra_min=r.extra_min,
+                    falta_min=r.falta_min,
+                )
+            )
         atual += timedelta(days=1)
 
     return ResumoPeriodo(
@@ -163,4 +237,5 @@ def resumir_periodo(
         faltas=faltas,
         dias_incompletos=dias_incompletos,
         pontos_inconsistentes=pontos_inconsistentes,
+        dias=tuple(dias),
     )

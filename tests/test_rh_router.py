@@ -1044,6 +1044,29 @@ def test_get_meu_resumo_route_serializes_estado_ponto_7_dias():
                     "horas_extras": "1.50",
                     "horas_faltantes": "2.00",
                     "pontos_inconsistentes": 2,
+                    "dias": [
+                        {
+                            "data": "2026-06-17",
+                            "situacao": "falta",
+                            "minutos_esperados": 480,
+                            "minutos_trabalhados": 0,
+                            "minutos_extras": 0,
+                            "minutos_faltantes": 480,
+                        }
+                    ],
+                },
+                "ponto_hoje": {
+                    "data": "2026-06-24",
+                    "tem_expediente": True,
+                    "jornada_aberta": True,
+                    "minutos_trabalhados": None,
+                    "batidas": [
+                        {
+                            "timestamp": "2026-06-24T08:00:00Z",
+                            "tipo": "entrada",
+                            "status": "validado",
+                        }
+                    ],
                 },
             }
         ),
@@ -1052,14 +1075,21 @@ def test_get_meu_resumo_route_serializes_estado_ponto_7_dias():
     response = client.get("/rh/me/resumo")
 
     assert response.status_code == 200
-    assert response.json()["estado_ponto_7_dias"] == {
-        "inicio": "2026-06-17",
-        "fim": "2026-06-23",
-        "faltas": 1,
-        "horas_extras": "1.50",
-        "horas_faltantes": "2.00",
-        "pontos_inconsistentes": 2,
-    }
+    payload = response.json()
+    assert payload["estado_ponto_7_dias"]["faltas"] == 1
+    assert payload["estado_ponto_7_dias"]["dias"] == [
+        {
+            "data": "2026-06-17",
+            "situacao": "falta",
+            "minutos_esperados": 480,
+            "minutos_trabalhados": 0,
+            "minutos_extras": 0,
+            "minutos_faltantes": 480,
+        }
+    ]
+    assert payload["ponto_hoje"]["jornada_aberta"] is True
+    assert payload["ponto_hoje"]["minutos_trabalhados"] is None
+    assert payload["ponto_hoje"]["batidas"][0]["tipo"] == "entrada"
 
 
 def test_get_meu_resumo_route_accepts_admin_with_employee_link():

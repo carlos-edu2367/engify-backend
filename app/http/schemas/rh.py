@@ -626,6 +626,15 @@ class RhUltimoHoleriteResumoResponse(BaseModel):
     status: StatusHolerite
 
 
+class RhResumoDiaPontoResponse(BaseModel):
+    data: date
+    situacao: str
+    minutos_esperados: int
+    minutos_trabalhados: int
+    minutos_extras: int
+    minutos_faltantes: int
+
+
 class RhEstadoPonto7DiasResponse(BaseModel):
     inicio: date
     fim: date
@@ -633,6 +642,21 @@ class RhEstadoPonto7DiasResponse(BaseModel):
     horas_extras: Decimal
     horas_faltantes: Decimal
     pontos_inconsistentes: int
+    dias: list[RhResumoDiaPontoResponse] = []
+
+
+class RhBatidaHojeResponse(BaseModel):
+    timestamp: datetime
+    tipo: TipoPonto
+    status: StatusPonto
+
+
+class RhPontoHojeResponse(BaseModel):
+    data: date
+    tem_expediente: bool
+    jornada_aberta: bool
+    minutos_trabalhados: int | None = None
+    batidas: list[RhBatidaHojeResponse] = []
 
 
 class RhMeResumoResponse(BaseModel):
@@ -642,6 +666,7 @@ class RhMeResumoResponse(BaseModel):
     atestados_pendentes: int
     ultimo_holerite_fechado: RhUltimoHoleriteResumoResponse | None = None
     estado_ponto_7_dias: RhEstadoPonto7DiasResponse | None = None
+    ponto_hoje: RhPontoHojeResponse | None = None
 
 
 class RhMeVinculoResponse(BaseModel):

@@ -181,6 +181,15 @@ class RhUltimoHoleriteFechadoDTO(BaseModel):
     status: StatusHolerite
 
 
+class RhResumoDiaPontoDTO(BaseModel):
+    data: date
+    situacao: str
+    minutos_esperados: int
+    minutos_trabalhados: int
+    minutos_extras: int
+    minutos_faltantes: int
+
+
 class RhEstadoPonto7DiasDTO(BaseModel):
     inicio: date
     fim: date
@@ -188,6 +197,21 @@ class RhEstadoPonto7DiasDTO(BaseModel):
     horas_extras: Decimal
     horas_faltantes: Decimal
     pontos_inconsistentes: int
+    dias: list[RhResumoDiaPontoDTO] = []
+
+
+class RhBatidaHojeDTO(BaseModel):
+    timestamp: datetime
+    tipo: TipoPonto
+    status: StatusPonto
+
+
+class RhPontoHojeDTO(BaseModel):
+    data: date
+    tem_expediente: bool
+    jornada_aberta: bool
+    minutos_trabalhados: int | None = None
+    batidas: list[RhBatidaHojeDTO] = []
 
 
 class RhMeResumoDTO(BaseModel):
@@ -197,6 +221,7 @@ class RhMeResumoDTO(BaseModel):
     atestados_pendentes: int
     ultimo_holerite_fechado: RhUltimoHoleriteFechadoDTO | None = None
     estado_ponto_7_dias: RhEstadoPonto7DiasDTO | None = None
+    ponto_hoje: RhPontoHojeDTO | None = None
 
 
 class RhAuditLogFiltersDTO(BaseModel):

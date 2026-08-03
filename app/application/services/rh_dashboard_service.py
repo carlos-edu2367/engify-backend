@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import structlog
 
@@ -10,8 +10,11 @@ from app.application.dtos.rh import (
     RhEstadoPonto7DiasDTO,
     RhAuditLogFiltersDTO,
     RhAuditLogListItemDTO,
+    RhBatidaHojeDTO,
     RhDashboardSummaryDTO,
     RhMeResumoDTO,
+    RhPontoHojeDTO,
+    RhResumoDiaPontoDTO,
     RhUltimoHoleriteFechadoDTO,
     RhUltimoPontoDTO,
 )
@@ -30,11 +33,20 @@ from app.application.providers.uow import UOWProvider
 from app.application.services.rh_audit_service import RhAuditService
 from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TurnoHorario
 from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
-from app.domain.services.rh_ponto_calculo import minutos_liberacao, resumir_periodo
+from app.domain.services.rh_ponto_calculo import minutos_liberacao, resultado_dia, resumir_periodo
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
 logger = structlog.get_logger()
+
+
+def _minutos_int(valor: Decimal) -> int:
+    """Minutos podem vir fracionados (o span e calculado em segundos).
+
+    Arredonda para o minuto mais proximo em vez de truncar, para que a
+    interface nao mostre "1 hora e 29 minutos" onde o certo e 1h30.
+    """
+    return int(valor.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 class RhDashboardService:
@@ -154,7 +166,10 @@ class RhDashboardService:
             funcionario_id=funcionario.id,
             status=StatusAtestado.AGUARDANDO_ENTREGA,
         )
-        estado_ponto_7_dias = await self._calcular_estado_ponto_7_dias(team_id, funcionario.id)
+        # horario buscado uma vez so e reaproveitado pelos dois calculos
+        horario = await self.horario_repo.get_by_funcionario_id(team_id, funcionario.id)
+        estado_ponto_7_dias = await self._calcular_estado_ponto_7_dias(team_id, funcionario.id, horario)
+        ponto_hoje = await self._calcular_ponto_hoje(team_id, funcionario.id, horario)
 
         await self._record_event(current_user, "rh.employee_area.accessed", entity_type="employee_area")
         logger.info(
@@ -191,6 +206,7 @@ class RhDashboardService:
                 else None
             ),
             estado_ponto_7_dias=estado_ponto_7_dias,
+            ponto_hoje=ponto_hoje,
         )
 
     async def obter_meu_vinculo(self, current_user: User) -> dict:
@@ -278,12 +294,15 @@ class RhDashboardService:
             datetime(ano, mes, last_day, 23, 59, 59, 999999, tzinfo=timezone.utc),
         )
 
-    async def _calcular_estado_ponto_7_dias(self, team_id, funcionario_id) -> RhEstadoPonto7DiasDTO:
+    async def _calcular_estado_ponto_7_dias(self, team_id, funcionario_id, horario) -> RhEstadoPonto7DiasDTO:
+        # A janela termina ONTEM de proposito: incluir o dia em andamento faz o
+        # saldo ainda nao cumprido aparecer como horas faltantes durante o
+        # proprio expediente. O dia corrente e mostrado no card "Hoje".
         hoje = datetime.now(timezone.utc).date()
-        inicio = hoje - timedelta(days=6)
+        fim = hoje - timedelta(days=1)
+        inicio = fim - timedelta(days=6)
         start = datetime.combine(inicio, time.min, tzinfo=timezone.utc)
-        end = datetime.combine(hoje, time.max, tzinfo=timezone.utc)
-        horario = await self.horario_repo.get_by_funcionario_id(team_id, funcionario_id)
+        end = datetime.combine(fim, time.max, tzinfo=timezone.utc)
         registros = await self.registro_ponto_repo.list_by_funcionario_periodo(
             team_id,
             funcionario_id,
@@ -293,11 +312,48 @@ class RhDashboardService:
             limit=500,
         )
         eventos_calendario = (
-            await self.evento_calendario_repo.list_by_periodo(team_id, inicio, hoje)
+            await self.evento_calendario_repo.list_by_periodo(team_id, inicio, fim)
             if self.evento_calendario_repo is not None
             else []
         )
-        return self._summarize_estado_ponto_7_dias(inicio, hoje, horario, registros, funcionario_id, eventos_calendario)
+        return self._summarize_estado_ponto_7_dias(inicio, fim, horario, registros, funcionario_id, eventos_calendario)
+
+    async def _calcular_ponto_hoje(self, team_id, funcionario_id, horario) -> RhPontoHojeDTO | None:
+        """Fatos do dia corrente. Nunca classifica falta.
+
+        minutos_trabalhados so e preenchido com a jornada fechada, usando a
+        mesma resultado_dia do relatorio dos 7 dias: qualquer calculo paralelo
+        de "horas ate agora" produziria, para o mesmo dia, um numero diferente
+        do que o relatorio mostra no dia seguinte.
+        """
+        if horario is None:
+            return None
+        hoje = datetime.now(timezone.utc).date()
+        registros = await self.registro_ponto_repo.list_by_funcionario_periodo(
+            team_id,
+            funcionario_id,
+            datetime.combine(hoje, time.min, tzinfo=timezone.utc),
+            datetime.combine(hoje, time.max, tzinfo=timezone.utc),
+            page=1,
+            limit=100,
+        )
+        registros = sorted(registros, key=lambda item: item.timestamp)
+        turno = horario.turno_para_dia(hoje.weekday())
+        validos = [r for r in registros if r.status in {StatusPonto.VALIDADO, StatusPonto.AJUSTADO}]
+        jornada_aberta = len(validos) % 2 != 0
+        minutos_trabalhados = None
+        if turno is not None and validos and not jornada_aberta:
+            minutos_trabalhados = _minutos_int(resultado_dia(registros, turno).trabalhado_min)
+        return RhPontoHojeDTO(
+            data=hoje,
+            tem_expediente=turno is not None,
+            jornada_aberta=jornada_aberta,
+            minutos_trabalhados=minutos_trabalhados,
+            batidas=[
+                RhBatidaHojeDTO(timestamp=r.timestamp, tipo=r.tipo, status=r.status)
+                for r in registros
+            ],
+        )
 
     def _summarize_estado_ponto_7_dias(
         self,
@@ -341,4 +397,15 @@ class RhDashboardService:
             horas_extras=(resumo.extra_min / Decimal("60")).quantize(Decimal("0.01")),
             horas_faltantes=(resumo.falta_min / Decimal("60")).quantize(Decimal("0.01")),
             pontos_inconsistentes=resumo.pontos_inconsistentes,
+            dias=[
+                RhResumoDiaPontoDTO(
+                    data=dia.data,
+                    situacao=dia.situacao.value,
+                    minutos_esperados=_minutos_int(dia.esperado_min),
+                    minutos_trabalhados=_minutos_int(dia.trabalhado_min),
+                    minutos_extras=_minutos_int(dia.extra_min),
+                    minutos_faltantes=_minutos_int(dia.falta_min),
+                )
+                for dia in resumo.dias
+            ],
         )
