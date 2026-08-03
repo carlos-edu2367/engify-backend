@@ -559,3 +559,89 @@ def test_summarize_estado_ponto_7_dias_expoe_situacao_de_cada_dia():
     assert resumo.dias[1].situacao == "falta"
     assert resumo.dias[1].minutos_trabalhados == 0
     assert resumo.dias[1].minutos_faltantes == 540
+
+
+@pytest.mark.asyncio
+async def test_ponto_hoje_omite_horas_com_jornada_aberta():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    employee = _make_user(Roles.FUNCIONARIO)
+    funcionario = _FuncionarioStub(employee.team.id, employee.id)
+    today = datetime.now(timezone.utc).date()
+    registros = [
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(today, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+    ]
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(_make_daily_horario(employee.team.id, funcionario.id)),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(registros),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    resumo = await service.obter_meu_resumo(employee)
+
+    assert resumo.ponto_hoje is not None
+    assert resumo.ponto_hoje.data == today
+    assert resumo.ponto_hoje.tem_expediente is True
+    assert resumo.ponto_hoje.jornada_aberta is True
+    assert resumo.ponto_hoje.minutos_trabalhados is None
+    assert len(resumo.ponto_hoje.batidas) == 1
+
+
+@pytest.mark.asyncio
+async def test_ponto_hoje_usa_o_mesmo_calculo_do_relatorio_quando_fechada():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    employee = _make_user(Roles.FUNCIONARIO)
+    funcionario = _FuncionarioStub(employee.team.id, employee.id)
+    today = datetime.now(timezone.utc).date()
+    registros = [
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(today, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(today, time(17, 0), tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(_make_daily_horario(employee.team.id, funcionario.id)),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(registros),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    resumo = await service.obter_meu_resumo(employee)
+
+    assert resumo.ponto_hoje is not None
+    assert resumo.ponto_hoje.jornada_aberta is False
+    # turno 08:00-17:00 sem intervalo cadastrado => 540 minutos
+    assert resumo.ponto_hoje.minutos_trabalhados == 540
+
+
+@pytest.mark.asyncio
+async def test_ponto_hoje_e_none_sem_horario_cadastrado():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    employee = _make_user(Roles.FUNCIONARIO)
+    funcionario = _FuncionarioStub(employee.team.id, employee.id)
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    resumo = await service.obter_meu_resumo(employee)
+
+    assert resumo.ponto_hoje is None
