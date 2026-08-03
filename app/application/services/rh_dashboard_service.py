@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import structlog
 
@@ -12,6 +12,7 @@ from app.application.dtos.rh import (
     RhAuditLogListItemDTO,
     RhDashboardSummaryDTO,
     RhMeResumoDTO,
+    RhResumoDiaPontoDTO,
     RhUltimoHoleriteFechadoDTO,
     RhUltimoPontoDTO,
 )
@@ -35,6 +36,15 @@ from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
 logger = structlog.get_logger()
+
+
+def _minutos_int(valor: Decimal) -> int:
+    """Minutos podem vir fracionados (o span e calculado em segundos).
+
+    Arredonda para o minuto mais proximo em vez de truncar, para que a
+    interface nao mostre "1 hora e 29 minutos" onde o certo e 1h30.
+    """
+    return int(valor.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 class RhDashboardService:
@@ -345,4 +355,15 @@ class RhDashboardService:
             horas_extras=(resumo.extra_min / Decimal("60")).quantize(Decimal("0.01")),
             horas_faltantes=(resumo.falta_min / Decimal("60")).quantize(Decimal("0.01")),
             pontos_inconsistentes=resumo.pontos_inconsistentes,
+            dias=[
+                RhResumoDiaPontoDTO(
+                    data=dia.data,
+                    situacao=dia.situacao.value,
+                    minutos_esperados=_minutos_int(dia.esperado_min),
+                    minutos_trabalhados=_minutos_int(dia.trabalhado_min),
+                    minutos_extras=_minutos_int(dia.extra_min),
+                    minutos_faltantes=_minutos_int(dia.falta_min),
+                )
+                for dia in resumo.dias
+            ],
         )

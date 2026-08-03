@@ -519,3 +519,43 @@ async def test_estado_ponto_7_dias_ignora_batidas_do_dia_corrente():
     # os 7 dias fechados nao tem registro nenhum: 7 faltas de 9h, e nada de hoje entra
     assert estado.faltas == 7
     assert estado.horas_faltantes == Decimal("63.00")
+    assert all(dia.data != today for dia in estado.dias)
+
+
+def test_summarize_estado_ponto_7_dias_expoe_situacao_de_cada_dia():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario_id = uuid4()
+    horario = _make_daily_horario(admin.team.id, funcionario_id)  # 08:00-17:00 sem intervalo => 540 min
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(),
+        horario_repo=_FakeHorarioRepo(),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+    dia_trabalhado = date(2026, 7, 6)
+    dia_sem_registro = date(2026, 7, 7)
+    registros = [
+        _make_ponto(admin.team.id, funcionario_id, datetime.combine(dia_trabalhado, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _make_ponto(admin.team.id, funcionario_id, datetime.combine(dia_trabalhado, time(15, 0), tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]
+
+    resumo = service._summarize_estado_ponto_7_dias(
+        dia_trabalhado, dia_sem_registro, horario, registros, funcionario_id, []
+    )
+
+    assert [d.data for d in resumo.dias] == [dia_trabalhado, dia_sem_registro]
+    assert resumo.dias[0].situacao == "parcial"
+    assert resumo.dias[0].minutos_esperados == 540
+    assert resumo.dias[0].minutos_trabalhados == 420
+    assert resumo.dias[0].minutos_faltantes == 120
+    assert resumo.dias[0].minutos_extras == 0
+    assert resumo.dias[1].situacao == "falta"
+    assert resumo.dias[1].minutos_trabalhados == 0
+    assert resumo.dias[1].minutos_faltantes == 540
