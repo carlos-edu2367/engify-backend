@@ -25,7 +25,10 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 _REFRESH_COOKIE = "refresh_token"
 _COOKIE_MAX_AGE = settings.refresh_token_expire_days * 24 * 60 * 60
-_REFRESH_ROTATION_GRACE_SECONDS = 30
+# Janela em que o refresh token já rotacionado ainda é aceito. Cobre o caso do
+# Set-Cookie não chegar ao browser (reload no meio da request, aba duplicada,
+# rede instável) — sem ela o cookie do usuário fica órfão e a sessão morre.
+_REFRESH_ROTATION_GRACE_SECONDS = 120
 
 
 def _refresh_cookie_path() -> str:
@@ -75,6 +78,25 @@ def _clear_refresh_cookie(response: Response, request: Request | None = None) ->
         domain=settings.refresh_cookie_domain,
         secure=_refresh_cookie_secure(request),
         samesite=_refresh_cookie_samesite(request),
+    )
+
+
+def _unauthorized_clearing_cookie(
+    detail: str, response: Response, request: Request | None = None
+) -> HTTPException:
+    """
+    401 que efetivamente apaga o cookie de refresh no browser.
+
+    Headers escritos no `Response` injetado são descartados quando a rota levanta
+    uma exceção — o exception handler monta um response novo. Por isso o
+    Set-Cookie de limpeza precisa viajar dentro da própria HTTPException, senão o
+    cookie inválido fica no browser e toda tentativa seguinte falha igual.
+    """
+    _clear_refresh_cookie(response, request)
+    return HTTPException(
+        status_code=401,
+        detail=detail,
+        headers={"set-cookie": response.headers["set-cookie"]},
     )
 
 
@@ -220,8 +242,9 @@ async def refresh_token(
     try:
         payload = decode_refresh_token(refresh_token)
     except JWTError:
-        _clear_refresh_cookie(response, request)
-        raise HTTPException(status_code=401, detail="Refresh token inválido ou expirado")
+        raise _unauthorized_clearing_cookie(
+            "Refresh token inválido ou expirado", response, request
+        )
 
     # Verifica se o token foi revogado por logout
     jti = payload.get("jti")
@@ -232,8 +255,9 @@ async def refresh_token(
             if rotated_payload:
                 _set_refresh_cookie(response, rotated_payload["refresh_token"], request)
                 return RefreshResponse(access_token=rotated_payload["access_token"])
-            _clear_refresh_cookie(response, request)
-            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
+            raise _unauthorized_clearing_cookie(
+                "Sessão encerrada. Faça login novamente.", response, request
+            )
 
     new_access = create_access_token(
         user_id=UUID(payload["sub"]),

@@ -274,3 +274,6 @@ async def test_refresh_rejects_logged_out_revoked_token(monkeypatch):
 
     assert exc.value.status_code == 401
     assert "refresh_token=" in response.headers["set-cookie"]
+    # O Set-Cookie precisa viajar na própria exceção: o response injetado é
+    # descartado pelo exception handler, e sem isso o cookie morto permanece.
+    assert "refresh_token=" in exc.value.headers["set-cookie"]
