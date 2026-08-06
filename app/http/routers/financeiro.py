@@ -10,6 +10,7 @@ from app.http.schemas.financeiro import (
     CreateMovimentacaoAttachmentRequest, MovimentacaoAttachmentResponse,
     CreatePagamentoAttachmentRequest, PagamentoAttachmentResponse,
     BaixaLoteRequest, BaixaLoteResponse,
+    ComprovacaoResponse, ComprovacaoMovimentacaoResponse, ComprovacaoAttachmentResponse,
 )
 from app.http.schemas.commission_report import (
     CreateCommissionReportRequest,
@@ -393,6 +394,36 @@ async def get_pagamento(
     except DomainError:
         raise HTTPException(status_code=404, detail="Pagamento não encontrado")
     return _pag_read_response(pag)
+
+
+@router.get("/pagamentos/{pagamento_id}/comprovacao", response_model=ComprovacaoResponse)
+async def get_pagamento_comprovacao(
+    pagamento_id: UUID,
+    user: ManagerUser,
+    svc: FinanceiroServiceDep,
+):
+    """Movimentacao gerada pela baixa do pagamento, com os anexos visiveis.
+
+    A permissao e a mesma da listagem: engenheiro so alcanca os pagamentos que
+    ja consegue ver. Em baixa de lote a resposta e sanitizada — nao expoe o
+    detalhamento nem os anexos dos demais pagamentos do lote.
+    """
+    try:
+        result = await svc.get_pagamento_comprovacao(
+            pagamento_id, user.team.id, actor_user=user,
+        )
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Pagamento não encontrado")
+
+    return ComprovacaoResponse(
+        movimentacao=(
+            ComprovacaoMovimentacaoResponse(**result.movimentacao.model_dump())
+            if result.movimentacao else None
+        ),
+        attachments=[
+            ComprovacaoAttachmentResponse(**a.model_dump()) for a in result.attachments
+        ],
+    )
 
 
 @router.put("/pagamentos/{pagamento_id}", response_model=PagamentoResponse)

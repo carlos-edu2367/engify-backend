@@ -172,6 +172,30 @@ class PagamentoAttachmentResponse(BaseModel):
     created_at: datetime
 
 
+# ── Comprovacao ────────────────────────────────────────────────────────────────
+
+class ComprovacaoAttachmentResponse(BaseModel):
+    id: UUID
+    file_path: str
+    file_name: str
+    content_type: str
+    kind: str
+    created_at: datetime
+
+
+class ComprovacaoMovimentacaoResponse(BaseModel):
+    id: UUID
+    title: str
+    valor: Decimal
+    data_movimentacao: datetime
+    is_lote: bool
+
+
+class ComprovacaoResponse(BaseModel):
+    movimentacao: Optional[ComprovacaoMovimentacaoResponse] = None
+    attachments: list[ComprovacaoAttachmentResponse] = []
+
+
 # ── Fluxo de Caixa ────────────────────────────────────────────────────────────
 
 class FluxoCaixaItemResponse(BaseModel):
