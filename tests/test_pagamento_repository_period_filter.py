@@ -125,3 +125,37 @@ async def test_sem_period_nao_filtra_por_data():
     sql = _compiled(session.last_statement)
     assert "data_agendada >=" not in sql
     assert "data_agendada <=" not in sql
+
+
+@pytest.mark.asyncio
+async def test_filtro_comprovante_pendente_gera_clausulas_esperadas():
+    session = _RecordingSession()
+    repo = PagamentoAgendadoRepositoryImpl(session)
+
+    await repo.list_by_team(
+        uuid4(), page=1, limit=50,
+        filters=PagamentoFiltersDTO(comprovante_pendente=True),
+    )
+
+    sql = _compiled(session.last_statement)
+    assert "WHERE" in sql
+    where_clause = sql.split("WHERE", 1)[1]
+    assert "requires_receipt" in where_clause
+    assert "receipt_attached" in where_clause
+    assert PaymentStatus.PAGO.value in where_clause
+
+
+@pytest.mark.asyncio
+async def test_filtro_comprovante_pendente_false_nao_filtra():
+    session = _RecordingSession()
+    repo = PagamentoAgendadoRepositoryImpl(session)
+
+    await repo.list_by_team(
+        uuid4(), page=1, limit=50,
+        filters=PagamentoFiltersDTO(comprovante_pendente=False),
+    )
+
+    sql = _compiled(session.last_statement)
+    where_clause = sql.split("WHERE", 1)[1] if "WHERE" in sql else ""
+    assert "requires_receipt" not in where_clause
+    assert "receipt_attached" not in where_clause

@@ -226,6 +226,12 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
             stmt = stmt.where(PagamentoAgendadoModel.data_agendada >= filters.period_start)
         if filters.period_end:
             stmt = stmt.where(PagamentoAgendadoModel.data_agendada <= filters.period_end)
+        if filters.comprovante_pendente:
+            stmt = stmt.where(
+                PagamentoAgendadoModel.status == PaymentStatus.PAGO.value,
+                PagamentoAgendadoModel.requires_receipt == True,  # noqa: E712
+                PagamentoAgendadoModel.receipt_attached == False,  # noqa: E712
+            )
         return stmt
 
     async def list_by_team(self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None) -> list[PagamentoAgendado]:

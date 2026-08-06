@@ -19,12 +19,17 @@ async def get_pagamento_filters(
         Optional[datetime],
         Query(description="Vencimento (data_agendada) até, em ISO8601"),
     ] = None,
+    comprovante_pendente: Annotated[
+        Optional[bool],
+        Query(description="True lista so pagos que pedem comprovante e ainda nao tem um"),
+    ] = None,
 ) -> PagamentoFiltersDTO:
     return PagamentoFiltersDTO(
         status=status,
         obra_id=obra_id,
         period_start=period_start,
         period_end=period_end,
+        comprovante_pendente=comprovante_pendente,
     )
 
 

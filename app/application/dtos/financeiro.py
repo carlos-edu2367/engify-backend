@@ -116,6 +116,9 @@ class PagamentoFiltersDTO(BaseModel):
     # Recorte por data de vencimento (data_agendada).
     period_start: Optional[datetime] = None
     period_end: Optional[datetime] = None
+    # True lista somente pagamentos ja pagos que pediam comprovante e ainda
+    # nao tiveram um anexado. False/None nao filtra nada.
+    comprovante_pendente: Optional[bool] = None
 
 
 class MovimentacaoFiltersDTO(BaseModel):
