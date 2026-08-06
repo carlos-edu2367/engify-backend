@@ -33,6 +33,9 @@ class ArcaikaConnectionRepository(ABC):
     async def get_by_id(self, conn_id: UUID) -> ArcaikaConnection | None: ...
 
     @abstractmethod
+    async def get_by_id_for_update(self, conn_id: UUID) -> ArcaikaConnection | None: ...
+
+    @abstractmethod
     async def get_by_team(self, team_id: UUID) -> ArcaikaConnection | None: ...
 
     @abstractmethod

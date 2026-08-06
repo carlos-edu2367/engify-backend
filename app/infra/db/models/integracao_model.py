@@ -44,6 +44,9 @@ class ArcaikaConnectionModel(Base):
     webhook_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     webhook_secret: Mapped[str] = mapped_column(String(200), nullable=False)
     refresh_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
         default=lambda: datetime.now(timezone.utc),
@@ -62,6 +65,7 @@ class ArcaikaConnectionModel(Base):
         c.webhook_url = self.webhook_url
         c.webhook_secret = self.webhook_secret
         c.refresh_token_hash = self.refresh_token_hash
+        c.refresh_token_expires_at = self.refresh_token_expires_at
         c.created_at = self.created_at
         c.revoked_at = self.revoked_at
         return c
@@ -79,6 +83,7 @@ class ArcaikaConnectionModel(Base):
             webhook_url=c.webhook_url,
             webhook_secret=c.webhook_secret,
             refresh_token_hash=c.refresh_token_hash,
+            refresh_token_expires_at=c.refresh_token_expires_at,
             created_at=c.created_at,
             revoked_at=c.revoked_at,
         )
@@ -91,6 +96,7 @@ class ArcaikaConnectionModel(Base):
         self.webhook_url = c.webhook_url
         self.webhook_secret = c.webhook_secret
         self.refresh_token_hash = c.refresh_token_hash
+        self.refresh_token_expires_at = c.refresh_token_expires_at
         self.revoked_at = c.revoked_at
 
 

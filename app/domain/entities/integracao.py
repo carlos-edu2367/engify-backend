@@ -67,6 +67,7 @@ class ArcaikaConnection:
         default_categoria_id: UUID = None,
         webhook_url: str | None = None,
         refresh_token_hash: str | None = None,
+        refresh_token_expires_at: datetime | None = None,
         created_at: datetime = None,
         revoked_at: datetime = None,
     ):
@@ -92,6 +93,7 @@ class ArcaikaConnection:
         self.webhook_secret = webhook_secret
         self.webhook_url = webhook_url
         self.refresh_token_hash = refresh_token_hash
+        self.refresh_token_expires_at = refresh_token_expires_at
         self.status = status
         self.created_at = created_at or _now()
         self.revoked_at = revoked_at
@@ -113,15 +115,17 @@ class ArcaikaConnection:
             raise DomainError("URL de webhook deve ser HTTPS")
         self.webhook_url = url
 
-    def rotate_refresh(self, new_hash: str) -> None:
+    def rotate_refresh(self, new_hash: str, expires_at: datetime) -> None:
         self.ensure_active()
         self.refresh_token_hash = new_hash
+        self.refresh_token_expires_at = expires_at
 
     def revoke(self) -> None:
         self.status = ConnectionStatus.REVOKED
         self.revoked_at = _now()
         # Invalida o refresh: nenhuma renovação de token é mais possível.
         self.refresh_token_hash = None
+        self.refresh_token_expires_at = None
 
 
 class IntegrationEvent:

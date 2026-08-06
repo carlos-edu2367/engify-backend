@@ -5,6 +5,7 @@ de integração máquina-a-máquina.
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+import logging
 from uuid import UUID
 
 from app.core.config import settings
@@ -21,6 +22,7 @@ from app.infra.security.integration_tokens import (
 )
 
 _ALLOWED_SCOPES = {s.value for s in ConnectionScope}
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -120,6 +122,7 @@ class OAuthArcaikaService:
         result = self._issue_tokens(connection, data.scopes)
         await self.connection_repo.save(connection)
         await self.uow.commit()
+        logger.info("Arcaika connection %s issued an integration token", connection.id)
         return result
 
     async def refresh(
@@ -128,9 +131,17 @@ class OAuthArcaikaService:
         self._authenticate_client(client_id, client_secret)
 
         conn_id = self._conn_id_from_refresh(refresh_token)
-        connection = await self.connection_repo.get_by_id(conn_id) if conn_id else None
+        connection = (
+            await self.connection_repo.get_by_id_for_update(conn_id)
+            if conn_id else None
+        )
         if connection is None or not connection.is_active:
             raise DomainError("Refresh token inválido")
+        if (
+            connection.refresh_token_expires_at is None
+            or connection.refresh_token_expires_at <= _now()
+        ):
+            raise DomainError("Refresh token expirado")
         if not verify_secret(refresh_token, connection.refresh_token_hash or ""):
             raise DomainError("Refresh token inválido")
 
@@ -138,6 +149,7 @@ class OAuthArcaikaService:
         result = self._issue_tokens(connection, scopes)
         await self.connection_repo.save(connection)
         await self.uow.commit()
+        logger.info("Arcaika connection %s rotated its integration refresh token", connection.id)
         return result
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -178,7 +190,8 @@ class OAuthArcaikaService:
         access = create_integration_access_token(connection.id, connection.team_id, scopes)
         # Refresh opaco prefixado pelo conn_id p/ lookup sem coluna indexada extra.
         refresh = f"{connection.id}.{generate_opaque_secret()}"
-        connection.rotate_refresh(hash_secret(refresh))
+        refresh_expires_at = _now() + timedelta(days=settings.integration_refresh_token_expire_days)
+        connection.rotate_refresh(hash_secret(refresh), refresh_expires_at)
         return TokenResult(
             access_token=access,
             refresh_token=refresh,

@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from uuid import uuid4
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, parse_qs
 
 import pytest
@@ -52,12 +53,17 @@ class _FakeCodeRepo:
 class _FakeConnRepo:
     def __init__(self):
         self.by_id = {}
+        self.for_update_calls = 0
 
     async def save(self, c):
         self.by_id[c.id] = c
         return c
 
     async def get_by_id(self, conn_id):
+        return self.by_id.get(conn_id)
+
+    async def get_by_id_for_update(self, conn_id):
+        self.for_update_calls += 1
         return self.by_id.get(conn_id)
 
     async def get_by_team(self, team_id):
@@ -154,8 +160,24 @@ async def test_refresh_token_rotation():
     first = await svc.exchange_code("arcaika", "topsecret", code, VERIFIER, REDIRECT)
     refreshed = await svc.refresh("arcaika", "topsecret", first.refresh_token)
     assert refreshed.refresh_token != first.refresh_token  # rotacionou
+    assert svc.connection_repo.for_update_calls == 1
+    connection = next(iter(svc.connection_repo.by_id.values()))
+    assert connection.refresh_token_expires_at > datetime.now(timezone.utc)
     # o refresh antigo não vale mais
     with pytest.raises(DomainError):
+        await svc.refresh("arcaika", "topsecret", first.refresh_token)
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_expirado_e_rejeitado():
+    svc = _svc()
+    redirect_to = await svc.authorize_consent(_user(), _consent())
+    code = _code_from(redirect_to)
+    first = await svc.exchange_code("arcaika", "topsecret", code, VERIFIER, REDIRECT)
+    connection = next(iter(svc.connection_repo.by_id.values()))
+    connection.refresh_token_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+    with pytest.raises(DomainError, match="expirado"):
         await svc.refresh("arcaika", "topsecret", first.refresh_token)
 
 

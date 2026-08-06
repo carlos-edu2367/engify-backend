@@ -46,6 +46,15 @@ class ArcaikaConnectionRepositoryImpl(ArcaikaConnectionRepository):
         model = result.scalar_one_or_none()
         return model.to_domain() if model else None
 
+    async def get_by_id_for_update(self, conn_id: UUID) -> ArcaikaConnection | None:
+        result = await self._session.execute(
+            select(ArcaikaConnectionModel)
+            .where(ArcaikaConnectionModel.id == conn_id)
+            .with_for_update()
+        )
+        model = result.scalar_one_or_none()
+        return model.to_domain() if model else None
+
     async def get_by_team(self, team_id: UUID) -> ArcaikaConnection | None:
         result = await self._session.execute(
             select(ArcaikaConnectionModel).where(ArcaikaConnectionModel.team_id == team_id)
