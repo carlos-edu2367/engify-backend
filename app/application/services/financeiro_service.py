@@ -420,19 +420,36 @@ class FinanceiroService():
 
     async def add_pagamento_attachment(
         self, pagamento: PagamentoAgendado, dto: AddPagamentoAttachmentDTO,
-    ) -> PagamentoAttachment:
+    ) -> list[PagamentoAttachment]:
+        """Anexa um arquivo ao pagamento. Retorna a lista de anexos criados —
+        mais de um quando replicado para as parcelas do mesmo parcelamento.
+        O primeiro item e sempre o anexo do pagamento alvo."""
         if pagamento.status == PaymentStatus.PAGO:
             raise errors.DomainError("Pagamento ja foi efetuado")
-        attachment = PagamentoAttachment(
-            pagamento_id=pagamento.id,
-            team_id=pagamento.team_id,
-            file_path=dto.file_path,
-            file_name=dto.file_name,
-            content_type=dto.content_type,
-        )
-        saved = await self.pagamento_attachment_repo.save(attachment)
+
+        alvos = [pagamento]
+        if dto.replicate_parcelamento and pagamento.parcelamento_id is not None:
+            irmas = await self.pagamento_repo.list_by_parcelamento(
+                pagamento.parcelamento_id, pagamento.team_id,
+            )
+            alvos = [pagamento] + [
+                p for p in irmas
+                if p.id != pagamento.id and p.status != PaymentStatus.PAGO
+            ]
+
+        criados: list[PagamentoAttachment] = []
+        for alvo in alvos:
+            attachment = PagamentoAttachment(
+                pagamento_id=alvo.id,
+                team_id=alvo.team_id,
+                file_path=dto.file_path,
+                file_name=dto.file_name,
+                content_type=dto.content_type,
+            )
+            criados.append(await self.pagamento_attachment_repo.save(attachment))
+
         await self.uow.commit()
-        return saved
+        return criados
 
     async def get_pagamento_attachments(self, pagamento_id: UUID) -> list[PagamentoAttachment]:
         return await self.pagamento_attachment_repo.list_by_pagamento(pagamento_id)

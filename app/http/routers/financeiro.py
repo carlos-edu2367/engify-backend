@@ -584,15 +584,18 @@ async def add_pagamento_attachment(
         raise HTTPException(status_code=404, detail="Pagamento não encontrado")
 
     dto = AddPagamentoAttachmentDTO(
-        file_path=body.file_path, file_name=body.file_name, content_type=body.content_type
+        file_path=body.file_path, file_name=body.file_name, content_type=body.content_type,
+        replicate_parcelamento=body.replicate_parcelamento,
     )
     try:
-        att = await svc.add_pagamento_attachment(pag, dto)
+        criados = await svc.add_pagamento_attachment(pag, dto)
     except DomainError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    att = criados[0]
 
     redis = get_redis()
-    await _invalidate_pagamento_attachments_cache(redis, user.team.id, pagamento_id)
+    for criado in criados:
+        await _invalidate_pagamento_attachments_cache(redis, user.team.id, criado.pagamento_id)
     return PagamentoAttachmentResponse(
         id=att.id, pagamento_id=att.pagamento_id,
         file_path=att.file_path, file_name=att.file_name,

@@ -130,7 +130,7 @@ async def test_engineer_can_attach_to_own_pagamento(team_id):
 
     pag = await svc.get_pagamento(pagamento.id, team_id, actor_user=actor)
     dto = AddPagamentoAttachmentDTO(file_path="pagamento/x/y.pdf", file_name="nota.pdf", content_type="application/pdf")
-    att = await svc.add_pagamento_attachment(pag, dto)
+    att = (await svc.add_pagamento_attachment(pag, dto))[0]
 
     assert att.pagamento_id == pagamento.id
     assert att.file_name == "nota.pdf"
@@ -252,3 +252,74 @@ async def test_pay_lote_copia_anexos_de_todos_os_pagamentos(team_id):
     assert mov_att_repo.save.await_count == 2
     nomes_copiados = {c.args[0].file_name for c in mov_att_repo.save.await_args_list}
     assert nomes_copiados == {"boleto1.pdf", "boleto2.pdf"}
+
+
+# ── replicacao em parcelamento ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_replicate_parcelamento_cria_anexo_em_todas_as_parcelas(team_id):
+    parcelamento_id = uuid4()
+    parcelas = []
+    for i in range(3):
+        p = _make_pagamento(team_id, created_by_user_id=uuid4())
+        p.parcelamento_id = parcelamento_id
+        p.parcela_numero = i + 1
+        p.parcela_total = 3
+        parcelas.append(p)
+
+    svc, pag_repo, pag_att_repo, _, _ = _make_service(parcelas)
+    pag_repo.list_by_parcelamento = AsyncMock(
+        side_effect=lambda pid, tid: [p for p in parcelas if p.parcelamento_id == pid]
+    )
+
+    dto = AddPagamentoAttachmentDTO(
+        file_path="pagamento/x/carne.pdf", file_name="carne.pdf",
+        content_type="application/pdf", replicate_parcelamento=True,
+    )
+    criados = await svc.add_pagamento_attachment(parcelas[0], dto)
+
+    assert len(criados) == 3
+    assert {a.pagamento_id for a in criados} == {p.id for p in parcelas}
+    assert all(a.file_path == "pagamento/x/carne.pdf" for a in criados)
+    assert criados[0].pagamento_id == parcelas[0].id
+
+
+@pytest.mark.asyncio
+async def test_sem_replicate_cria_apenas_um_anexo(team_id):
+    parcelamento_id = uuid4()
+    p1 = _make_pagamento(team_id, created_by_user_id=uuid4())
+    p1.parcelamento_id = parcelamento_id
+    p1.parcela_numero = 1
+    p1.parcela_total = 2
+    svc, *_ = _make_service([p1])
+
+    dto = AddPagamentoAttachmentDTO(
+        file_path="p", file_name="n.pdf", content_type="application/pdf",
+    )
+    criados = await svc.add_pagamento_attachment(p1, dto)
+
+    assert len(criados) == 1
+    assert criados[0].pagamento_id == p1.id
+
+
+@pytest.mark.asyncio
+async def test_replicate_ignora_parcelas_ja_pagas(team_id):
+    parcelamento_id = uuid4()
+    p1 = _make_pagamento(team_id, created_by_user_id=uuid4())
+    p2 = _make_pagamento(team_id, created_by_user_id=uuid4(), status=PaymentStatus.PAGO)
+    for i, p in enumerate((p1, p2)):
+        p.parcelamento_id = parcelamento_id
+        p.parcela_numero = i + 1
+        p.parcela_total = 2
+
+    svc, pag_repo, *_ = _make_service([p1, p2])
+    pag_repo.list_by_parcelamento = AsyncMock(return_value=[p1, p2])
+
+    dto = AddPagamentoAttachmentDTO(
+        file_path="p", file_name="n.pdf", content_type="application/pdf",
+        replicate_parcelamento=True,
+    )
+    criados = await svc.add_pagamento_attachment(p1, dto)
+
+    assert len(criados) == 1
+    assert criados[0].pagamento_id == p1.id

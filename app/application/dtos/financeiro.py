@@ -98,6 +98,9 @@ class AddPagamentoAttachmentDTO(BaseModel):
     file_path: str
     file_name: str
     content_type: str
+    # Quando True e o pagamento faz parte de um parcelamento, registra o mesmo
+    # arquivo em todas as parcelas aguardando do grupo (carne, contrato etc.).
+    replicate_parcelamento: bool = False
 
 
 class PagamentoFiltersDTO(BaseModel):

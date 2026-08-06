@@ -142,6 +142,7 @@ class CreatePagamentoAttachmentRequest(BaseModel):
     file_path: str
     file_name: str
     content_type: str
+    replicate_parcelamento: bool = False
 
 
 class PagamentoAttachmentResponse(BaseModel):
