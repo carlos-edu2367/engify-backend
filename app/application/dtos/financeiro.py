@@ -86,6 +86,9 @@ class PagamentoFiltersDTO(BaseModel):
     status: Optional[PaymentStatus] = None
     obra_id: Optional[UUID] = None
     created_by_user_id: Optional[UUID] = None
+    # Recorte por data de vencimento (data_agendada).
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
 
 
 class MovimentacaoFiltersDTO(BaseModel):

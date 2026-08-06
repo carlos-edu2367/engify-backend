@@ -210,6 +210,10 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
             stmt = stmt.where(PagamentoAgendadoModel.obra_id == filters.obra_id)
         if filters.created_by_user_id:
             stmt = stmt.where(PagamentoAgendadoModel.created_by_user_id == filters.created_by_user_id)
+        if filters.period_start:
+            stmt = stmt.where(PagamentoAgendadoModel.data_agendada >= filters.period_start)
+        if filters.period_end:
+            stmt = stmt.where(PagamentoAgendadoModel.data_agendada <= filters.period_end)
         return stmt
 
     async def list_by_team(self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None) -> list[PagamentoAgendado]:
