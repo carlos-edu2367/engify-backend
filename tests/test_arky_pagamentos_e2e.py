@@ -200,3 +200,39 @@ async def test_confirm_rejects_cross_tenant_payload():
     from app.domain.errors import DomainError
     with pytest.raises(DomainError, match="tenant"):
         await orch.execute_confirmed_action(preview, user)
+
+
+@pytest.mark.asyncio
+async def test_confirm_creates_parcelado_and_avulso_together():
+    user = _make_user(Roles.FINANCEIRO)
+    pag_repo = AsyncMock()
+    pag_repo.save = AsyncMock(side_effect=lambda p: p)
+    preview_repo = _InMemoryPreviewRepo()
+    orch = _build_orchestrator(user, AsyncMock(), preview_repo, pag_repo)
+
+    preview = ArkyActionPreview(
+        team_id=user.team.id, user_id=user.id, conversation_id=uuid4(),
+        action_type="prepare_create_pagamentos",
+        payload={
+            "team_id": str(user.team.id),
+            "itens": [
+                {
+                    "title": "Boleto material", "valor": "1000.00", "classe": "material",
+                    "data_agendada": datetime.now(timezone.utc).isoformat(),
+                    "payment_cod": "11144477735", "parcelas": 3,
+                },
+                {
+                    "title": "Diaria avulsa", "valor": "150.00", "classe": "diarista",
+                    "data_agendada": datetime.now(timezone.utc).isoformat(),
+                    "payment_cod": "pix-1", "parcelas": 1,
+                },
+            ],
+        },
+        summary="x", risk_level="preparacao",
+    )
+    preview.confirm()
+
+    result = await orch.execute_confirmed_action(preview, user)
+
+    assert result["created"] == 4  # 3 parcelas + 1 avulso
+    assert pag_repo.save.await_count == 4

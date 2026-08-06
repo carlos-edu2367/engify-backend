@@ -553,27 +553,56 @@ class ArkyOrchestrator:
         if not itens:
             raise DomainError("Nenhum pagamento para confirmar")
 
-        from app.application.dtos.financeiro import CreatePagamentoDTO
+        from app.application.dtos.financeiro import (
+            CreatePagamentoDTO, CreatePagamentoParceladoDTO,
+        )
         from app.domain.entities.financeiro import MovClass
 
-        dtos: list[CreatePagamentoDTO] = []
+        avulsos: list[CreatePagamentoDTO] = []
+        parcelados: list[CreatePagamentoParceladoDTO] = []
         for item in itens:
-            dtos.append(
-                CreatePagamentoDTO(
-                    title=item["title"],
-                    details=item.get("details", ""),
-                    valor=item["valor"],
-                    classe=MovClass(item["classe"]),
-                    data_agendada=item["data_agendada"],
-                    payment_cod=item.get("payment_cod"),
-                    obra_id=item.get("obra_id"),
-                    diarist_id=item.get("diarist_id"),
+            parcelas = int(item.get("parcelas", 1) or 1)
+            if parcelas > 1:
+                cod = item.get("payment_cod")
+                parcelados.append(
+                    CreatePagamentoParceladoDTO(
+                        title=item["title"],
+                        details=item.get("details", ""),
+                        valor=item["valor"],
+                        classe=MovClass(item["classe"]),
+                        data_agendada=item["data_agendada"],
+                        parcelas=parcelas,
+                        # So a 1a parcela carrega o codigo sugerido pelo Arky;
+                        # as demais ficam para o financeiro preencher depois.
+                        payment_cods=[cod] + [None] * (parcelas - 1),
+                        obra_id=item.get("obra_id"),
+                        diarist_id=item.get("diarist_id"),
+                    )
                 )
+            else:
+                avulsos.append(
+                    CreatePagamentoDTO(
+                        title=item["title"],
+                        details=item.get("details", ""),
+                        valor=item["valor"],
+                        classe=MovClass(item["classe"]),
+                        data_agendada=item["data_agendada"],
+                        payment_cod=item.get("payment_cod"),
+                        obra_id=item.get("obra_id"),
+                        diarist_id=item.get("diarist_id"),
+                    )
+                )
+
+        criados = []
+        if avulsos:
+            criados += await self._financeiro_service.create_pagamentos(
+                avulsos, user.team.id, actor_user=user
+            )
+        for dto in parcelados:
+            criados += await self._financeiro_service.create_pagamento_parcelado(
+                dto, user.team.id, actor_user=user
             )
 
-        criados = await self._financeiro_service.create_pagamentos(
-            dtos, user.team.id, actor_user=user
-        )
         total = round(sum(float(p.valor.amount) for p in criados), 2)
         return {
             "created": len(criados),

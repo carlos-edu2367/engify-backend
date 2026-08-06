@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from app.application.services.arky.tools.context import ArkyToolContext
+from app.application.services.financeiro_parcelamento import MAX_PARCELAS, MIN_PARCELAS
 from app.domain.entities.financeiro import MovClass
 from app.domain.errors import DomainError
 
@@ -197,6 +198,19 @@ async def _validate_pagamento_item(item: dict, ctx: ArkyToolContext) -> dict:
     payment_cod = item.get("payment_cod")
     payment_cod = payment_cod.strip() if isinstance(payment_cod, str) else None
 
+    parcelas_raw = item.get("parcelas")
+    parcelas = 1
+    if parcelas_raw is not None:
+        try:
+            parcelas = int(parcelas_raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"parcelas invalido no pagamento '{title}'")
+        if parcelas != 1 and (parcelas < MIN_PARCELAS or parcelas > MAX_PARCELAS):
+            raise ValueError(
+                f"parcelas deve ser 1 ou estar entre {MIN_PARCELAS} e {MAX_PARCELAS} "
+                f"no pagamento '{title}'"
+            )
+
     normalized: dict = {
         "title": title[:200],
         "details": (item.get("details") or "").strip()[:1000],
@@ -204,6 +218,7 @@ async def _validate_pagamento_item(item: dict, ctx: ArkyToolContext) -> dict:
         "classe": classe,
         "data_agendada": _parse_data_agendada(item.get("data_agendada")).isoformat(),
         "payment_cod": payment_cod or None,
+        "parcelas": parcelas,
     }
 
     obra_id = item.get("obra_id")
@@ -278,6 +293,10 @@ async def financeiro_prepare_pagamentos(params: dict, ctx: ArkyToolContext) -> d
     resumo = (
         f"Agendar {len(itens)} pagamento(s) — total R$ {total:.2f}".replace(".", ",")
     )
+    parcelados = [i for i in itens if i.get("parcelas", 1) > 1]
+    if parcelados:
+        detalhe = ", ".join(f"{i['title']}: {i['parcelas']}x" for i in parcelados)
+        resumo = f"{resumo} ({detalhe})"
 
     from app.domain.entities.arky import ArkyActionPreview
     preview = ArkyActionPreview(
@@ -312,6 +331,7 @@ async def financeiro_prepare_pagamentos(params: dict, ctx: ArkyToolContext) -> d
                     "payment_cod": i.get("payment_cod"),
                     "obra_title": i.get("obra_title"),
                     "diarist_nome": i.get("diarist_nome"),
+                    "parcelas": i.get("parcelas", 1),
                 }
                 for i in itens
             ],

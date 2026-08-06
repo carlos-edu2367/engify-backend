@@ -248,6 +248,53 @@ async def test_prepare_rejects_unknown_obra(team_id):
     assert "error" in out and "Obra" in out["error"]
 
 
+# ── prepare (parcelamento) ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_prepare_aceita_parcelas(team_id):
+    preview_repo = AsyncMock()
+    preview_repo.save = AsyncMock(side_effect=lambda p: SimpleNamespace(
+        id=uuid4(), summary=p.summary, risk_level=p.risk_level))
+    ctx = _ctx(team_id, preview_repo=preview_repo)
+
+    out = await fin_tools.financeiro_prepare_pagamentos(
+        {"pagamentos": [{
+            "title": "Boleto material", "classe": "material", "valor": "1000.00",
+            "data_agendada": "2026-03-10", "payment_cod": "11144477735", "parcelas": 3,
+        }]},
+        ctx,
+    )
+    assert "error" not in out
+    assert "3x" in out["summary"]
+    assert out["preview"]["itens"][0]["parcelas"] == 3
+
+
+@pytest.mark.asyncio
+async def test_prepare_rejeita_parcelas_fora_do_limite(team_id):
+    ctx = _ctx(team_id, preview_repo=AsyncMock())
+    out = await fin_tools.financeiro_prepare_pagamentos(
+        {"pagamentos": [{
+            "title": "Boleto", "classe": "material", "valor": "100.00",
+            "payment_cod": "11144477735", "parcelas": 99,
+        }]},
+        ctx,
+    )
+    assert "error" in out
+    assert "parcelas" in out["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_engenheiro_precisa_de_codigo_mesmo_parcelado(team_id):
+    ctx = _ctx(team_id, role=Roles.ENGENHEIRO, preview_repo=AsyncMock())
+    out = await fin_tools.financeiro_prepare_pagamentos(
+        {"pagamentos": [{
+            "title": "Boleto", "classe": "material", "valor": "100.00", "parcelas": 3,
+        }]},
+        ctx,
+    )
+    assert "error" in out
+
+
 # ── diaristas_list ────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
