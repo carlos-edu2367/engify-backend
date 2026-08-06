@@ -13,6 +13,7 @@ from app.application.dtos.financeiro import (
     EditPagamentoDTO, PagamentoReadResponse, PagamentoResponse,
     AddMovimentacaoAttachmentDTO, AddPagamentoAttachmentDTO, MovimentacaoFiltersDTO,
     PagamentoFiltersDTO, BaixaLoteDTO, LotePagamentoResultDTO,
+    ComprovacaoDTO, ComprovacaoMovimentacaoDTO, ComprovacaoAttachmentDTO,
 )
 from app.application.providers.utility.pix_provider import generate_pix_copy_and_past
 from app.application.services.financeiro_parcelamento import (
@@ -481,6 +482,54 @@ class FinanceiroService():
 
     async def get_pagamento_attachments(self, pagamento_id: UUID) -> list[PagamentoAttachment]:
         return await self.pagamento_attachment_repo.list_by_pagamento(pagamento_id)
+
+    async def get_pagamento_comprovacao(
+        self, pagamento_id: UUID, team_id: UUID, actor_user: User | None = None,
+    ) -> ComprovacaoDTO:
+        """Movimentacao gerada pela baixa do pagamento, com os anexos visiveis.
+
+        A permissao e exatamente a de ``get_pagamento`` — engenheiro so alcanca
+        o que ja consegue listar. Em baixa de lote a resposta e sanitizada: nao
+        expoe titulo consolidado, valor total nem anexos de outros pagamentos."""
+        pagamento = await self.get_pagamento(pagamento_id, team_id, actor_user=actor_user)
+
+        mov = await self.mov_repo.get_by_pagamento(pagamento_id, team_id)
+        if mov is None:
+            return ComprovacaoDTO(movimentacao=None, attachments=[])
+
+        anexos = await self.mov_attachment_repo.list_by_movimentacao(mov.id)
+        is_lote = mov.pagamento_id != pagamento_id
+
+        if is_lote:
+            data_br = mov.data_movimentacao.strftime("%d/%m/%Y")
+            title = f"Pago em {data_br} via baixa em lote"
+            valor = pagamento.valor.amount
+            # So o que e atribuivel a este pagamento, mais os comprovantes da
+            # baixa. Anexos legados (sem origem) ficam de fora de proposito.
+            anexos = [
+                a for a in anexos
+                if a.origem_pagamento_id == pagamento_id or a.kind == "comprovante"
+            ]
+        else:
+            title = mov.title
+            valor = mov.valor.amount
+
+        return ComprovacaoDTO(
+            movimentacao=ComprovacaoMovimentacaoDTO(
+                id=mov.id,
+                title=title,
+                valor=valor,
+                data_movimentacao=mov.data_movimentacao,
+                is_lote=is_lote,
+            ),
+            attachments=[
+                ComprovacaoAttachmentDTO(
+                    id=a.id, file_path=a.file_path, file_name=a.file_name,
+                    content_type=a.content_type, kind=a.kind, created_at=a.created_at,
+                )
+                for a in anexos
+            ],
+        )
 
     async def delete_pagamento_attachment(
         self, attachment_id: UUID, pagamento: PagamentoAgendado,

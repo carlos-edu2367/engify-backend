@@ -140,6 +140,28 @@ class LotePagamentoResultDTO(BaseModel):
     comprovante_pendente_count: int = 0
 
 
+class ComprovacaoAttachmentDTO(BaseModel):
+    id: UUID
+    file_path: str
+    file_name: str
+    content_type: str
+    kind: str
+    created_at: datetime
+
+
+class ComprovacaoMovimentacaoDTO(BaseModel):
+    id: UUID
+    title: str
+    valor: Decimal
+    data_movimentacao: datetime
+    is_lote: bool
+
+
+class ComprovacaoDTO(BaseModel):
+    movimentacao: Optional[ComprovacaoMovimentacaoDTO] = None
+    attachments: list[ComprovacaoAttachmentDTO] = []
+
+
 class FluxoCaixaItemDTO(BaseModel):
     mes: str
     total_entradas: Decimal
