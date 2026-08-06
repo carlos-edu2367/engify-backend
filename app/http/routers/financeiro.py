@@ -407,6 +407,7 @@ async def update_pagamento(
         data_agendada=body.data_agendada,
         payment_cod=body.payment_cod,
         obra_id=body.obra_id,
+        apply_to=body.apply_to,
     )
     try:
         updated = await svc.edit_pagamento(pag, dto, actor_user=user)

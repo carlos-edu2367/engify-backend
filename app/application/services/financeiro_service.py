@@ -350,8 +350,53 @@ class FinanceiroService():
         )
 
         saved = await self.pagamento_repo.save(pagamento)
+        if dto.apply_to == "future" and pagamento.parcelamento_id is not None:
+            await self._propagate_to_future_parcelas(pagamento, dto)
         await self.uow.commit()
         return saved
+
+    async def _propagate_to_future_parcelas(
+        self, origem: PagamentoAgendado, dto: EditPagamentoDTO,
+    ) -> None:
+        """Replica os campos comuns do parcelamento nas parcelas seguintes.
+
+        data_agendada e payment_cod NAO propagam — sao unicos por parcela.
+        Parcelas ja pagas sao ignoradas."""
+        irmas = await self.pagamento_repo.list_by_parcelamento(
+            origem.parcelamento_id, origem.team_id,
+        )
+        for parcela in irmas:
+            if parcela.id == origem.id:
+                continue
+            if parcela.parcela_numero is None or origem.parcela_numero is None:
+                continue
+            if parcela.parcela_numero <= origem.parcela_numero:
+                continue
+            if parcela.status == PaymentStatus.PAGO:
+                continue
+
+            if dto.title is not None:
+                parcela.title = dto.title
+            if dto.details is not None:
+                parcela.details = dto.details
+            if dto.valor is not None:
+                parcela.valor = Money(dto.valor)
+            if dto.classe is not None:
+                parcela.classe = dto.classe
+            if dto.obra_id is not None:
+                parcela.obra_id = dto.obra_id
+
+            if dto.valor is not None:
+                receiver_name = await self._resolve_receiver_name(
+                    parcela.diarist_id, parcela.team_id,
+                )
+                parcela.pix_copy_and_past = generate_pix_copy_and_past(
+                    payment_code=parcela.payment_cod,
+                    amount=parcela.valor.amount,
+                    receiver_name=receiver_name,
+                    city="GOIANIA",
+                )
+            await self.pagamento_repo.save(parcela)
 
     async def add_pagamento_attachment(
         self, pagamento: PagamentoAgendado, dto: AddPagamentoAttachmentDTO,

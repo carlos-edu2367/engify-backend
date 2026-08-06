@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from uuid import UUID
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from app.domain.entities.financeiro import MovimentacaoTypes, MovClass, Natureza, PaymentStatus
 
@@ -57,6 +57,9 @@ class EditPagamentoDTO(BaseModel):
     data_agendada: Optional[datetime] = None
     payment_cod: Optional[str] = None
     obra_id: Optional[UUID] = None
+    # "self" edita so o pagamento alvo; "future" propaga os campos comuns para
+    # as parcelas seguintes do mesmo parcelamento que ainda estao aguardando.
+    apply_to: Literal["self", "future"] = "self"
 
 
 class PagamentoResponse(BaseModel):

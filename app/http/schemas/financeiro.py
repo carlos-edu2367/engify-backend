@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from uuid import UUID
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from app.domain.entities.financeiro import MovimentacaoTypes, MovClass, Natureza, PaymentStatus
 
@@ -61,6 +61,7 @@ class UpdatePagamentoRequest(BaseModel):
     data_agendada: Optional[datetime] = None
     payment_cod: Optional[str] = None
     obra_id: Optional[UUID] = None
+    apply_to: Literal["self", "future"] = "self"
 
 
 class PagamentoResponse(BaseModel):

@@ -177,3 +177,101 @@ async def test_rejeita_payment_cods_com_tamanho_errado(team_id):
             _dto(payment_cods=["a", "b"]), team_id, actor_user=_make_user(team_id),
         )
     assert salvos == []
+
+
+from app.application.dtos.financeiro import CreatePagamentoDTO, EditPagamentoDTO
+
+
+async def _criar_parcelamento(svc, team_id, actor, parcelas=4):
+    return await svc.create_pagamento_parcelado(
+        _dto(parcelas=parcelas, valor="400.00"), team_id, actor_user=actor,
+    )
+
+
+@pytest.mark.asyncio
+async def test_edicao_self_nao_toca_nas_outras_parcelas(team_id):
+    svc, _, _ = _make_service()
+    actor = _make_user(team_id)
+    parcelas = await _criar_parcelamento(svc, team_id, actor)
+
+    dto = EditPagamentoDTO(title="Novo titulo", apply_to="self")
+    await svc.edit_pagamento(parcelas[1], dto, actor_user=actor)
+
+    assert parcelas[1].title == "Novo titulo"
+    assert parcelas[2].title != "Novo titulo"
+    assert parcelas[0].title != "Novo titulo"
+
+
+@pytest.mark.asyncio
+async def test_edicao_future_propaga_campos_comuns(team_id):
+    svc, _, _ = _make_service()
+    actor = _make_user(team_id)
+    parcelas = await _criar_parcelamento(svc, team_id, actor)
+
+    dto = EditPagamentoDTO(
+        title="Reforma", details="Nova descricao", valor=Decimal("150.00"),
+        classe=MovClass.SERVICO, apply_to="future",
+    )
+    await svc.edit_pagamento(parcelas[1], dto, actor_user=actor)
+
+    for p in parcelas[1:]:
+        assert p.title == "Reforma"
+        assert p.details == "Nova descricao"
+        assert p.valor.amount == Decimal("150.00")
+        assert p.classe == MovClass.SERVICO
+    # parcela anterior intocada
+    assert parcelas[0].title != "Reforma"
+    assert parcelas[0].valor.amount == Decimal("100.00")
+
+
+@pytest.mark.asyncio
+async def test_edicao_future_nao_propaga_data_nem_codigo(team_id):
+    svc, _, _ = _make_service()
+    actor = _make_user(team_id)
+    parcelas = await _criar_parcelamento(svc, team_id, actor)
+    data_original = parcelas[2].data_agendada
+    cod_original = parcelas[2].payment_cod
+
+    dto = EditPagamentoDTO(
+        data_agendada=datetime(2027, 7, 7, tzinfo=timezone.utc),
+        payment_cod="11144477735", apply_to="future",
+    )
+    await svc.edit_pagamento(parcelas[1], dto, actor_user=actor)
+
+    assert parcelas[1].data_agendada.year == 2027
+    assert parcelas[1].payment_cod == "11144477735"
+    assert parcelas[2].data_agendada == data_original
+    assert parcelas[2].payment_cod == cod_original
+
+
+@pytest.mark.asyncio
+async def test_edicao_future_ignora_parcelas_ja_pagas(team_id):
+    svc, _, _ = _make_service()
+    actor = _make_user(team_id)
+    parcelas = await _criar_parcelamento(svc, team_id, actor)
+    parcelas[3].status = PaymentStatus.PAGO
+    titulo_pago = parcelas[3].title
+
+    dto = EditPagamentoDTO(title="Reforma", apply_to="future")
+    await svc.edit_pagamento(parcelas[1], dto, actor_user=actor)
+
+    assert parcelas[2].title == "Reforma"
+    assert parcelas[3].title == titulo_pago
+
+
+@pytest.mark.asyncio
+async def test_edicao_future_em_pagamento_avulso_age_como_self(team_id):
+    svc, _, _ = _make_service()
+    actor = _make_user(team_id)
+    avulso = await svc.create_pagamento(
+        CreatePagamentoDTO(
+            title="Avulso", details="", valor=Decimal("50.00"), classe=MovClass.FIXO,
+            data_agendada=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        ),
+        team_id, actor_user=actor,
+    )
+
+    dto = EditPagamentoDTO(title="Editado", apply_to="future")
+    editado = await svc.edit_pagamento(avulso, dto, actor_user=actor)
+
+    assert editado.title == "Editado"
