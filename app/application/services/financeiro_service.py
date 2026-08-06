@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
 from app.application.providers.repo.financeiro_repo import (
@@ -9,11 +9,15 @@ from app.application.providers.repo.team_repos import DiaristRepository
 from app.application.providers.uow import UOWProvider
 from app.application.dtos.financeiro import (
     CreateMovimentacaoDTO, MovimentacaoResponse,
-    CreatePagamentoDTO, EditPagamentoDTO, PagamentoReadResponse, PagamentoResponse,
+    CreatePagamentoDTO, CreatePagamentoParceladoDTO,
+    EditPagamentoDTO, PagamentoReadResponse, PagamentoResponse,
     AddMovimentacaoAttachmentDTO, AddPagamentoAttachmentDTO, MovimentacaoFiltersDTO,
     PagamentoFiltersDTO, BaixaLoteDTO, LotePagamentoResultDTO,
 )
 from app.application.providers.utility.pix_provider import generate_pix_copy_and_past
+from app.application.services.financeiro_parcelamento import (
+    MAX_PARCELAS, MIN_PARCELAS, build_datas_parcelas, split_valor_parcelas,
+)
 from app.domain.entities.financeiro import (
     Movimentacao, MovimentacaoTypes, MovClass, Natureza,
     PagamentoAgendado, PaymentStatus, MovimentacaoAttachment, PagamentoAttachment
@@ -125,14 +129,15 @@ class FinanceiroService():
     # ── Pagamentos Agendados ───────────────────────────────────────────────────
 
     async def _build_pagamento(
-        self, dto: CreatePagamentoDTO, team_id: UUID, actor_user: User | None
+        self, dto: CreatePagamentoDTO, team_id: UUID, actor_user: User | None,
+        require_payment_code: bool = True,
     ) -> PagamentoAgendado:
         """Valida e constrói um PagamentoAgendado sem persistir.
 
         Centraliza as regras de criação (código obrigatório p/ engenheiro,
         carimbo de autoria, geração do Pix) para reuso entre a criação
         unitária e a criação em lote."""
-        if _is_engineer(actor_user) and not _has_payment_code(dto.payment_cod):
+        if require_payment_code and _is_engineer(actor_user) and not _has_payment_code(dto.payment_cod):
             raise errors.DomainError("codigo de pagamento e obrigatorio para engenheiros")
 
         receiver_name = await self._resolve_receiver_name(dto.diarist_id, team_id)
@@ -182,6 +187,58 @@ class FinanceiroService():
         pagamentos = [
             await self._build_pagamento(dto, team_id, actor_user) for dto in dtos
         ]
+        salvos = [await self.pagamento_repo.save(p) for p in pagamentos]
+        await self.uow.commit()
+        return salvos
+
+    async def create_pagamento_parcelado(
+        self, dto: CreatePagamentoParceladoDTO, team_id: UUID,
+        actor_user: User | None = None,
+    ) -> list[PagamentoAgendado]:
+        """Cria N parcelas atomicamente, agrupadas por um mesmo parcelamento_id.
+
+        Cada parcela e um PagamentoAgendado normal — baixa, anexos e permissoes
+        seguem o fluxo existente. Engenheiro so precisa informar o codigo da
+        primeira parcela."""
+        if dto.parcelas < MIN_PARCELAS or dto.parcelas > MAX_PARCELAS:
+            raise errors.DomainError(
+                f"Numero de parcelas deve estar entre {MIN_PARCELAS} e {MAX_PARCELAS}"
+            )
+        codigos = dto.payment_cods
+        if codigos is not None and len(codigos) != dto.parcelas:
+            raise errors.DomainError(
+                "A lista de codigos deve ter exatamente o numero de parcelas"
+            )
+        if codigos is None:
+            codigos = [None] * dto.parcelas
+        if _is_engineer(actor_user) and not _has_payment_code(codigos[0]):
+            raise errors.DomainError("codigo de pagamento e obrigatorio para engenheiros")
+
+        valores = split_valor_parcelas(dto.valor, dto.parcelas)
+        datas = build_datas_parcelas(dto.data_agendada, dto.parcelas)
+        parcelamento_id = uuid4()
+
+        # Constroi/valida todas antes de persistir qualquer uma.
+        pagamentos: list[PagamentoAgendado] = []
+        for i in range(dto.parcelas):
+            item = CreatePagamentoDTO(
+                title=f"{dto.title} ({i + 1}/{dto.parcelas})",
+                details=dto.details,
+                valor=valores[i],
+                classe=dto.classe,
+                data_agendada=datas[i],
+                payment_cod=codigos[i],
+                obra_id=dto.obra_id,
+                diarist_id=dto.diarist_id,
+            )
+            pag = await self._build_pagamento(
+                item, team_id, actor_user, require_payment_code=(i == 0),
+            )
+            pag.parcelamento_id = parcelamento_id
+            pag.parcela_numero = i + 1
+            pag.parcela_total = dto.parcelas
+            pagamentos.append(pag)
+
         salvos = [await self.pagamento_repo.save(p) for p in pagamentos]
         await self.uow.commit()
         return salvos

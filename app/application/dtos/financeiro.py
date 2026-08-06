@@ -37,6 +37,18 @@ class CreatePagamentoDTO(BaseModel):
     diarist_id: Optional[UUID] = None
 
 
+class CreatePagamentoParceladoDTO(BaseModel):
+    title: str
+    details: str
+    valor: Decimal  # valor TOTAL do parcelamento
+    classe: MovClass
+    data_agendada: datetime  # vencimento da 1a parcela
+    parcelas: int
+    payment_cods: Optional[list[Optional[str]]] = None
+    obra_id: Optional[UUID] = None
+    diarist_id: Optional[UUID] = None
+
+
 class EditPagamentoDTO(BaseModel):
     title: Optional[str] = None
     details: Optional[str] = None
