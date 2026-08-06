@@ -110,10 +110,31 @@ class FinanceiroService():
             file_path=dto.file_path,
             file_name=dto.file_name,
             content_type=dto.content_type,
+            kind=dto.kind,
         )
         saved = await self.mov_attachment_repo.save(attachment)
+        if dto.kind == "comprovante":
+            await self._mark_receipt_attached(movimentacao)
         await self.uow.commit()
         return saved
+
+    async def _mark_receipt_attached(self, movimentacao: Movimentacao) -> None:
+        """Marca como quitada a pendencia de comprovante dos pagamentos ligados
+        a esta movimentacao. Idempotente."""
+        ids: list[UUID] = []
+        if movimentacao.pagamento_id is not None:
+            ids.append(movimentacao.pagamento_id)
+        elif movimentacao.lote_info:
+            ids = [UUID(str(i)) for i in movimentacao.lote_info.get("lote_ids", [])]
+
+        for pagamento_id in ids:
+            pagamento = await self.pagamento_repo.get_by_id(
+                pagamento_id, movimentacao.team_id,
+            )
+            if pagamento.receipt_attached:
+                continue
+            pagamento.receipt_attached = True
+            await self.pagamento_repo.save(pagamento)
 
     async def get_attachments(self, movimentacao_id: UUID) -> list[MovimentacaoAttachment]:
         return await self.mov_attachment_repo.list_by_movimentacao(movimentacao_id)
@@ -484,6 +505,8 @@ class FinanceiroService():
                 file_path=anexo.file_path,
                 file_name=anexo.file_name,
                 content_type=anexo.content_type,
+                kind="documento",
+                origem_pagamento_id=anexo.pagamento_id,
             )
             await self.mov_attachment_repo.save(copia)
 
@@ -579,6 +602,7 @@ class FinanceiroService():
             quantidade=len(pagamentos),
             valor_total=total,
             movimentacao_id=saved_mov.id,
+            comprovante_pendente_count=sum(1 for p in pagamentos if p.requires_receipt),
         )
 
     async def _resolve_receiver_name(self, diarist_id: UUID | None, team_id: UUID) -> str:

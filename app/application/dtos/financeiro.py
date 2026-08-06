@@ -134,6 +134,7 @@ class LotePagamentoResultDTO(BaseModel):
     quantidade: int
     valor_total: Decimal
     movimentacao_id: UUID
+    comprovante_pendente_count: int = 0
 
 
 class FluxoCaixaItemDTO(BaseModel):
