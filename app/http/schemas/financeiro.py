@@ -68,6 +68,9 @@ class PagamentoResponse(BaseModel):
     created_by_name: Optional[str] = None
     created_by_engineer: bool = False
     created_at: Optional[datetime] = None
+    parcelamento_id: Optional[UUID] = None
+    parcela_numero: Optional[int] = None
+    parcela_total: Optional[int] = None
 
 
 class PagamentoReadResponse(PagamentoResponse):

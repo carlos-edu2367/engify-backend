@@ -43,6 +43,9 @@ def _make_pagamento(team_id, created_by_user_id=None, status=PaymentStatus.AGUAR
     p.created_by_name = "Ana" if created_by_user_id else None
     p.created_by_engineer = created_by_user_id is not None
     p.created_at = datetime.now(timezone.utc)
+    p.parcelamento_id = None
+    p.parcela_numero = None
+    p.parcela_total = None
     return p
 
 

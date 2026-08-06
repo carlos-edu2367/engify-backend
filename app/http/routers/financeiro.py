@@ -630,6 +630,9 @@ def _pag_response(p) -> PagamentoResponse:
         created_by_name=p.created_by_name,
         created_by_engineer=p.created_by_engineer,
         created_at=p.created_at,
+        parcelamento_id=p.parcelamento_id,
+        parcela_numero=p.parcela_numero,
+        parcela_total=p.parcela_total,
     )
 
 
@@ -646,4 +649,7 @@ def _pag_read_response(p) -> PagamentoReadResponse:
         created_by_name=p.created_by_name,
         created_by_engineer=p.created_by_engineer,
         created_at=p.created_at,
+        parcelamento_id=p.parcelamento_id,
+        parcela_numero=p.parcela_numero,
+        parcela_total=p.parcela_total,
     )

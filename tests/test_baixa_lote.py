@@ -37,6 +37,9 @@ def _make_pagamento(team_id, valor: str = "100.00",
     p.payment_date = None
     p.obra_id = None
     p.diarist_id = None
+    p.parcelamento_id = None
+    p.parcela_numero = None
+    p.parcela_total = None
     return p
 
 

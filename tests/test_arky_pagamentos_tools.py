@@ -45,6 +45,9 @@ def _pagamento(team_id, title="Diaria Pedro", status=PaymentStatus.AGUARDANDO,
     p.created_by_name = "Maria Fin"
     p.created_by_engineer = False
     p.created_at = datetime.now(timezone.utc)
+    p.parcelamento_id = None
+    p.parcela_numero = None
+    p.parcela_total = None
     return p
 
 

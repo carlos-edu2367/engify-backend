@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, DateTime, Numeric, Boolean, ForeignKey, Index, Text, text
+from sqlalchemy import String, DateTime, Numeric, Boolean, ForeignKey, Index, Text, text, SmallInteger
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infra.db.models.base import Base, TimestampMixin
@@ -170,6 +170,11 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
     created_by_engineer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    parcelamento_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    parcela_numero: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    parcela_total: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
 
     team: Mapped["TeamModel"] = relationship(  # type: ignore[name-defined]
         back_populates="pagamentos", lazy="raise"
@@ -184,6 +189,7 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         Index("idx_pagamentos_obra", "obra_id"),
         Index("idx_pagamentos_team_creator_data", "team_id", "created_by_user_id", "data_agendada"),
         Index("idx_pagamentos_team_engineer_data", "team_id", "created_by_engineer", "data_agendada"),
+        Index("idx_pagamentos_parcelamento", "parcelamento_id", "parcela_numero"),
     )
 
     def to_domain(self) -> PagamentoAgendado:
@@ -206,6 +212,9 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         p.created_by_name = self.created_by_name
         p.created_by_engineer = self.created_by_engineer
         p.created_at = self.created_at
+        p.parcelamento_id = self.parcelamento_id
+        p.parcela_numero = self.parcela_numero
+        p.parcela_total = self.parcela_total
         return p
 
     @classmethod
@@ -229,6 +238,9 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
             created_by_role=p.created_by_role,
             created_by_name=p.created_by_name,
             created_by_engineer=p.created_by_engineer,
+            parcelamento_id=p.parcelamento_id,
+            parcela_numero=p.parcela_numero,
+            parcela_total=p.parcela_total,
         )
 
     def update_from_domain(self, p: PagamentoAgendado) -> None:

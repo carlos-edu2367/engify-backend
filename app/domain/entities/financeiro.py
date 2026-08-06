@@ -67,7 +67,10 @@ class PagamentoAgendado():
                  created_by_role: str = None,
                  created_by_name: str = None,
                  created_by_engineer: bool = False,
-                 created_at: datetime = None):
+                 created_at: datetime = None,
+                 parcelamento_id: UUID = None,
+                 parcela_numero: int = None,
+                 parcela_total: int = None):
         self.id = id
         self.team_id = team_id
         self.title = title
@@ -86,6 +89,11 @@ class PagamentoAgendado():
         self.created_by_name = created_by_name
         self.created_by_engineer = created_by_engineer
         self.created_at = created_at
+        # Parcelamento: nulos em pagamentos avulsos. parcelamento_id agrupa as
+        # parcelas; parcela_numero e 1-based.
+        self.parcelamento_id = parcelamento_id
+        self.parcela_numero = parcela_numero
+        self.parcela_total = parcela_total
 
 
 class MovimentacaoAttachment():
