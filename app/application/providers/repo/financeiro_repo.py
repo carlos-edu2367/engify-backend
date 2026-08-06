@@ -11,6 +11,15 @@ class MovimentacaoRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_by_pagamento(self, pagamento_id: UUID, team_id: UUID) -> Movimentacao | None:
+        """Movimentacao gerada pela baixa deste pagamento, individual ou em lote.
+
+        Procura primeiro por pagamento_id; se nao achar, procura o pagamento
+        dentro de lote_info->'lote_ids'. Retorna None se o pagamento ainda nao
+        foi baixado."""
+        pass
+
+    @abstractmethod
     async def list_by_team(self, team_id: UUID, page: int, limit: int, filters: MovimentacaoFiltersDTO | None = None) -> list[Movimentacao]:
         pass
 

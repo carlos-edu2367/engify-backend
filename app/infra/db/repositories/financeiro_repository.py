@@ -39,6 +39,31 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
             raise DomainError("Movimentacao nao encontrada")
         return model.to_domain()
 
+    async def get_by_pagamento(self, pagamento_id: UUID, team_id: UUID) -> Movimentacao | None:
+        # Baixa individual: o vinculo e direto.
+        stmt = select(MovimentacaoModel).where(
+            MovimentacaoModel.pagamento_id == pagamento_id,
+            MovimentacaoModel.team_id == team_id,
+            MovimentacaoModel.is_deleted == False,  # noqa: E712
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalars().first()
+        if model:
+            return model.to_domain()
+
+        # Baixa em lote: o pagamento aparece dentro de lote_info->'lote_ids'.
+        # O operador ? usa o indice GIN idx_movimentacoes_lote_info. Usamos
+        # .op("->") explicito (em vez do acessor [chave]) para gerar sempre o
+        # operador classico do Postgres, independente da versao do servidor.
+        stmt = select(MovimentacaoModel).where(
+            MovimentacaoModel.team_id == team_id,
+            MovimentacaoModel.is_deleted == False,  # noqa: E712
+            MovimentacaoModel.lote_info.op("->")("lote_ids").op("?")(str(pagamento_id)),
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalars().first()
+        return model.to_domain() if model else None
+
     def _apply_filters(self, stmt, filters: MovimentacaoFiltersDTO | None):
         if not filters:
             return stmt
