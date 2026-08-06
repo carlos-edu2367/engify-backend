@@ -237,6 +237,7 @@ async def create_obra_pagamento(
         data_agendada=body.data_agendada,
         payment_cod=body.payment_cod,
         obra_id=obra_id,
+        requires_receipt=body.requires_receipt,
     )
     try:
         pag = await fin_svc.create_pagamento(dto, user.team.id, actor_user=user)
@@ -263,6 +264,8 @@ async def create_obra_pagamento(
         created_by_name=pag.created_by_name,
         created_by_engineer=pag.created_by_engineer,
         created_at=pag.created_at,
+        requires_receipt=pag.requires_receipt,
+        receipt_attached=pag.receipt_attached,
     )
 
 
@@ -289,6 +292,7 @@ async def create_obra_pagamento_parcelado(
         parcelas=body.parcelas,
         payment_cods=body.payment_cods,
         obra_id=obra_id,
+        requires_receipt=body.requires_receipt,
     )
     try:
         parcelas = await fin_svc.create_pagamento_parcelado(dto, user.team.id, actor_user=user)
@@ -308,6 +312,7 @@ async def create_obra_pagamento_parcelado(
             created_by_engineer=p.created_by_engineer, created_at=p.created_at,
             parcelamento_id=p.parcelamento_id, parcela_numero=p.parcela_numero,
             parcela_total=p.parcela_total,
+            requires_receipt=p.requires_receipt, receipt_attached=p.receipt_attached,
         )
         for p in parcelas
     ]

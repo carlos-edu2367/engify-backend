@@ -46,6 +46,8 @@ def _make_pagamento(team_id, created_by_user_id=None, status=PaymentStatus.AGUAR
     p.parcelamento_id = None
     p.parcela_numero = None
     p.parcela_total = None
+    p.requires_receipt = False
+    p.receipt_attached = False
     return p
 
 

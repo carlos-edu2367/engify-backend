@@ -48,6 +48,8 @@ def _pagamento(team_id, title="Diaria Pedro", status=PaymentStatus.AGUARDANDO,
     p.parcelamento_id = None
     p.parcela_numero = None
     p.parcela_total = None
+    p.requires_receipt = False
+    p.receipt_attached = False
     return p
 
 

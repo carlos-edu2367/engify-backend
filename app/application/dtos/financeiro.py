@@ -35,6 +35,7 @@ class CreatePagamentoDTO(BaseModel):
     payment_cod: Optional[str] = None
     obra_id: Optional[UUID] = None
     diarist_id: Optional[UUID] = None
+    requires_receipt: bool = False
 
 
 class CreatePagamentoParceladoDTO(BaseModel):
@@ -47,6 +48,7 @@ class CreatePagamentoParceladoDTO(BaseModel):
     payment_cods: Optional[list[Optional[str]]] = None
     obra_id: Optional[UUID] = None
     diarist_id: Optional[UUID] = None
+    requires_receipt: bool = False
 
 
 class EditPagamentoDTO(BaseModel):
@@ -57,6 +59,7 @@ class EditPagamentoDTO(BaseModel):
     data_agendada: Optional[datetime] = None
     payment_cod: Optional[str] = None
     obra_id: Optional[UUID] = None
+    requires_receipt: Optional[bool] = None
     # "self" edita so o pagamento alvo; "future" propaga os campos comuns para
     # as parcelas seguintes do mesmo parcelamento que ainda estao aguardando.
     apply_to: Literal["self", "future"] = "self"
@@ -82,6 +85,8 @@ class PagamentoResponse(BaseModel):
     parcelamento_id: Optional[UUID] = None
     parcela_numero: Optional[int] = None
     parcela_total: Optional[int] = None
+    requires_receipt: bool = False
+    receipt_attached: bool = False
 
 
 class PagamentoReadResponse(PagamentoResponse):
@@ -92,6 +97,7 @@ class AddMovimentacaoAttachmentDTO(BaseModel):
     file_path: str
     file_name: str
     content_type: str
+    kind: Literal["documento", "comprovante"] = "documento"
 
 
 class AddPagamentoAttachmentDTO(BaseModel):

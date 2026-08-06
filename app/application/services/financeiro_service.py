@@ -161,6 +161,7 @@ class FinanceiroService():
             created_by_role=actor_user.role.value if actor_user else None,
             created_by_name=getattr(actor_user, "nome", None),
             created_by_engineer=_is_engineer(actor_user),
+            requires_receipt=dto.requires_receipt,
         )
 
     async def create_pagamento(
@@ -230,6 +231,7 @@ class FinanceiroService():
                 payment_cod=codigos[i],
                 obra_id=dto.obra_id,
                 diarist_id=dto.diarist_id,
+                requires_receipt=dto.requires_receipt,
             )
             pag = await self._build_pagamento(
                 item, team_id, actor_user, require_payment_code=(i == 0),
@@ -338,7 +340,8 @@ class FinanceiroService():
             raise errors.DomainError("Pagamento ja foi efetuado")
         if not any([dto.title is not None, dto.details is not None, dto.valor is not None,
                     dto.classe is not None,
-                    dto.data_agendada is not None, dto.payment_cod is not None, dto.obra_id is not None]):
+                    dto.data_agendada is not None, dto.payment_cod is not None, dto.obra_id is not None,
+                    dto.requires_receipt is not None]):
             raise errors.DomainError("Envie ao menos um campo para editar")
 
         effective_payment_cod = dto.payment_cod if dto.payment_cod is not None else pagamento.payment_cod
@@ -359,6 +362,8 @@ class FinanceiroService():
             pagamento.payment_cod = dto.payment_cod
         if dto.obra_id is not None:
             pagamento.obra_id = dto.obra_id
+        if dto.requires_receipt is not None:
+            pagamento.requires_receipt = dto.requires_receipt
 
         receiver_name = await self._resolve_receiver_name(pagamento.diarist_id, pagamento.team_id)
         amount = dto.valor if dto.valor is not None else pagamento.valor.amount
@@ -405,6 +410,8 @@ class FinanceiroService():
                 parcela.classe = dto.classe
             if dto.obra_id is not None:
                 parcela.obra_id = dto.obra_id
+            if dto.requires_receipt is not None:
+                parcela.requires_receipt = dto.requires_receipt
 
             if dto.valor is not None:
                 receiver_name = await self._resolve_receiver_name(
@@ -662,6 +669,8 @@ def _pag_to_response(p: PagamentoAgendado) -> PagamentoReadResponse:
         parcelamento_id=p.parcelamento_id,
         parcela_numero=p.parcela_numero,
         parcela_total=p.parcela_total,
+        requires_receipt=p.requires_receipt,
+        receipt_attached=p.receipt_attached,
     )
 
 

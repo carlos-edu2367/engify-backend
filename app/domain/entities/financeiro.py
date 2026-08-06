@@ -70,7 +70,9 @@ class PagamentoAgendado():
                  created_at: datetime = None,
                  parcelamento_id: UUID = None,
                  parcela_numero: int = None,
-                 parcela_total: int = None):
+                 parcela_total: int = None,
+                 requires_receipt: bool = False,
+                 receipt_attached: bool = False):
         self.id = id
         self.team_id = team_id
         self.title = title
@@ -94,6 +96,11 @@ class PagamentoAgendado():
         self.parcelamento_id = parcelamento_id
         self.parcela_numero = parcela_numero
         self.parcela_total = parcela_total
+        # Comprovante: requires_receipt e uma recomendacao ao pagador, nunca uma
+        # trava. receipt_attached e denormalizado a partir dos anexos da
+        # movimentacao gerada na baixa.
+        self.requires_receipt = requires_receipt
+        self.receipt_attached = receipt_attached
 
 
 class MovimentacaoAttachment():
@@ -101,7 +108,8 @@ class MovimentacaoAttachment():
     Suporta: image/*, application/pdf
     """
     def __init__(self, movimentacao_id: UUID, team_id: UUID, file_path: str,
-                 file_name: str, content_type: str, id: UUID = None):
+                 file_name: str, content_type: str, id: UUID = None,
+                 kind: str = "documento", origem_pagamento_id: UUID = None):
         self.id = id  # None para novas entidades; o repositório gera o UUID
         self.movimentacao_id = movimentacao_id
         self.team_id = team_id
@@ -110,6 +118,12 @@ class MovimentacaoAttachment():
         self.content_type = content_type
         self.is_deleted = False
         self.created_at = datetime.now(timezone.utc)
+        # "documento" (boleto/nota, inclusive copias vindas do pagamento) ou
+        # "comprovante" (enviado no fluxo de baixa).
+        self.kind = kind
+        # Preenchido nas copias vindas de um pagamento; permite filtrar a visao
+        # do engenheiro numa movimentacao de lote.
+        self.origem_pagamento_id = origem_pagamento_id
 
     def delete(self):
         self.is_deleted = True

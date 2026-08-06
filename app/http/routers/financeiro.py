@@ -304,6 +304,7 @@ async def create_pagamento(
         payment_cod=body.payment_cod,
         obra_id=body.obra_id,
         diarist_id=body.diarist_id,
+        requires_receipt=body.requires_receipt,
     )
     try:
         pag = await svc.create_pagamento(dto, user.team.id, actor_user=user)
@@ -331,6 +332,7 @@ async def create_pagamento_parcelado(
         payment_cods=body.payment_cods,
         obra_id=body.obra_id,
         diarist_id=body.diarist_id,
+        requires_receipt=body.requires_receipt,
     )
     try:
         parcelas = await svc.create_pagamento_parcelado(dto, user.team.id, actor_user=user)
@@ -408,6 +410,7 @@ async def update_pagamento(
         data_agendada=body.data_agendada,
         payment_cod=body.payment_cod,
         obra_id=body.obra_id,
+        requires_receipt=body.requires_receipt,
         apply_to=body.apply_to,
     )
     try:
@@ -674,6 +677,8 @@ def _pag_response(p) -> PagamentoResponse:
         parcelamento_id=p.parcelamento_id,
         parcela_numero=p.parcela_numero,
         parcela_total=p.parcela_total,
+        requires_receipt=p.requires_receipt,
+        receipt_attached=p.receipt_attached,
     )
 
 
@@ -693,4 +698,6 @@ def _pag_read_response(p) -> PagamentoReadResponse:
         parcelamento_id=p.parcelamento_id,
         parcela_numero=p.parcela_numero,
         parcela_total=p.parcela_total,
+        requires_receipt=p.requires_receipt,
+        receipt_attached=p.receipt_attached,
     )

@@ -175,6 +175,12 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
     )
     parcela_numero: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     parcela_total: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    requires_receipt: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    receipt_attached: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     team: Mapped["TeamModel"] = relationship(  # type: ignore[name-defined]
         back_populates="pagamentos", lazy="raise"
@@ -190,6 +196,11 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         Index("idx_pagamentos_team_creator_data", "team_id", "created_by_user_id", "data_agendada"),
         Index("idx_pagamentos_team_engineer_data", "team_id", "created_by_engineer", "data_agendada"),
         Index("idx_pagamentos_parcelamento", "parcelamento_id", "parcela_numero"),
+        Index(
+            "idx_pagamentos_comprovante_pendente",
+            "team_id", "data_agendada",
+            postgresql_where=text("requires_receipt AND NOT receipt_attached"),
+        ),
     )
 
     def to_domain(self) -> PagamentoAgendado:
@@ -215,6 +226,8 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         p.parcelamento_id = self.parcelamento_id
         p.parcela_numero = self.parcela_numero
         p.parcela_total = self.parcela_total
+        p.requires_receipt = self.requires_receipt
+        p.receipt_attached = self.receipt_attached
         return p
 
     @classmethod
@@ -241,6 +254,8 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
             parcelamento_id=p.parcelamento_id,
             parcela_numero=p.parcela_numero,
             parcela_total=p.parcela_total,
+            requires_receipt=p.requires_receipt,
+            receipt_attached=p.receipt_attached,
         )
 
     def update_from_domain(self, p: PagamentoAgendado) -> None:
@@ -259,6 +274,8 @@ class PagamentoAgendadoModel(Base, TimestampMixin):
         self.created_by_role = p.created_by_role
         self.created_by_name = p.created_by_name
         self.created_by_engineer = p.created_by_engineer
+        self.requires_receipt = p.requires_receipt
+        self.receipt_attached = p.receipt_attached
 
 
 class MovimentacaoAttachmentModel(Base, TimestampMixin):
@@ -283,6 +300,12 @@ class MovimentacaoAttachmentModel(Base, TimestampMixin):
     # Suporta image/* e application/pdf
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="documento", server_default=text("'documento'")
+    )
+    origem_pagamento_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
 
     movimentacao: Mapped["MovimentacaoModel"] = relationship(
         back_populates="attachments", lazy="raise"
@@ -303,6 +326,8 @@ class MovimentacaoAttachmentModel(Base, TimestampMixin):
         a.content_type = self.content_type
         a.is_deleted = self.is_deleted
         a.created_at = self.created_at
+        a.kind = self.kind
+        a.origem_pagamento_id = self.origem_pagamento_id
         return a
 
     @classmethod
@@ -315,6 +340,8 @@ class MovimentacaoAttachmentModel(Base, TimestampMixin):
             file_name=a.file_name,
             content_type=a.content_type,
             is_deleted=a.is_deleted,
+            kind=a.kind,
+            origem_pagamento_id=a.origem_pagamento_id,
         )
 
     def update_from_domain(self, a: MovimentacaoAttachment) -> None:

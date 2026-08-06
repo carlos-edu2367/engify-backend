@@ -39,6 +39,7 @@ class CreatePagamentoRequest(BaseModel):
     payment_cod: Optional[str] = None
     obra_id: Optional[UUID] = None
     diarist_id: Optional[UUID] = None
+    requires_receipt: bool = False
 
 
 class CreatePagamentoParceladoRequest(BaseModel):
@@ -51,6 +52,7 @@ class CreatePagamentoParceladoRequest(BaseModel):
     payment_cods: Optional[list[Optional[str]]] = None
     obra_id: Optional[UUID] = None
     diarist_id: Optional[UUID] = None
+    requires_receipt: bool = False
 
 
 class UpdatePagamentoRequest(BaseModel):
@@ -61,6 +63,7 @@ class UpdatePagamentoRequest(BaseModel):
     data_agendada: Optional[datetime] = None
     payment_cod: Optional[str] = None
     obra_id: Optional[UUID] = None
+    requires_receipt: Optional[bool] = None
     apply_to: Literal["self", "future"] = "self"
 
 
@@ -84,6 +87,8 @@ class PagamentoResponse(BaseModel):
     parcelamento_id: Optional[UUID] = None
     parcela_numero: Optional[int] = None
     parcela_total: Optional[int] = None
+    requires_receipt: bool = False
+    receipt_attached: bool = False
 
 
 class PagamentoReadResponse(PagamentoResponse):
@@ -98,6 +103,7 @@ class CreateObraPagamentoRequest(BaseModel):
     valor: Decimal
     data_agendada: datetime
     payment_cod: str
+    requires_receipt: bool = False
 
 
 class CreateObraPagamentoParceladoRequest(BaseModel):
@@ -107,6 +113,7 @@ class CreateObraPagamentoParceladoRequest(BaseModel):
     data_agendada: datetime
     parcelas: int = Field(ge=2, le=36)
     payment_cods: list[Optional[str]]
+    requires_receipt: bool = False
 
 
 # ── Baixa em Lote ─────────────────────────────────────────────────────────────
@@ -127,6 +134,7 @@ class CreateMovimentacaoAttachmentRequest(BaseModel):
     file_path: str
     file_name: str
     content_type: str
+    kind: Literal["documento", "comprovante"] = "documento"
 
 
 class MovimentacaoAttachmentResponse(BaseModel):
@@ -136,6 +144,8 @@ class MovimentacaoAttachmentResponse(BaseModel):
     file_name: str
     content_type: str
     created_at: datetime
+    kind: str
+    origem_pagamento_id: Optional[UUID] = None
 
 
 class CreatePagamentoAttachmentRequest(BaseModel):

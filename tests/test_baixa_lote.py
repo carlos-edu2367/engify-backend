@@ -40,6 +40,8 @@ def _make_pagamento(team_id, valor: str = "100.00",
     p.parcelamento_id = None
     p.parcela_numero = None
     p.parcela_total = None
+    p.requires_receipt = False
+    p.receipt_attached = False
     return p
 
 
