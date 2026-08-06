@@ -28,6 +28,7 @@ from app.application.services.obra_service import (
 from app.application.services.notificacao_service import NotificacaoService
 from app.application.services.financeiro_service import FinanceiroService
 from app.application.services.financeiro_fluxo_caixa_service import FinanceiroFluxoCaixaService
+from app.application.services.obra_financeiro_resumo_service import ObraFinanceiroResumoService
 from app.application.services.rh_audit_service import RhAuditService
 from app.application.services.rh_dashboard_service import RhDashboardService
 from app.application.services.rh_funcionario_service import RhFuncionarioService
@@ -287,6 +288,14 @@ async def get_financeiro_service(session: Session) -> FinanceiroService:
 async def get_financeiro_fluxo_caixa_service(session: Session) -> FinanceiroFluxoCaixaService:
     return FinanceiroFluxoCaixaService(
         mov_repo=MovimentacaoRepositoryImpl(session),
+    )
+
+
+async def get_obra_financeiro_resumo_service(session: Session) -> ObraFinanceiroResumoService:
+    return ObraFinanceiroResumoService(
+        obra_repo=ObraRepositoryImpl(session),
+        mov_repo=MovimentacaoRepositoryImpl(session),
+        pagamento_repo=PagamentoAgendadoRepositoryImpl(session),
     )
 
 
@@ -575,6 +584,7 @@ ItemServiceDep = Annotated[ItemService, Depends(get_item_service)]
 DiaryServiceDep = Annotated[DiaryService, Depends(get_diary_service)]
 FinanceiroServiceDep = Annotated[FinanceiroService, Depends(get_financeiro_service)]
 FinanceiroFluxoCaixaServiceDep = Annotated[FinanceiroFluxoCaixaService, Depends(get_financeiro_fluxo_caixa_service)]
+ObraFinanceiroResumoServiceDep = Annotated[ObraFinanceiroResumoService, Depends(get_obra_financeiro_resumo_service)]
 RhAuditServiceDep = Annotated[RhAuditService, Depends(get_rh_audit_service)]
 RhFuncionarioServiceDep = Annotated[RhFuncionarioService, Depends(get_rh_funcionario_service)]
 RhLocalPontoServiceDep = Annotated[RhLocalPontoService, Depends(get_rh_local_ponto_service)]

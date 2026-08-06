@@ -12,6 +12,7 @@ from app.http.middleware.security_headers import SecurityHeadersMiddleware
 from app.http.middleware.error_middleware import register_exception_handlers
 from app.http.routers import auth
 from app.http.routers import teams, users, obras, items, diarias, financeiro, storage
+from app.http.routers import obra_financeiro
 from app.http.routers import mural
 from app.http.routers import public_obras
 from app.http.routers import categorias_obras
@@ -67,6 +68,7 @@ app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(teams.router, prefix=settings.api_prefix)
 app.include_router(users.router, prefix=settings.api_prefix)
 app.include_router(obras.router, prefix=settings.api_prefix)
+app.include_router(obra_financeiro.router, prefix=settings.api_prefix)
 app.include_router(items.router, prefix=settings.api_prefix)
 app.include_router(diarias.router, prefix=settings.api_prefix)
 app.include_router(financeiro.router, prefix=settings.api_prefix)

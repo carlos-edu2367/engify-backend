@@ -11,6 +11,7 @@ from app.application.dtos.obra import CreateDiary, EditDiary, DiariesResponse
 from app.domain.errors import DomainError
 from app.infra.cache.client import get_redis
 from app.infra.cache.keys import diarias_list_key, diarias_pattern, pagamentos_version_key
+from app.infra.cache.invalidation import invalidate_obra_financeiro_resumo
 from app.core.limiter import limiter
 
 router = APIRouter(prefix="/diarias", tags=["Diárias"])
@@ -50,6 +51,7 @@ async def create_diary(body: CreateDiary, user: EngineerUser, svc: DiaryServiceD
     redis = get_redis()
     await _invalidate_diarias_cache(redis, user.team.id)
     await redis.incr(pagamentos_version_key(user.team.id))
+    await invalidate_obra_financeiro_resumo(redis, user.team.id)
     return _diary_to_response(diary)
 
 

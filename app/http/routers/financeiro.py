@@ -44,6 +44,7 @@ from app.infra.cache.keys import (
     movimentacao_delete_lock_key, movimentacao_deleted_tombstone_key,
     fluxo_caixa_key, fluxo_caixa_pattern, public_obra_key,
 )
+from app.infra.cache.invalidation import invalidate_obra_financeiro_resumo
 from app.core.limiter import limiter
 
 router = APIRouter(prefix="/financeiro", tags=["Financeiro"])
@@ -54,6 +55,7 @@ async def _invalidate_movimentacoes_cache(redis, team_id: UUID) -> None:
     async for key in redis.scan_iter(match=pattern, count=100):
         await redis.delete(key)
     await _invalidate_fluxo_caixa_cache(redis, team_id)
+    await invalidate_obra_financeiro_resumo(redis, team_id)
 
 
 async def _invalidate_mov_attachments_cache(redis, team_id: UUID, mov_id: UUID) -> None:
@@ -75,6 +77,7 @@ async def _invalidate_pagamentos_cache(redis, team_id: UUID) -> None:
     # futura acessa e que expira sozinha pelo TTL. Isso fecha a race em que
     # a escrita da listagem chega depois do SCAN+DEL e deixa dado stale.
     await redis.incr(pagamentos_version_key(team_id))
+    await invalidate_obra_financeiro_resumo(redis, team_id)
 
 
 async def _invalidate_fluxo_caixa_cache(redis, team_id: UUID) -> None:

@@ -48,6 +48,14 @@ class MovimentacaoRepository(ABC):
         """Retorna agregação mensal de entradas e saídas para o fluxo de caixa."""
         pass
 
+    @abstractmethod
+    async def get_resumo_obra(self, obra_id: UUID, team_id: UUID) -> list[dict]:
+        """Agregado financeiro de uma obra, agrupado por (type, classe).
+
+        Filtra obra_id + team_id + is_deleted = false. Cada linha traz as
+        chaves: type, classe, total, qtd."""
+        pass
+
 
 class PagamentoAgendadoRepository(ABC):
     @abstractmethod
@@ -102,6 +110,14 @@ class PagamentoAgendadoRepository(ABC):
     @abstractmethod
     async def delete_unpaid(self, id: UUID, team_id: UUID, created_by_user_id: UUID | None = None) -> bool:
         """Remove um pagamento pendente do tenant. Retorna False se nao removeu."""
+        pass
+
+    @abstractmethod
+    async def get_comprometido_obra(self, obra_id: UUID, team_id: UUID) -> list[dict]:
+        """Custo comprometido de uma obra, agrupado por classe.
+
+        Soma pagamentos com status AGUARDANDO. A tabela nao tem is_deleted:
+        remocao e hard delete. Cada linha traz: classe, total, qtd."""
         pass
 
 

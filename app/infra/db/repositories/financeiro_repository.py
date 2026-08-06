@@ -197,6 +197,24 @@ class MovimentacaoRepositoryImpl(MovimentacaoRepository):
         result = await self._session.execute(stmt)
         return [dict(row._mapping) for row in result.all()]
 
+    async def get_resumo_obra(self, obra_id: UUID, team_id: UUID) -> list[dict]:
+        stmt = (
+            select(
+                MovimentacaoModel.type.label("type"),
+                MovimentacaoModel.classe.label("classe"),
+                func.sum(MovimentacaoModel.valor_amount).label("total"),
+                func.count().label("qtd"),
+            )
+            .where(
+                MovimentacaoModel.team_id == team_id,
+                MovimentacaoModel.obra_id == obra_id,
+                MovimentacaoModel.is_deleted == False,  # noqa: E712
+            )
+            .group_by(MovimentacaoModel.type, MovimentacaoModel.classe)
+        )
+        result = await self._session.execute(stmt)
+        return [dict(row._mapping) for row in result.all()]
+
 
 class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
     def __init__(self, session: AsyncSession) -> None:
@@ -353,6 +371,23 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
         result = await self._session.execute(stmt)
         await self._session.flush()
         return (result.rowcount or 0) > 0
+
+    async def get_comprometido_obra(self, obra_id: UUID, team_id: UUID) -> list[dict]:
+        stmt = (
+            select(
+                PagamentoAgendadoModel.classe.label("classe"),
+                func.sum(PagamentoAgendadoModel.valor_amount).label("total"),
+                func.count().label("qtd"),
+            )
+            .where(
+                PagamentoAgendadoModel.team_id == team_id,
+                PagamentoAgendadoModel.obra_id == obra_id,
+                PagamentoAgendadoModel.status == PaymentStatus.AGUARDANDO.value,
+            )
+            .group_by(PagamentoAgendadoModel.classe)
+        )
+        result = await self._session.execute(stmt)
+        return [dict(row._mapping) for row in result.all()]
 
 
 class MovimentacaoAttachmentRepositoryImpl(MovimentacaoAttachmentRepository):

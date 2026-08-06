@@ -71,6 +71,10 @@ def fluxo_caixa_key(team_id: UUID, range_str: str) -> str:
     return f"{team_id}:fluxo_caixa:{range_str}"
 
 
+def obra_financeiro_resumo_key(team_id: UUID, obra_id: UUID) -> str:
+    return f"{team_id}:obras:{obra_id}:financeiro:resumo"
+
+
 def users_list_key(team_id: UUID) -> str:
     return f"{team_id}:users:list"
 
@@ -107,6 +111,10 @@ def movimentacoes_pattern(team_id: UUID) -> str:
 
 def fluxo_caixa_pattern(team_id: UUID) -> str:
     return f"{team_id}:fluxo_caixa:*"
+
+
+def obra_financeiro_resumo_pattern(team_id: UUID) -> str:
+    return f"{team_id}:obras:*:financeiro:resumo"
 
 
 def rh_geofences_pattern(team_id: UUID, funcionario_id: UUID) -> str:

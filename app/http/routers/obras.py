@@ -26,6 +26,7 @@ from app.infra.cache.keys import (
     pagamentos_version_key, public_obra_key, movimentacoes_pattern,
     entradas_obra_key, entradas_obra_pattern,
 )
+from app.infra.cache.invalidation import invalidate_obra_financeiro_resumo
 
 router = APIRouter(prefix="/obras", tags=["Obras"])
 
@@ -64,12 +65,14 @@ async def _invalidate_obras_cache(redis, team_id: UUID) -> None:
     pattern = obras_pattern(team_id)
     async for key in redis.scan_iter(match=pattern, count=100):
         await redis.delete(key)
+    await invalidate_obra_financeiro_resumo(redis, team_id)
 
 
 async def _invalidate_movimentacoes_cache(redis, team_id: UUID) -> None:
     pattern = movimentacoes_pattern(team_id)
     async for key in redis.scan_iter(match=pattern, count=100):
         await redis.delete(key)
+    await invalidate_obra_financeiro_resumo(redis, team_id)
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -246,6 +249,7 @@ async def create_obra_pagamento(
 
     redis = get_redis()
     await redis.incr(pagamentos_version_key(user.team.id))
+    await invalidate_obra_financeiro_resumo(redis, user.team.id)
 
     return PagamentoResponse(
         id=pag.id,
@@ -301,6 +305,7 @@ async def create_obra_pagamento_parcelado(
 
     redis = get_redis()
     await redis.incr(pagamentos_version_key(user.team.id))
+    await invalidate_obra_financeiro_resumo(redis, user.team.id)
 
     return [
         PagamentoResponse(
