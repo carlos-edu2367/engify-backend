@@ -275,3 +275,61 @@ async def test_edicao_future_em_pagamento_avulso_age_como_self(team_id):
     editado = await svc.edit_pagamento(avulso, dto, actor_user=actor)
 
     assert editado.title == "Editado"
+
+
+@pytest.mark.asyncio
+async def test_delete_self_remove_apenas_a_parcela(team_id):
+    svc, pag_repo, _ = _make_service()
+    actor = _make_user(team_id)
+    parcelas = await _criar_parcelamento(svc, team_id, actor)
+
+    removidos = await svc.delete_pagamento(parcelas[1].id, team_id, actor_user=actor)
+
+    assert removidos == 1
+    assert pag_repo.delete_unpaid.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_scope_parcelamento_remove_todas_aguardando(team_id):
+    svc, pag_repo, _ = _make_service()
+    actor = _make_user(team_id)
+    parcelas = await _criar_parcelamento(svc, team_id, actor)
+    parcelas[0].status = PaymentStatus.PAGO
+
+    removidos = await svc.delete_pagamento(
+        parcelas[1].id, team_id, actor_user=actor, scope="parcelamento",
+    )
+
+    # 4 parcelas, 1 ja paga -> 3 removidas
+    assert removidos == 3
+    ids_removidos = {c.args[0] for c in pag_repo.delete_unpaid.await_args_list}
+    assert parcelas[0].id not in ids_removidos
+
+
+@pytest.mark.asyncio
+async def test_delete_scope_parcelamento_em_avulso_remove_um(team_id):
+    svc, _, _ = _make_service()
+    actor = _make_user(team_id)
+    avulso = await svc.create_pagamento(
+        CreatePagamentoDTO(
+            title="Avulso", details="", valor=Decimal("50.00"), classe=MovClass.FIXO,
+            data_agendada=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        ),
+        team_id, actor_user=actor,
+    )
+
+    removidos = await svc.delete_pagamento(
+        avulso.id, team_id, actor_user=actor, scope="parcelamento",
+    )
+    assert removidos == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_parcela_ja_paga_rejeitado(team_id):
+    svc, _, _ = _make_service()
+    actor = _make_user(team_id)
+    parcelas = await _criar_parcelamento(svc, team_id, actor)
+    parcelas[1].status = PaymentStatus.PAGO
+
+    with pytest.raises(DomainError, match="ja foi efetuado"):
+        await svc.delete_pagamento(parcelas[1].id, team_id, actor_user=actor)

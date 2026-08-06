@@ -1,5 +1,6 @@
 import json
-from fastapi import APIRouter, HTTPException, Request
+from typing import Annotated, Literal
+from fastapi import APIRouter, HTTPException, Query, Request
 from uuid import UUID
 
 from app.http.schemas.financeiro import (
@@ -424,10 +425,16 @@ async def delete_pagamento(
     pagamento_id: UUID,
     user: ManagerUser,
     svc: FinanceiroServiceDep,
+    scope: Annotated[
+        Literal["self", "parcelamento"],
+        Query(description="'self' remove so este pagamento; 'parcelamento' remove todas as parcelas aguardando do grupo"),
+    ] = "self",
 ):
     """Remove um pagamento agendado ainda nao pago. Restrito ao tenant do usuario."""
     try:
-        await svc.delete_pagamento(pagamento_id, user.team.id, actor_user=user)
+        removidos = await svc.delete_pagamento(
+            pagamento_id, user.team.id, actor_user=user, scope=scope,
+        )
     except DomainError as e:
         detail = str(e)
         if "nao encontrado" in detail.lower() or "não encontrado" in detail.lower():
@@ -436,6 +443,8 @@ async def delete_pagamento(
 
     redis = get_redis()
     await _invalidate_pagamentos_cache(redis, user.team.id)
+    if removidos > 1:
+        return MessageResponse(message=f"{removidos} parcelas removidas com sucesso")
     return MessageResponse(message="Pagamento removido com sucesso")
 
 

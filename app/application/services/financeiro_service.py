@@ -292,22 +292,42 @@ class FinanceiroService():
         return pagamento
 
     async def delete_pagamento(
-        self, id: UUID, team_id: UUID, actor_user: User | None = None
-    ) -> None:
+        self, id: UUID, team_id: UUID, actor_user: User | None = None,
+        scope: str = "self",
+    ) -> int:
+        """Remove um pagamento pendente. Com scope='parcelamento', remove todas
+        as parcelas aguardando do mesmo grupo. Retorna quantas foram removidas."""
         pagamento = await self.pagamento_repo.get_by_id(id, team_id)
         _ensure_pagamento_visible_to_actor(pagamento, actor_user)
         if pagamento.status == PaymentStatus.PAGO:
             raise errors.DomainError("Pagamento ja foi efetuado")
 
+        alvos = [pagamento]
+        if scope == "parcelamento" and pagamento.parcelamento_id is not None:
+            irmas = await self.pagamento_repo.list_by_parcelamento(
+                pagamento.parcelamento_id, team_id,
+            )
+            alvos = [
+                p for p in irmas
+                if p.status != PaymentStatus.PAGO
+                and _is_pagamento_visible_to_actor(p, actor_user)
+            ]
+
         owner_id = actor_user.id if _is_engineer(actor_user) else None
-        if owner_id is None:
-            deleted = await self.pagamento_repo.delete_unpaid(id, team_id)
-        else:
-            deleted = await self.pagamento_repo.delete_unpaid(id, team_id, owner_id)
-        if not deleted:
+        removidos = 0
+        for alvo in alvos:
+            if owner_id is None:
+                deleted = await self.pagamento_repo.delete_unpaid(alvo.id, team_id)
+            else:
+                deleted = await self.pagamento_repo.delete_unpaid(alvo.id, team_id, owner_id)
+            if deleted:
+                removidos += 1
+
+        if removidos == 0:
             raise errors.DomainError("Pagamento ja foi efetuado")
 
         await self.uow.commit()
+        return removidos
 
     async def edit_pagamento(
         self, pagamento: PagamentoAgendado, dto: EditPagamentoDTO,
@@ -636,8 +656,16 @@ def _has_payment_code(payment_cod: str | None) -> bool:
     return bool(payment_cod and payment_cod.strip())
 
 
+def _is_pagamento_visible_to_actor(
+    pagamento: PagamentoAgendado, actor_user: User | None
+) -> bool:
+    if not _is_engineer(actor_user):
+        return True
+    return pagamento.created_by_user_id == actor_user.id
+
+
 def _ensure_pagamento_visible_to_actor(
     pagamento: PagamentoAgendado, actor_user: User | None
 ) -> None:
-    if _is_engineer(actor_user) and pagamento.created_by_user_id != actor_user.id:
+    if not _is_pagamento_visible_to_actor(pagamento, actor_user):
         raise errors.DomainError("Pagamento nao encontrado")
