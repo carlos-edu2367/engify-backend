@@ -28,6 +28,13 @@ class MovimentacaoResponse(BaseModel):
     data_movimentacao: datetime
 
 
+class PayPagamentoResponse(MovimentacaoResponse):
+    """Resposta da baixa individual: a movimentacao gerada mais o contexto que
+    o front usa para sugerir o anexo do comprovante."""
+    pagamento_id: UUID
+    requires_receipt: bool = False
+
+
 # ── Pagamentos Agendados ───────────────────────────────────────────────────────
 
 class CreatePagamentoRequest(BaseModel):
@@ -126,6 +133,7 @@ class BaixaLoteResponse(BaseModel):
     quantidade: int
     valor_total: Decimal
     movimentacao_id: UUID
+    comprovante_pendente_count: int = 0
 
 
 # ── Anexos ─────────────────────────────────────────────────────────────────────

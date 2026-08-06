@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from uuid import UUID
 
 from app.http.schemas.financeiro import (
-    CreateMovimentacaoRequest, MovimentacaoResponse,
+    CreateMovimentacaoRequest, MovimentacaoResponse, PayPagamentoResponse,
     CreatePagamentoRequest, CreatePagamentoParceladoRequest,
     UpdatePagamentoRequest, PagamentoReadResponse, PagamentoResponse,
     CreateMovimentacaoAttachmentRequest, MovimentacaoAttachmentResponse,
@@ -215,11 +215,14 @@ async def add_movimentacao_attachment(
     try:
         mov = await svc.get_movimentacao_by_team(movimentacao_id, user.team.id)
         dto = AddMovimentacaoAttachmentDTO(
-            file_path=body.file_path, file_name=body.file_name, content_type=body.content_type
+            file_path=body.file_path, file_name=body.file_name, content_type=body.content_type,
+            kind=body.kind,
         )
         att = await svc.add_attachment(mov, dto)
         redis = get_redis()
         await _invalidate_mov_attachments_cache(redis, user.team.id, movimentacao_id)
+        if body.kind == "comprovante":
+            await _invalidate_pagamentos_cache(redis, user.team.id)
         if mov.obra_id is not None:
             await redis.delete(public_obra_key(mov.obra_id))
         return MovimentacaoAttachmentResponse(
@@ -229,6 +232,8 @@ async def add_movimentacao_attachment(
             file_name=att.file_name,
             content_type=att.content_type,
             created_at=att.created_at,
+            kind=att.kind,
+            origem_pagamento_id=att.origem_pagamento_id,
         )
     except DomainError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -254,7 +259,8 @@ async def list_movimentacao_attachments(
             MovimentacaoAttachmentResponse(
                 id=a.id, movimentacao_id=a.movimentacao_id,
                 file_path=a.file_path, file_name=a.file_name,
-                content_type=a.content_type, created_at=a.created_at
+                content_type=a.content_type, created_at=a.created_at,
+                kind=a.kind, origem_pagamento_id=a.origem_pagamento_id,
             ) for a in atts
         ]
         await redis.set(
@@ -451,7 +457,7 @@ async def delete_pagamento(
     return MessageResponse(message="Pagamento removido com sucesso")
 
 
-@router.patch("/pagamentos/{pagamento_id}/pay", response_model=MovimentacaoResponse)
+@router.patch("/pagamentos/{pagamento_id}/pay", response_model=PayPagamentoResponse)
 async def pay_pagamento(
     pagamento_id: UUID,
     user: FinanceiroUser,
@@ -474,12 +480,13 @@ async def pay_pagamento(
     redis = get_redis()
     await _invalidate_pagamentos_cache(redis, user.team.id)
     await _invalidate_movimentacoes_cache(redis, user.team.id)
-    return MovimentacaoResponse(
+    return PayPagamentoResponse(
         id=mov.id, title=mov.title, type=mov.type,
         valor=mov.valor.amount, classe=mov.classe,
         natureza=mov.natureza, obra_id=mov.obra_id,
-        pagamento_id=mov.pagamento_id,
+        pagamento_id=pag.id,
         data_movimentacao=mov.data_movimentacao,
+        requires_receipt=pag.requires_receipt,
     )
 
 
@@ -514,6 +521,7 @@ async def baixa_lote_pagamentos(
         quantidade=resultado.quantidade,
         valor_total=resultado.valor_total,
         movimentacao_id=resultado.movimentacao_id,
+        comprovante_pendente_count=resultado.comprovante_pendente_count,
     )
 
 
