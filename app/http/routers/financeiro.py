@@ -4,7 +4,8 @@ from uuid import UUID
 
 from app.http.schemas.financeiro import (
     CreateMovimentacaoRequest, MovimentacaoResponse,
-    CreatePagamentoRequest, UpdatePagamentoRequest, PagamentoReadResponse, PagamentoResponse,
+    CreatePagamentoRequest, CreatePagamentoParceladoRequest,
+    UpdatePagamentoRequest, PagamentoReadResponse, PagamentoResponse,
     CreateMovimentacaoAttachmentRequest, MovimentacaoAttachmentResponse,
     CreatePagamentoAttachmentRequest, PagamentoAttachmentResponse,
     BaixaLoteRequest, BaixaLoteResponse,
@@ -24,7 +25,7 @@ from app.http.dependencies.services import (
     CommissionReportJobStatusUseCaseDep,
 )
 from app.application.dtos.financeiro import (
-    CreateMovimentacaoDTO, CreatePagamentoDTO, EditPagamentoDTO,
+    CreateMovimentacaoDTO, CreatePagamentoDTO, CreatePagamentoParceladoDTO, EditPagamentoDTO,
     AddMovimentacaoAttachmentDTO, AddPagamentoAttachmentDTO, BaixaLoteDTO,
 )
 from app.application.use_cases.generate_monthly_commission_report import (
@@ -310,6 +311,33 @@ async def create_pagamento(
     redis = get_redis()
     await _invalidate_pagamentos_cache(redis, user.team.id)
     return _pag_response(pag)
+
+
+@router.post("/pagamentos/parcelado", response_model=list[PagamentoResponse], status_code=201)
+async def create_pagamento_parcelado(
+    body: CreatePagamentoParceladoRequest,
+    user: ManagerUser,
+    svc: FinanceiroServiceDep,
+):
+    """Agenda um pagamento em N parcelas. Restrito a ADMIN, ENG e FIN."""
+    dto = CreatePagamentoParceladoDTO(
+        title=body.title,
+        details=body.details,
+        valor=body.valor,
+        classe=body.classe,
+        data_agendada=body.data_agendada,
+        parcelas=body.parcelas,
+        payment_cods=body.payment_cods,
+        obra_id=body.obra_id,
+        diarist_id=body.diarist_id,
+    )
+    try:
+        parcelas = await svc.create_pagamento_parcelado(dto, user.team.id, actor_user=user)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    redis = get_redis()
+    await _invalidate_pagamentos_cache(redis, user.team.id)
+    return [_pag_response(p) for p in parcelas]
 
 
 @router.get("/pagamentos", response_model=PaginatedResponse[PagamentoReadResponse])

@@ -51,6 +51,11 @@ class PagamentoAgendadoRepository(ABC):
         pass
 
     @abstractmethod
+    async def list_by_parcelamento(self, parcelamento_id: UUID, team_id: UUID) -> list[PagamentoAgendado]:
+        """Parcelas de um parcelamento, ordenadas por parcela_numero. Seguro por tenant."""
+        pass
+
+    @abstractmethod
     async def list_by_team(self, team_id: UUID, page: int, limit: int, filters: PagamentoFiltersDTO | None = None) -> list[PagamentoAgendado]:
         pass
 

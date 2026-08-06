@@ -201,6 +201,18 @@ class PagamentoAgendadoRepositoryImpl(PagamentoAgendadoRepository):
         result = await self._session.execute(stmt)
         return [m.to_domain() for m in result.scalars().all()]
 
+    async def list_by_parcelamento(self, parcelamento_id: UUID, team_id: UUID) -> list[PagamentoAgendado]:
+        stmt = (
+            select(PagamentoAgendadoModel)
+            .where(
+                PagamentoAgendadoModel.parcelamento_id == parcelamento_id,
+                PagamentoAgendadoModel.team_id == team_id,
+            )
+            .order_by(PagamentoAgendadoModel.parcela_numero.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [m.to_domain() for m in result.scalars().all()]
+
     def _apply_filters(self, stmt, filters: PagamentoFiltersDTO | None):
         if not filters:
             return stmt

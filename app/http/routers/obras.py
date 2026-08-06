@@ -8,13 +8,15 @@ from app.http.schemas.obras import (
     RegisterObraImageRequest, RegisterObraImagesBatchRequest, ObraImageResponse,
     AddRecebimentoRequest, RecebimentoResponse,
 )
-from app.http.schemas.financeiro import CreateObraPagamentoRequest, PagamentoResponse
+from app.http.schemas.financeiro import (
+    CreateObraPagamentoRequest, CreateObraPagamentoParceladoRequest, PagamentoResponse,
+)
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.dependencies.auth import CurrentUser, EngineerUser, AdminUser, ManagerUser
 from app.http.dependencies.pagination import Pagination
 from app.http.dependencies.services import ObraServiceDep, ItemServiceDep, ObraImageServiceDep, FinanceiroServiceDep, RecebimentoServiceDep
 from app.application.dtos.obra import CreateObraDTO, EditObraInfo, CreateObraImage, DeleteRecebimentoDTO
-from app.application.dtos.financeiro import CreatePagamentoDTO
+from app.application.dtos.financeiro import CreatePagamentoDTO, CreatePagamentoParceladoDTO
 from app.domain.entities.financeiro import MovClass
 from app.domain.entities.obra import Status
 from app.domain.errors import DomainError
@@ -262,6 +264,53 @@ async def create_obra_pagamento(
         created_by_engineer=pag.created_by_engineer,
         created_at=pag.created_at,
     )
+
+
+@router.post("/{obra_id}/pagamentos/parcelado", response_model=list[PagamentoResponse], status_code=201)
+async def create_obra_pagamento_parcelado(
+    obra_id: UUID,
+    body: CreateObraPagamentoParceladoRequest,
+    user: EngineerUser,
+    svc: ObraServiceDep,
+    fin_svc: FinanceiroServiceDep,
+):
+    """Agenda um pagamento parcelado vinculado a obra. Restrito a ADMIN e ENG."""
+    try:
+        await svc.get_obra(obra_id, user.team.id)
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Obra não encontrada")
+
+    dto = CreatePagamentoParceladoDTO(
+        title=body.title,
+        details=body.details,
+        valor=body.valor,
+        classe=MovClass.SERVICO,
+        data_agendada=body.data_agendada,
+        parcelas=body.parcelas,
+        payment_cods=body.payment_cods,
+        obra_id=obra_id,
+    )
+    try:
+        parcelas = await fin_svc.create_pagamento_parcelado(dto, user.team.id, actor_user=user)
+    except DomainError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    redis = get_redis()
+    await redis.incr(pagamentos_version_key(user.team.id))
+
+    return [
+        PagamentoResponse(
+            id=p.id, title=p.title, details=p.details, valor=p.valor.amount,
+            classe=p.classe, status=p.status, data_agendada=p.data_agendada,
+            payment_cod=p.payment_cod, obra_id=p.obra_id, diarist_id=p.diarist_id,
+            payment_date=p.payment_date, created_by_user_id=p.created_by_user_id,
+            created_by_role=p.created_by_role, created_by_name=p.created_by_name,
+            created_by_engineer=p.created_by_engineer, created_at=p.created_at,
+            parcelamento_id=p.parcelamento_id, parcela_numero=p.parcela_numero,
+            parcela_total=p.parcela_total,
+        )
+        for p in parcelas
+    ]
 
 
 # ── Recebimentos ──────────────────────────────────────────────────────────────

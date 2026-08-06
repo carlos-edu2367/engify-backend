@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import UUID
 from decimal import Decimal
 from typing import Optional
@@ -37,6 +37,18 @@ class CreatePagamentoRequest(BaseModel):
     classe: MovClass
     data_agendada: datetime
     payment_cod: Optional[str] = None
+    obra_id: Optional[UUID] = None
+    diarist_id: Optional[UUID] = None
+
+
+class CreatePagamentoParceladoRequest(BaseModel):
+    title: str
+    details: str
+    valor: Decimal  # valor TOTAL, dividido entre as parcelas
+    classe: MovClass
+    data_agendada: datetime  # vencimento da 1a parcela
+    parcelas: int = Field(ge=2, le=36)
+    payment_cods: Optional[list[Optional[str]]] = None
     obra_id: Optional[UUID] = None
     diarist_id: Optional[UUID] = None
 
@@ -85,6 +97,15 @@ class CreateObraPagamentoRequest(BaseModel):
     valor: Decimal
     data_agendada: datetime
     payment_cod: str
+
+
+class CreateObraPagamentoParceladoRequest(BaseModel):
+    title: str
+    details: str
+    valor: Decimal
+    data_agendada: datetime
+    parcelas: int = Field(ge=2, le=36)
+    payment_cods: list[Optional[str]]
 
 
 # ── Baixa em Lote ─────────────────────────────────────────────────────────────
