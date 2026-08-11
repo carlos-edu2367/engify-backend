@@ -35,7 +35,7 @@ from app.domain.entities.rh_calendario import EventoCalendarioRh
 from app.domain.errors import DomainError
 from app.http.dependencies.auth import CurrentUser, RHAdminUser
 from app.http.dependencies.pagination import Pagination
-from app.http.dependencies.services import RhCalendarioServiceDep, RhDashboardServiceDep, RhEncargoServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
+from app.http.dependencies.services import RhCalendarioServiceDep, RhDashboardServiceDep, RhEncargoServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoExportServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.schemas.rh import (
     RhFuncionarioCreateRequest,
@@ -1037,6 +1037,29 @@ async def list_ponto_dias(
         page=pagination.page,
         limit=pagination.limit,
         total=total,
+    )
+
+
+@router.get("/ponto/export")
+async def exportar_cartoes_ponto(
+    user: RHAdminUser,
+    svc: RhPontoExportServiceDep,
+    start: date = Query(...),
+    end: date = Query(...),
+    funcionario_id: UUID | None = Query(default=None),
+):
+    try:
+        conteudo = await svc.exportar_cartoes(user, start, end, funcionario_id=funcionario_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    nome = svc.nome_arquivo(start, end)
+    return Response(
+        content=conteudo,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{nome}"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
     )
 
 

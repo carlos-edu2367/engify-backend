@@ -32,6 +32,7 @@ from app.application.services.obra_financeiro_resumo_service import ObraFinancei
 from app.application.services.rh_audit_service import RhAuditService
 from app.application.services.rh_dashboard_service import RhDashboardService
 from app.application.services.rh_funcionario_service import RhFuncionarioService
+from app.application.services.rh_ponto_export_service import RhPontoExportService
 from app.application.services.rh_ponto_service import RhLocalPontoService, RhPontoService
 from app.application.services.rh_folha_service import RhFolhaService
 from app.application.services.rh_encargo_service import RhEncargoService
@@ -348,6 +349,13 @@ async def get_rh_ponto_service(session: Session) -> RhPontoService:
     )
 
 
+async def get_rh_ponto_export_service(session: Session) -> RhPontoExportService:
+    return RhPontoExportService(
+        funcionario_repo=FuncionarioRepositoryImpl(session),
+        registro_ponto_repo=RegistroPontoRepositoryImpl(session),
+    )
+
+
 async def get_rh_solicitacoes_service(session: Session) -> RhSolicitacoesService:
     folha_service = await get_rh_folha_service(session)
 
@@ -589,6 +597,7 @@ RhAuditServiceDep = Annotated[RhAuditService, Depends(get_rh_audit_service)]
 RhFuncionarioServiceDep = Annotated[RhFuncionarioService, Depends(get_rh_funcionario_service)]
 RhLocalPontoServiceDep = Annotated[RhLocalPontoService, Depends(get_rh_local_ponto_service)]
 RhPontoServiceDep = Annotated[RhPontoService, Depends(get_rh_ponto_service)]
+RhPontoExportServiceDep = Annotated[RhPontoExportService, Depends(get_rh_ponto_export_service)]
 RhSolicitacoesServiceDep = Annotated[RhSolicitacoesService, Depends(get_rh_solicitacoes_service)]
 RhCalendarioServiceDep = Annotated[RhCalendarioService, Depends(get_rh_calendario_service)]
 RhFolhaServiceDep = Annotated[RhFolhaService, Depends(get_rh_folha_service)]
