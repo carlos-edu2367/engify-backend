@@ -52,6 +52,7 @@ from app.domain.entities.rh import (
     StatusRegraEncargo,
     StatusPonto,
 )
+from app.core.tempo import local_tz
 from app.domain.services.rh_beneficio_calculo import (
     contar_faltas,
     dias_uteis_competencia,
@@ -760,6 +761,7 @@ class RhFolhaService:
             fim=end.date(),
             datas_abonadas=datas_abonadas,
             liberacoes=liberacoes,
+            tz=local_tz(),
         )
         horas_extras = valor_hora_extra(funcionario.salario_base, resumo.extra_min, config)
         descontos_falta = valor_falta(funcionario.salario_base, resumo.falta_min, config)

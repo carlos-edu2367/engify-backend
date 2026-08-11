@@ -367,3 +367,48 @@ def test_resumir_periodo_devolve_um_registro_por_dia_do_periodo():
         date(2026, 7, 11),
         date(2026, 7, 12),
     ]
+
+
+def test_resumir_periodo_agrupa_batidas_pelo_dia_do_fuso_informado():
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("America/Sao_Paulo")
+    funcionario_id = uuid4()
+    team_id = uuid4()
+
+    def _reg_utc(momento: datetime, tipo: TipoPonto) -> RegistroPonto:
+        return RegistroPonto(
+            team_id=team_id,
+            funcionario_id=funcionario_id,
+            tipo=tipo,
+            timestamp=momento,
+            latitude=0.0,
+            longitude=0.0,
+            status=StatusPonto.VALIDADO,
+        )
+
+    # Jornada noturna de 06/07/2026: entra 18h e sai 23h locais.
+    # A saida, em UTC, ja e 07/07 as 02h.
+    registros = [
+        _reg_utc(datetime(2026, 7, 6, 21, 0, tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _reg_utc(datetime(2026, 7, 7, 2, 0, tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]
+    turno = TurnoHorario(
+        dia_semana=0,
+        hora_entrada=time(18, 0),
+        hora_saida=time(23, 0),
+        intervalos=[],
+    )
+
+    resumo = resumir_periodo(
+        registros=registros,
+        turno_para_dia=lambda dia: turno if dia == 0 else None,
+        inicio=date(2026, 7, 6),
+        fim=date(2026, 7, 6),
+        datas_abonadas=set(),
+        tz=tz,
+    )
+
+    # As duas batidas pertencem ao mesmo dia local: 5h de span, nada faltando.
+    assert resumo.dias[0].trabalhado_min == Decimal("300")
+    assert resumo.dias[0].falta_min == Decimal("0")

@@ -31,6 +31,7 @@ from app.application.providers.repo.rh_repo import (
 )
 from app.application.providers.uow import UOWProvider
 from app.application.services.rh_audit_service import RhAuditService
+from app.core.tempo import local_tz
 from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TurnoHorario
 from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
 from app.domain.services.rh_ponto_calculo import minutos_liberacao, resultado_dia, resumir_periodo
@@ -389,6 +390,7 @@ class RhDashboardService:
             fim=fim,
             datas_abonadas=datas_abonadas,
             liberacoes=liberacoes,
+            tz=local_tz(),
         )
         return RhEstadoPonto7DiasDTO(
             inicio=inicio,

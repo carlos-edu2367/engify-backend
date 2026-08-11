@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, time as Time, timedelta, timezone
+from datetime import date, time as Time, timedelta, timezone, tzinfo
 from enum import Enum
 from decimal import Decimal
 from typing import Callable
@@ -157,18 +157,24 @@ def resumir_periodo(
     fim: date,
     datas_abonadas: set[date],
     liberacoes: dict[date, Decimal] | None = None,
+    *,
+    tz: tzinfo = timezone.utc,
 ) -> ResumoPeriodo:
     """Agrega resultado_dia() para cada dia com turno no periodo.
 
     liberacoes mapeia data -> minutos esperados reduzidos (ex.: liberacao
     antecipada). Quando presente para uma data, substitui o esperado do turno
     para aquele dia, evitando que a saida antecipada autorizada vire falta.
+
+    tz define o fuso usado para decidir a que dia cada batida pertence. Em
+    UTC-3, uma batida as 23h locais chega como o dia seguinte em UTC; agrupar
+    por UTC jogaria essa batida para o dia errado.
     """
     liberacoes = liberacoes or {}
     por_dia: dict[date, list[RegistroPonto]] = defaultdict(list)
     pontos_inconsistentes = 0
     for r in registros:
-        dia = r.timestamp.astimezone(timezone.utc).date()
+        dia = r.timestamp.astimezone(tz).date()
         por_dia[dia].append(r)
         if r.status == StatusPonto.INCONSISTENTE:
             pontos_inconsistentes += 1
