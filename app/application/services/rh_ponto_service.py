@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Awaitable, Callable
 from uuid import UUID
@@ -25,6 +25,7 @@ from app.domain.services.rh_ponto_calculo import resultado_dia
 from app.application.providers.uow import UOWProvider
 from app.application.providers.utility.rh_geofence_cache import RhGeofenceCache
 from app.domain.entities.rh import LocalPonto, RegistroPonto, RhAuditLog, StatusHolerite, StatusPonto, TipoPonto
+from app.core.tempo import combine_local, day_bounds, local_date_of, marker_bounds
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
@@ -327,14 +328,15 @@ class RhPontoService:
         if current_user.role not in {Roles.ADMIN, Roles.FINANCEIRO}:
             raise DomainError("Acesso restrito ao RH")
         funcionario = await self.funcionario_repo.get_by_id(funcionario_id, current_user.team.id)
-        day_start = datetime.combine(data, time.min, tzinfo=timezone.utc)
-        day_end = datetime.combine(data, time.max, tzinfo=timezone.utc)
+        day_start, day_end = day_bounds(data)
         registros = await self.registro_ponto_repo.list_by_funcionario_day(current_user.team.id, funcionario.id, day_start, day_end)
         locais = await self.local_ponto_repo.list_by_funcionario(current_user.team.id, funcionario.id)
         self._enrich_registros_with_locais(registros, locais)
         status_dia = self._status_dia(registros)
         turno = await self._turno_do_dia(current_user.team.id, funcionario.id, data)
-        ajustes_relacionados = await self._ajustes_relacionados_do_dia(current_user.team.id, funcionario.id, day_start, day_end)
+        # Ajustes sao filtrados por data_referencia, que e marcador de dia e nao instante.
+        marker_start, marker_end = marker_bounds(data)
+        ajustes_relacionados = await self._ajustes_relacionados_do_dia(current_user.team.id, funcionario.id, marker_start, marker_end)
         auditoria_resumida = await self._auditoria_resumida_do_dia(current_user.team.id, registros, ajustes_relacionados)
         return {
             "funcionario": funcionario,
@@ -446,8 +448,7 @@ class RhPontoService:
         funcionario = await self.funcionario_repo.get_by_id(dto.funcionario_id, current_user.team.id)
         await self._ensure_competencia_aberta(current_user.team.id, funcionario.id, dto.data)
 
-        day_start = datetime.combine(dto.data, time.min, tzinfo=timezone.utc)
-        day_end = datetime.combine(dto.data, time.max, tzinfo=timezone.utc)
+        day_start, day_end = day_bounds(dto.data)
         existentes = await self.registro_ponto_repo.list_by_funcionario_day(current_user.team.id, funcionario.id, day_start, day_end)
         before = [self._registro_snapshot(item) for item in existentes]
         coordinates = (existentes[0].latitude, existentes[0].longitude) if existentes else (0.0, 0.0)
@@ -458,7 +459,7 @@ class RhPontoService:
 
         criados: list[RegistroPonto] = []
         for batida in dto.batidas:
-            timestamp = datetime.combine(dto.data, batida.hora, tzinfo=timezone.utc)
+            timestamp = combine_local(dto.data, batida.hora)
             registro = RegistroPonto(
                 team_id=current_user.team.id,
                 funcionario_id=funcionario.id,
@@ -615,10 +616,10 @@ class RhPontoService:
         )
 
     def _day_start(self, reference_timestamp: datetime) -> datetime:
-        return datetime.combine(reference_timestamp.date(), time.min, tzinfo=timezone.utc)
+        return day_bounds(local_date_of(reference_timestamp))[0]
 
     def _day_end(self, reference_timestamp: datetime) -> datetime:
-        return datetime.combine(reference_timestamp.date(), time.max, tzinfo=timezone.utc)
+        return day_bounds(local_date_of(reference_timestamp))[1]
 
 
 def hash_ip(value: str | None) -> str | None:

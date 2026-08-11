@@ -970,3 +970,25 @@ async def test_obter_dia_ponto_retorna_ajustes_relacionados_e_auditoria():
     assert detail["ajustes_relacionados"][0].id == ajuste.id
     assert len(detail["auditoria_resumida"]) == 1
     assert detail["auditoria_resumida"][0].entity_id == registro.id
+
+
+def test_day_bounds_do_servico_de_ponto_usa_dia_local():
+    from datetime import date, datetime, timezone
+
+    from app.core.tempo import day_bounds
+
+    start, end = day_bounds(date(2026, 8, 10))
+    # O dia local de 10/08 comeca as 03:00 UTC e termina as 02:59:59 UTC do dia 11.
+    assert start == datetime(2026, 8, 10, 3, 0, tzinfo=timezone.utc)
+    assert end.replace(microsecond=0) == datetime(2026, 8, 11, 2, 59, 59, tzinfo=timezone.utc)
+
+
+def test_editar_dia_ponto_converte_hora_de_parede_para_utc():
+    from datetime import date, datetime, time, timezone
+
+    from app.core.tempo import combine_local
+
+    # RH digita 17:48 no editor de dia; o instante gravado deve ser 20:48 UTC.
+    assert combine_local(date(2026, 8, 10), time(17, 48)) == datetime(
+        2026, 8, 10, 20, 48, tzinfo=timezone.utc
+    )

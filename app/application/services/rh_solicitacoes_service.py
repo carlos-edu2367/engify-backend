@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Any, Awaitable, Callable
 from uuid import UUID
@@ -37,6 +37,7 @@ from app.domain.entities.rh import (
     TipoAtestado,
     TipoPonto,
 )
+from app.core.tempo import date_marker_of, day_bounds, local_date_of
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 
@@ -454,14 +455,15 @@ class RhSolicitacoesService:
             ajuste.funcionario_cpf_mascarado = self._mask_cpf(funcionario.cpf.value)
 
     def _ensure_requested_times_match_reference_day(self, dto: CreateAjustePontoDTO) -> None:
-        reference_day = self._as_utc(dto.data_referencia).date()
+        # data_referencia nomeia um dia; os horarios solicitados sao instantes.
+        reference_day = date_marker_of(dto.data_referencia)
         for value in [
             dto.hora_entrada_solicitada,
             dto.hora_saida_solicitada,
             dto.hora_intervalo_inicio_solicitada,
             dto.hora_intervalo_fim_solicitada,
         ]:
-            if value is not None and self._as_utc(value).date() != reference_day:
+            if value is not None and local_date_of(value) != reference_day:
                 raise DomainError("Horario solicitado deve estar na data de referencia")
 
     def _coordinates_from_existing(self, registros: list[RegistroPonto]) -> tuple[float, float]:
@@ -487,10 +489,11 @@ class RhSolicitacoesService:
         return value.astimezone(timezone.utc)
 
     def _day_start(self, value: datetime) -> datetime:
-        return datetime.combine(self._as_utc(value).date(), time.min, tzinfo=timezone.utc)
+        """Inicio do dia local nomeado por um marcador de data (data_referencia)."""
+        return day_bounds(date_marker_of(value))[0]
 
     def _day_end(self, value: datetime) -> datetime:
-        return datetime.combine(self._as_utc(value).date(), time.max, tzinfo=timezone.utc)
+        return day_bounds(date_marker_of(value))[1]
 
     def _mask_cpf(self, cpf: str) -> str:
         digits = "".join(ch for ch in cpf if ch.isdigit())

@@ -2,9 +2,11 @@ from datetime import date, datetime, time, timezone
 
 from app.core.tempo import (
     combine_local,
+    date_marker_of,
     day_bounds,
     local_date_of,
     local_time_of,
+    marker_bounds,
     to_local,
 )
 
@@ -42,3 +44,19 @@ def test_combine_local_converte_hora_de_parede_para_utc():
     assert combine_local(date(2026, 8, 10), time(17, 48)) == datetime(
         2026, 8, 10, 20, 48, tzinfo=timezone.utc
     )
+
+
+def test_date_marker_of_le_marcador_antigo_e_novo_no_mesmo_dia():
+    # Forma antiga (meia-noite UTC) e nova (meia-noite local) do dia 28.
+    antigo = datetime(2026, 4, 28, 0, 0, tzinfo=timezone.utc)
+    novo = datetime(2026, 4, 28, 3, 0, tzinfo=timezone.utc)
+    assert date_marker_of(antigo) == date(2026, 4, 28)
+    assert date_marker_of(novo) == date(2026, 4, 28)
+
+
+def test_marker_bounds_cobre_as_duas_formas_de_marcador():
+    inicio, fim = marker_bounds(date(2026, 4, 28))
+    antigo = datetime(2026, 4, 28, 0, 0, tzinfo=timezone.utc)
+    novo = datetime(2026, 4, 28, 3, 0, tzinfo=timezone.utc)
+    assert inicio <= antigo <= fim
+    assert inicio <= novo <= fim

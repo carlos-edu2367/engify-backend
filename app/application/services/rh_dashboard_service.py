@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 import structlog
@@ -31,7 +31,7 @@ from app.application.providers.repo.rh_repo import (
 )
 from app.application.providers.uow import UOWProvider
 from app.application.services.rh_audit_service import RhAuditService
-from app.core.tempo import local_tz
+from app.core.tempo import day_bounds, local_date_of, local_tz, marker_bounds
 from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TurnoHorario
 from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
 from app.domain.services.rh_ponto_calculo import minutos_liberacao, resultado_dia, resumir_periodo
@@ -81,8 +81,8 @@ class RhDashboardService:
         team_id = current_user.team.id
         start, end = self._competencia_bounds(mes, ano)
         now = datetime.now(timezone.utc)
-        day_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
-        day_end = datetime.combine(now.date(), time.max, tzinfo=timezone.utc)
+        # Ferias sao delimitadas por datas, entao a janela de "hoje" cobre o dia inteiro.
+        day_start, day_end = marker_bounds(local_date_of(now))
 
         total_funcionarios_ativos = await self.funcionario_repo.count_by_team(team_id, is_active=True)
         ajustes_pendentes = await self.ajuste_repo.count_by_filters(team_id, status=StatusAjuste.PENDENTE)
@@ -299,11 +299,11 @@ class RhDashboardService:
         # A janela termina ONTEM de proposito: incluir o dia em andamento faz o
         # saldo ainda nao cumprido aparecer como horas faltantes durante o
         # proprio expediente. O dia corrente e mostrado no card "Hoje".
-        hoje = datetime.now(timezone.utc).date()
+        hoje = local_date_of(datetime.now(timezone.utc))
         fim = hoje - timedelta(days=1)
         inicio = fim - timedelta(days=6)
-        start = datetime.combine(inicio, time.min, tzinfo=timezone.utc)
-        end = datetime.combine(fim, time.max, tzinfo=timezone.utc)
+        start = day_bounds(inicio)[0]
+        end = day_bounds(fim)[1]
         registros = await self.registro_ponto_repo.list_by_funcionario_periodo(
             team_id,
             funcionario_id,
@@ -329,12 +329,13 @@ class RhDashboardService:
         """
         if horario is None:
             return None
-        hoje = datetime.now(timezone.utc).date()
+        hoje = local_date_of(datetime.now(timezone.utc))
+        dia_start, dia_end = day_bounds(hoje)
         registros = await self.registro_ponto_repo.list_by_funcionario_periodo(
             team_id,
             funcionario_id,
-            datetime.combine(hoje, time.min, tzinfo=timezone.utc),
-            datetime.combine(hoje, time.max, tzinfo=timezone.utc),
+            dia_start,
+            dia_end,
             page=1,
             limit=100,
         )
