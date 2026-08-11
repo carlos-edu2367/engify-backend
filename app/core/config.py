@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     environment: Literal["dev", "staging", "prod"] = "dev"
     debug: bool = False
     api_prefix: str = "/api/v1"
+    # Fuso usado para resolver dia e hora de parede. O armazenamento continua em UTC.
+    app_timezone: str = "America/Sao_Paulo"
 
     # Database (PostgreSQL + asyncpg)
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/engify"
