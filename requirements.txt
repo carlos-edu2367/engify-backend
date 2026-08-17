@@ -31,6 +31,11 @@ httpx>=0.27.0
 # Observabilidade
 structlog>=24.0.0
 
+# zoneinfo (app/core/tempo.py) usa o banco IANA do sistema; a imagem de producao
+# (Debian) ja o inclui, mas Windows nao tem banco de fuso proprio, entao o dev
+# local e o CI nesse SO dependem deste pacote para nao lancar ZoneInfoNotFoundError.
+tzdata>=2024.1
+
 # Testes
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
