@@ -324,12 +324,16 @@ async def test_obter_meu_resumo_accepts_admin_when_linked_to_funcionario():
 
 
 @pytest.mark.asyncio
-async def test_obter_meu_resumo_includes_estado_ponto_ultimos_7_dias():
+async def test_obter_meu_resumo_includes_estado_ponto_do_mes_atual():
     from app.application.services.rh_dashboard_service import RhDashboardService
 
     employee = _make_user(Roles.FUNCIONARIO)
     funcionario = _FuncionarioStub(employee.team.id, employee.id)
-    today = datetime.now(timezone.utc).date()
+    # "Hoje" fixo no dia 8 do mes: da uma janela de 1 a 7/08, do mesmo tamanho
+    # que os 7 dias antigos, sem depender do relogio real da maquina que roda
+    # o teste (perto da virada do mes esse teste ficaria instavel).
+    agora = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
+    today = date(2026, 8, 8)
     normal_day = today
     missing_day = today - timedelta(days=1)
     extra_day = today - timedelta(days=2)
@@ -362,17 +366,17 @@ async def test_obter_meu_resumo_includes_estado_ponto_ultimos_7_dias():
         uow=_FakeUow(),
     )
 
-    resumo = await service.obter_meu_resumo(employee)
+    resumo = await service.obter_meu_resumo(employee, agora=agora)
 
     assert resumo.estado_ponto_7_dias is not None
-    # janela vai de today-7 ate today-1; normal_day (= today) ficou de fora
+    # janela vai do dia 1 do mes ate today-1; normal_day (= today) ficou de fora
     # faltas: missing_day, inconsistent_day, today-5, today-6, today-7
     assert resumo.estado_ponto_7_dias.faltas == 5
     assert resumo.estado_ponto_7_dias.horas_extras == Decimal("1.00")
     # 9h (missing) + 2h (short) + 9h (inconsistente) + 9h x 3 dias vazios
     assert resumo.estado_ponto_7_dias.horas_faltantes == Decimal("47.00")
     assert resumo.estado_ponto_7_dias.pontos_inconsistentes == 1
-    assert resumo.estado_ponto_7_dias.inicio == today - timedelta(days=7)
+    assert resumo.estado_ponto_7_dias.inicio == date(2026, 8, 1)
     assert resumo.estado_ponto_7_dias.fim == today - timedelta(days=1)
 
 
@@ -487,12 +491,13 @@ def test_summarize_estado_ponto_7_dias_sem_liberacao_gera_falta():
 
 
 @pytest.mark.asyncio
-async def test_estado_ponto_7_dias_ignora_batidas_do_dia_corrente():
+async def test_estado_ponto_mes_atual_ignora_batidas_do_dia_corrente():
     from app.application.services.rh_dashboard_service import RhDashboardService
 
     employee = _make_user(Roles.FUNCIONARIO)
     funcionario = _FuncionarioStub(employee.team.id, employee.id)
-    today = datetime.now(timezone.utc).date()
+    agora = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
+    today = date(2026, 8, 8)
     # jornada de hoje em andamento: entrada e saida para o almoco, nada mais
     registros = [
         _make_ponto(employee.team.id, funcionario.id, datetime.combine(today, time(8, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
@@ -510,16 +515,50 @@ async def test_estado_ponto_7_dias_ignora_batidas_do_dia_corrente():
         uow=_FakeUow(),
     )
 
-    resumo = await service.obter_meu_resumo(employee)
+    resumo = await service.obter_meu_resumo(employee, agora=agora)
 
     estado = resumo.estado_ponto_7_dias
     assert estado is not None
     assert estado.fim == today - timedelta(days=1)
-    assert estado.inicio == today - timedelta(days=7)
+    assert estado.inicio == date(2026, 8, 1)
     # os 7 dias fechados nao tem registro nenhum: 7 faltas de 9h, e nada de hoje entra
     assert estado.faltas == 7
     assert estado.horas_faltantes == Decimal("63.00")
     assert all(dia.data != today for dia in estado.dias)
+
+
+@pytest.mark.asyncio
+async def test_estado_ponto_mes_atual_no_dia_1_do_mes_fica_vazio():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    # No dia 1 do mes, "do dia 1 ate ontem" nao tem nenhum dia fechado ainda.
+    # inicio (dia 1) fica depois de fim (ultimo dia do mes anterior) de proposito
+    # — sem isso a janela puxaria dias do mes anterior, que e exatamente o que
+    # a mudanca para "mes atual" deveria deixar de fazer.
+    employee = _make_user(Roles.FUNCIONARIO)
+    funcionario = _FuncionarioStub(employee.team.id, employee.id)
+    agora = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(_make_daily_horario(employee.team.id, funcionario.id)),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    resumo = await service.obter_meu_resumo(employee, agora=agora)
+
+    estado = resumo.estado_ponto_7_dias
+    assert estado is not None
+    assert estado.inicio == date(2026, 9, 1)
+    assert estado.fim == date(2026, 8, 31)
+    assert estado.dias == []
+    assert estado.faltas == 0
+    assert estado.horas_faltantes == Decimal("0.00")
 
 
 def test_summarize_estado_ponto_7_dias_expoe_situacao_de_cada_dia():

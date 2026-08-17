@@ -129,7 +129,10 @@ class RhDashboardService:
             total_liquido_competencia=holerite_summary.get("total_liquido", 0),
         )
 
-    async def obter_meu_resumo(self, current_user: User) -> RhMeResumoDTO:
+    async def obter_meu_resumo(self, current_user: User, agora: datetime | None = None) -> RhMeResumoDTO:
+        # agora e injetavel so para o teste poder fixar "hoje" perto de uma
+        # virada de mes sem depender do relogio real da maquina que roda o CI.
+        agora = agora or datetime.now(timezone.utc)
         team_id = current_user.team.id
         funcionario = await self.funcionario_repo.get_by_user_id(team_id, current_user.id)
         if funcionario is None or funcionario.is_deleted or not funcionario.is_active:
@@ -169,8 +172,8 @@ class RhDashboardService:
         )
         # horario buscado uma vez so e reaproveitado pelos dois calculos
         horario = await self.horario_repo.get_by_funcionario_id(team_id, funcionario.id)
-        estado_ponto_7_dias = await self._calcular_estado_ponto_7_dias(team_id, funcionario.id, horario)
-        ponto_hoje = await self._calcular_ponto_hoje(team_id, funcionario.id, horario)
+        estado_ponto_7_dias = await self._calcular_estado_ponto_7_dias(team_id, funcionario.id, horario, agora)
+        ponto_hoje = await self._calcular_ponto_hoje(team_id, funcionario.id, horario, agora)
 
         await self._record_event(current_user, "rh.employee_area.accessed", entity_type="employee_area")
         logger.info(
@@ -295,13 +298,19 @@ class RhDashboardService:
             datetime(ano, mes, last_day, 23, 59, 59, 999999, tzinfo=timezone.utc),
         )
 
-    async def _calcular_estado_ponto_7_dias(self, team_id, funcionario_id, horario) -> RhEstadoPonto7DiasDTO:
+    async def _calcular_estado_ponto_7_dias(self, team_id, funcionario_id, horario, agora: datetime) -> RhEstadoPonto7DiasDTO:
         # A janela termina ONTEM de proposito: incluir o dia em andamento faz o
         # saldo ainda nao cumprido aparecer como horas faltantes durante o
         # proprio expediente. O dia corrente e mostrado no card "Hoje".
-        hoje = local_date_of(datetime.now(timezone.utc))
+        #
+        # inicio e o dia 1 do mes corrente, nao mais "hoje - 7". No dia 1 do
+        # mes ainda nao ha nenhum dia fechado para resumir: inicio fica depois
+        # de fim e o loop de resumir_periodo produz uma janela vazia (nao um
+        # erro), entao a tela mostra "nenhum dia" em vez de puxar dias do mes
+        # anterior.
+        hoje = local_date_of(agora)
         fim = hoje - timedelta(days=1)
-        inicio = fim - timedelta(days=6)
+        inicio = date(hoje.year, hoje.month, 1)
         start = day_bounds(inicio)[0]
         end = day_bounds(fim)[1]
         registros = await self.registro_ponto_repo.list_by_funcionario_periodo(
@@ -319,17 +328,17 @@ class RhDashboardService:
         )
         return self._summarize_estado_ponto_7_dias(inicio, fim, horario, registros, funcionario_id, eventos_calendario)
 
-    async def _calcular_ponto_hoje(self, team_id, funcionario_id, horario) -> RhPontoHojeDTO | None:
+    async def _calcular_ponto_hoje(self, team_id, funcionario_id, horario, agora: datetime) -> RhPontoHojeDTO | None:
         """Fatos do dia corrente. Nunca classifica falta.
 
         minutos_trabalhados so e preenchido com a jornada fechada, usando a
-        mesma resultado_dia do relatorio dos 7 dias: qualquer calculo paralelo
+        mesma resultado_dia do relatorio do mes: qualquer calculo paralelo
         de "horas ate agora" produziria, para o mesmo dia, um numero diferente
         do que o relatorio mostra no dia seguinte.
         """
         if horario is None:
             return None
-        hoje = local_date_of(datetime.now(timezone.utc))
+        hoje = local_date_of(agora)
         dia_start, dia_end = day_bounds(hoje)
         registros = await self.registro_ponto_repo.list_by_funcionario_periodo(
             team_id,
