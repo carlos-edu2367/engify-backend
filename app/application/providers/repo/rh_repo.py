@@ -225,7 +225,9 @@ class AjustePontoRepository(ABC):
         pass
 
     @abstractmethod
-    async def has_pending_duplicate(self, team_id: UUID, funcionario_id: UUID, data_referencia, entrada, saida) -> bool:
+    async def has_pending_duplicate(
+        self, team_id: UUID, funcionario_id: UUID, data_referencia, entrada, saida, intervalo_inicio, intervalo_fim
+    ) -> bool:
         pass
 
     @abstractmethod

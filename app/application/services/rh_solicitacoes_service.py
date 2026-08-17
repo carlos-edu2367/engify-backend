@@ -164,6 +164,8 @@ class RhSolicitacoesService:
             dto.data_referencia,
             dto.hora_entrada_solicitada,
             dto.hora_saida_solicitada,
+            dto.hora_intervalo_inicio_solicitada,
+            dto.hora_intervalo_fim_solicitada,
         ):
             raise DomainError("Ja existe ajuste pendente para este dia e horario")
         ajuste = AjustePonto(

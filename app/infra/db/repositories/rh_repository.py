@@ -694,7 +694,9 @@ class AjustePontoRepositoryImpl(_SoftDeleteRepository, AjustePontoRepository):
         result = await self._session.execute(stmt)
         return int(result.scalar_one())
 
-    async def has_pending_duplicate(self, team_id: UUID, funcionario_id: UUID, data_referencia, entrada, saida) -> bool:
+    async def has_pending_duplicate(
+        self, team_id: UUID, funcionario_id: UUID, data_referencia, entrada, saida, intervalo_inicio, intervalo_fim
+    ) -> bool:
         stmt = select(func.count()).select_from(AjustePontoModel).where(
             AjustePontoModel.team_id == team_id,
             AjustePontoModel.funcionario_id == funcionario_id,
@@ -710,6 +712,14 @@ class AjustePontoRepositoryImpl(_SoftDeleteRepository, AjustePontoRepository):
             stmt = stmt.where(AjustePontoModel.hora_saida_solicitada.is_(None))
         else:
             stmt = stmt.where(AjustePontoModel.hora_saida_solicitada == saida)
+        if intervalo_inicio is None:
+            stmt = stmt.where(AjustePontoModel.hora_intervalo_inicio_solicitada.is_(None))
+        else:
+            stmt = stmt.where(AjustePontoModel.hora_intervalo_inicio_solicitada == intervalo_inicio)
+        if intervalo_fim is None:
+            stmt = stmt.where(AjustePontoModel.hora_intervalo_fim_solicitada.is_(None))
+        else:
+            stmt = stmt.where(AjustePontoModel.hora_intervalo_fim_solicitada == intervalo_fim)
         result = await self._session.execute(stmt)
         return int(result.scalar_one()) > 0
 

@@ -126,7 +126,7 @@ class _FakeAjusteRepo:
         self.items.append(ajuste)
         return ajuste
 
-    async def has_pending_duplicate(self, team_id, funcionario_id, data_referencia, entrada, saida):
+    async def has_pending_duplicate(self, team_id, funcionario_id, data_referencia, entrada, saida, intervalo_inicio, intervalo_fim):
         return self.duplicate
 
     async def list_by_filters(self, team_id, page, limit, **filters):
@@ -296,6 +296,53 @@ async def test_approve_ferias_revalidates_overlap():
 
     with pytest.raises(DomainError):
         await service.approve_ferias(ferias.id, admin)
+
+
+@pytest.mark.asyncio
+async def test_request_ajuste_accepts_late_night_local_time_sent_as_utc():
+    # O frontend converte hora de parede (fuso do funcionario) para o instante UTC
+    # antes de enviar. Em UTC-3, uma saida as 21:00 local vira 00:00Z do dia
+    # seguinte — a comparacao antiga (data de calendario em UTC) rejeitava esse
+    # instante como "fora da data de referencia" mesmo sendo o mesmo dia local.
+    current_user = _make_user(Roles.FUNCIONARIO)
+    funcionario = _make_funcionario(current_user.team.id, user_id=current_user.id)
+    service = _make_service(funcionario)
+
+    data_referencia = datetime(2026, 8, 14, 3, 0, tzinfo=timezone.utc)  # meia-noite local (UTC-3) de 14/08
+    hora_saida_local_21h = datetime(2026, 8, 15, 0, 0, tzinfo=timezone.utc)  # 21:00 local de 14/08
+
+    ajuste = await service.request_ajuste(
+        CreateAjustePontoDTO(
+            funcionario_id=None,
+            data_referencia=data_referencia,
+            justificativa="Saida tardia na sexta",
+            hora_saida_solicitada=hora_saida_local_21h,
+        ),
+        current_user,
+    )
+
+    assert ajuste.hora_saida_solicitada == hora_saida_local_21h
+
+
+@pytest.mark.asyncio
+async def test_request_ajuste_rejects_time_outside_reference_day_window():
+    current_user = _make_user(Roles.FUNCIONARIO)
+    funcionario = _make_funcionario(current_user.team.id, user_id=current_user.id)
+    service = _make_service(funcionario)
+
+    data_referencia = datetime(2026, 8, 14, 3, 0, tzinfo=timezone.utc)
+    hora_fora_da_janela = datetime(2026, 8, 16, 12, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(DomainError):
+        await service.request_ajuste(
+            CreateAjustePontoDTO(
+                funcionario_id=None,
+                data_referencia=data_referencia,
+                justificativa="Data errada",
+                hora_saida_solicitada=hora_fora_da_janela,
+            ),
+            current_user,
+        )
 
 
 @pytest.mark.asyncio
