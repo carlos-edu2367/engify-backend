@@ -664,6 +664,96 @@ async def test_ponto_hoje_usa_o_mesmo_calculo_do_relatorio_quando_fechada():
 
 
 @pytest.mark.asyncio
+async def test_ponto_hoje_mostra_batidas_em_dia_sem_turno_como_extra():
+    """Regressao: colaborador bate ponto num domingo sem turno cadastrado na escala.
+
+    Antes, tem_expediente ficava False e o frontend descartava as batidas
+    inteiramente (card so mostrava "Voce nao tem expediente hoje"), mesmo com
+    o registro salvo no banco. Agora, havendo batida no dia, ela precisa
+    aparecer e contar como hora trabalhada extra (esperado = 0).
+    """
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    employee = _make_user(Roles.FUNCIONARIO)
+    funcionario = _FuncionarioStub(employee.team.id, employee.id)
+    domingo = date(2026, 7, 5)  # domingo
+    agora = datetime.combine(domingo, time(14, 0), tzinfo=timezone.utc)
+    horario = HorarioTrabalho(
+        team_id=employee.team.id,
+        funcionario_id=funcionario.id,
+        turnos=[
+            TurnoHorario(dia_semana=dia, hora_entrada=time(8, 0), hora_saida=time(17, 0))
+            for dia in range(6)  # segunda a sabado, sem turno de domingo (weekday 6)
+        ],
+    )
+    registros = [
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(domingo, time(9, 0), tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _make_ponto(employee.team.id, funcionario.id, datetime.combine(domingo, time(13, 0), tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(horario),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(registros),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    resumo = await service.obter_meu_resumo(employee, agora=agora)
+
+    assert resumo.ponto_hoje is not None
+    assert resumo.ponto_hoje.tem_expediente is True
+    assert resumo.ponto_hoje.jornada_aberta is False
+    assert resumo.ponto_hoje.minutos_trabalhados == 240
+    assert len(resumo.ponto_hoje.batidas) == 2
+
+
+@pytest.mark.asyncio
+async def test_ponto_hoje_sem_turno_e_sem_batidas_continua_sem_expediente():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    employee = _make_user(Roles.FUNCIONARIO)
+    funcionario = _FuncionarioStub(employee.team.id, employee.id)
+    domingo = date(2026, 7, 5)
+    agora = datetime.combine(domingo, time(14, 0), tzinfo=timezone.utc)
+    horario = HorarioTrabalho(
+        team_id=employee.team.id,
+        funcionario_id=funcionario.id,
+        turnos=[
+            TurnoHorario(dia_semana=dia, hora_entrada=time(8, 0), hora_saida=time(17, 0))
+            for dia in range(6)
+        ],
+    )
+    # _FakeRegistroRepo trata lista vazia como "sem stub configurado" e devolve
+    # um registro dummy fixo (usado por outros testes de ultimo_ponto); por
+    # isso passamos um registro de outro dia so para a lista deixar de ser
+    # vazia e o filtro por periodo realmente ser exercitado.
+    registro_outro_dia = _make_ponto(
+        employee.team.id, funcionario.id, datetime(2026, 1, 10, 8, 0, tzinfo=timezone.utc), TipoPonto.ENTRADA
+    )
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(funcionario=funcionario),
+        horario_repo=_FakeHorarioRepo(horario),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo([registro_outro_dia]),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+
+    resumo = await service.obter_meu_resumo(employee, agora=agora)
+
+    assert resumo.ponto_hoje is not None
+    assert resumo.ponto_hoje.tem_expediente is False
+    assert len(resumo.ponto_hoje.batidas) == 0
+
+
+@pytest.mark.asyncio
 async def test_ponto_hoje_e_none_sem_horario_cadastrado():
     from app.application.services.rh_dashboard_service import RhDashboardService
 

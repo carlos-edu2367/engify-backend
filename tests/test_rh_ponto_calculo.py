@@ -326,6 +326,87 @@ def test_resumir_periodo_marca_dia_sem_turno_como_sem_expediente():
     assert resumo.faltas == 0
 
 
+def test_resultado_dia_sem_turno_conta_tudo_como_hora_extra():
+    # Domingo batido sem turno cadastrado: nao ha esperado nem intervalo
+    # conhecido, entao o span inteiro trabalhado vira hora extra.
+    registros = [_reg(time(9, 0), TipoPonto.ENTRADA), _reg(time(13, 0), TipoPonto.SAIDA)]
+    r = resultado_dia(registros, turno=None)
+    assert r.esperado_min == Decimal("0")
+    assert r.trabalhado_min == Decimal("240")
+    assert r.extra_min == Decimal("240")
+    assert r.falta_min == Decimal("0")
+    assert r.incompleto is False
+
+
+def test_resumir_periodo_dia_sem_turno_com_batidas_conta_como_extra():
+    """Regressao: colaborador bate ponto num domingo sem turno cadastrado.
+
+    Antes, esse dia virava SEM_EXPEDIENTE e as batidas validas eram
+    descartadas do resumo (sumiam do /meu-rh mesmo existindo no banco).
+    Agora, dia sem turno com batida valida conta como hora extra.
+    """
+    from app.domain.services.rh_ponto_calculo import SituacaoDia
+
+    # _reg() cria batidas fixas em 2026-07-06 (independente da hora passada); usamos a
+    # mesma data aqui pois turno_para_dia devolve None incondicionalmente neste teste.
+    domingo = date(2026, 7, 6)
+    registros = [_reg(time(9, 0), TipoPonto.ENTRADA), _reg(time(13, 0), TipoPonto.SAIDA)]
+
+    resumo = resumir_periodo(
+        registros=registros,
+        turno_para_dia=lambda _weekday: None,  # nenhum turno cadastrado nesse dia
+        inicio=domingo,
+        fim=domingo,
+        datas_abonadas=set(),
+    )
+
+    assert resumo.dias[0].situacao == SituacaoDia.EXTRA
+    assert resumo.dias[0].esperado_min == Decimal("0")
+    assert resumo.dias[0].trabalhado_min == Decimal("240")
+    assert resumo.dias[0].extra_min == Decimal("240")
+    assert resumo.extra_min == Decimal("240")
+    assert resumo.faltas == 0
+    assert resumo.dias_incompletos == 0
+
+
+def test_resumir_periodo_dia_sem_turno_com_batida_impar_fica_incompleto():
+    from app.domain.services.rh_ponto_calculo import SituacaoDia
+
+    # _reg() cria batidas fixas em 2026-07-06 (independente da hora passada); usamos a
+    # mesma data aqui pois turno_para_dia devolve None incondicionalmente neste teste.
+    domingo = date(2026, 7, 6)
+    registros = [_reg(time(9, 0), TipoPonto.ENTRADA)]  # esqueceu de bater a saida
+
+    resumo = resumir_periodo(
+        registros=registros,
+        turno_para_dia=lambda _weekday: None,
+        inicio=domingo,
+        fim=domingo,
+        datas_abonadas=set(),
+    )
+
+    assert resumo.dias[0].situacao == SituacaoDia.INCOMPLETO
+    assert resumo.dias_incompletos == 1
+
+
+def test_resumir_periodo_dia_sem_turno_sem_batidas_continua_sem_expediente():
+    from app.domain.services.rh_ponto_calculo import SituacaoDia
+
+    # _reg() cria batidas fixas em 2026-07-06 (independente da hora passada); usamos a
+    # mesma data aqui pois turno_para_dia devolve None incondicionalmente neste teste.
+    domingo = date(2026, 7, 6)
+
+    resumo = resumir_periodo(
+        registros=[],
+        turno_para_dia=lambda _weekday: None,
+        inicio=domingo,
+        fim=domingo,
+        datas_abonadas=set(),
+    )
+
+    assert resumo.dias[0].situacao == SituacaoDia.SEM_EXPEDIENTE
+
+
 def test_resumir_periodo_abonado_vence_a_classificacao_do_dia():
     from app.domain.services.rh_ponto_calculo import SituacaoDia
 

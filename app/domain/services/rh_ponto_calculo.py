@@ -90,7 +90,9 @@ def _classificar_dia(resultado: ResultadoDia) -> SituacaoDia:
     return SituacaoDia.COMPLETO
 
 
-def _esperado_min(turno: TurnoHorario) -> Decimal:
+def _esperado_min(turno: TurnoHorario | None) -> Decimal:
+    if turno is None:
+        return Decimal("0")
     return Decimal(str(turno.horas_esperadas)) * Decimal("60")
 
 
@@ -120,7 +122,10 @@ def minutos_liberacao(turno: TurnoHorario, hora_corte: Time) -> Decimal:
     return max(Decimal("0"), bruto - intervalo_min)
 
 
-def resultado_dia(registros: list[RegistroPonto], turno: TurnoHorario, esperado_min_override: Decimal | None = None) -> ResultadoDia:
+def resultado_dia(registros: list[RegistroPonto], turno: TurnoHorario | None, esperado_min_override: Decimal | None = None) -> ResultadoDia:
+    """turno pode ser None: dia sem turno cadastrado (ex.: domingo fora de escala) em que o
+    colaborador bateu ponto mesmo assim. Sem turno nao ha esperado nem intervalo conhecido, entao
+    o span inteiro trabalhado vira hora extra (esperado=0, intervalo=0)."""
     esperado = esperado_min_override if esperado_min_override is not None else _esperado_min(turno)
     validos = sorted(
         [r for r in registros if r.status in _STATUS_VALIDOS],
@@ -132,7 +137,7 @@ def resultado_dia(registros: list[RegistroPonto], turno: TurnoHorario, esperado_
         return ResultadoDia(esperado, Decimal("0"), Decimal("0"), Decimal("0"), incompleto=True)
 
     span_min = Decimal(str((validos[-1].timestamp - validos[0].timestamp).total_seconds() / 60))
-    intervalo_min = Decimal(str(sum(i.minutos for i in turno.intervalos)))
+    intervalo_min = Decimal(str(sum(i.minutos for i in turno.intervalos))) if turno is not None else Decimal("0")
     trabalhado = max(Decimal("0"), span_min - intervalo_min)
     extra = max(Decimal("0"), trabalhado - esperado)
     falta = max(Decimal("0"), esperado - trabalhado)
@@ -189,7 +194,13 @@ def resumir_periodo(
     dias: list[ResumoDia] = []
     while atual <= fim:
         turno = turno_para_dia(atual.weekday())
-        if turno is None:
+        registros_dia = por_dia.get(atual, [])
+        tem_batida_valida = any(r.status in _STATUS_VALIDOS for r in registros_dia)
+        if turno is None and not tem_batida_valida:
+            # Sem turno cadastrado e sem nenhuma batida valida: dia realmente
+            # sem expediente (ex.: domingo comum). Se houver batida valida
+            # mesmo sem turno, cai no ramo abaixo e conta como hora extra em
+            # vez de sumir do resumo.
             dias.append(
                 ResumoDia(
                     data=atual,
@@ -217,7 +228,7 @@ def resumir_periodo(
                 )
             )
         else:
-            r = resultado_dia(por_dia.get(atual, []), turno, esperado_min_override=esperado_dia)
+            r = resultado_dia(registros_dia, turno, esperado_min_override=esperado_dia)
             extra_total += r.extra_min
             falta_total += r.falta_min
             if r.incompleto:

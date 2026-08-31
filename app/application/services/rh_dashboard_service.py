@@ -353,11 +353,16 @@ class RhDashboardService:
         validos = [r for r in registros if r.status in {StatusPonto.VALIDADO, StatusPonto.AJUSTADO}]
         jornada_aberta = len(validos) % 2 != 0
         minutos_trabalhados = None
-        if turno is not None and validos and not jornada_aberta:
+        # turno=None e' aceito por resultado_dia: sem turno, esperado/intervalo viram 0 e o
+        # trabalhado inteiro conta como hora extra. Isso cobre o dia sem turno cadastrado (ex.:
+        # domingo fora de escala) em que o colaborador bateu ponto mesmo assim.
+        if validos and not jornada_aberta:
             minutos_trabalhados = _minutos_int(resultado_dia(registros, turno).trabalhado_min)
         return RhPontoHojeDTO(
             data=hoje,
-            tem_expediente=turno is not None,
+            # tem_expediente tambem cobre "sem turno mas com batida": o card precisa mostrar
+            # o que foi registrado em vez de esconder um ponto que existe no banco.
+            tem_expediente=turno is not None or bool(registros),
             jornada_aberta=jornada_aberta,
             minutos_trabalhados=minutos_trabalhados,
             batidas=[
