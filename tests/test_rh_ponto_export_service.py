@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
@@ -7,7 +7,7 @@ import pytest
 from openpyxl import load_workbook
 
 from app.application.services.rh_ponto_export_service import RhPontoExportService
-from app.domain.entities.rh import RegistroPonto, StatusPonto, TipoPonto
+from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, StatusPonto, TipoPonto, TurnoHorario
 from app.domain.entities.user import Roles
 from app.domain.errors import DomainError
 
@@ -21,6 +21,14 @@ class _FakeFuncionarioRepo:
 
     async def list_active_by_team(self, team_id, limit, offset):
         return self._funcionarios if offset == 0 else []
+
+
+class _FakeHorarioRepo:
+    def __init__(self, horarios: dict | None = None) -> None:
+        self._horarios = horarios or {}
+
+    async def list_by_funcionarios(self, team_id, funcionario_ids):
+        return {fid: h for fid, h in self._horarios.items() if fid in funcionario_ids}
 
 
 class _FakeRegistroRepo:
@@ -57,10 +65,11 @@ def _reg(funcionario_id, team_id, momento, tipo):
     )
 
 
-def _service(funcionarios, registros):
+def _service(funcionarios, registros, horarios=None):
     return RhPontoExportService(
         funcionario_repo=_FakeFuncionarioRepo(funcionarios),
         registro_ponto_repo=_FakeRegistroRepo(registros),
+        horario_repo=_FakeHorarioRepo(horarios),
     )
 
 
@@ -105,6 +114,46 @@ async def test_batida_noturna_cai_no_dia_local_correto():
     assert aba["A16"].value == "10/03/2026"
     assert aba["C16"].value == "18:00"
     assert aba["F16"].value == "23:00"
+
+
+@pytest.mark.asyncio
+async def test_sem_horario_cadastrado_batida_conta_como_hora_extra():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    registros = [
+        _reg(funcionario.id, team_id, datetime(2026, 3, 2, 8, 0, tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _reg(funcionario.id, team_id, datetime(2026, 3, 2, 12, 0, tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]
+    service = _service([funcionario], registros)  # sem horario cadastrado
+    conteudo = await service.exportar_cartoes(
+        _user(team_id), date(2026, 3, 1), date(2026, 3, 31), funcionario_id=funcionario.id
+    )
+    aba = load_workbook(BytesIO(conteudo)).worksheets[0]
+    # 02/03 e a linha 8 (cabecalho na 6, 01/03 na 7)
+    assert aba["G8"].value == "04:00"
+    assert aba["H8"].value == "00:00"
+
+
+@pytest.mark.asyncio
+async def test_com_turno_cadastrado_jornada_curta_vira_atraso():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    horario = HorarioTrabalho(
+        team_id=team_id,
+        funcionario_id=funcionario.id,
+        turnos=[TurnoHorario(dia_semana=0, hora_entrada=time(8, 0), hora_saida=time(17, 0))],  # 2026-03-02 e segunda
+    )
+    registros = [
+        _reg(funcionario.id, team_id, datetime(2026, 3, 2, 8, 0, tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _reg(funcionario.id, team_id, datetime(2026, 3, 2, 15, 0, tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]
+    service = _service([funcionario], registros, horarios={funcionario.id: horario})
+    conteudo = await service.exportar_cartoes(
+        _user(team_id), date(2026, 3, 1), date(2026, 3, 31), funcionario_id=funcionario.id
+    )
+    aba = load_workbook(BytesIO(conteudo)).worksheets[0]
+    assert aba["G8"].value == "00:00"
+    assert aba["H8"].value == "02:00"
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from app.application.providers.repo.rh_repo import (
     FuncionarioRepository,
+    HorarioTrabalhoRepository,
     RegistroPontoRepository,
 )
 from app.application.providers.utility.cartao_ponto_builder import (
@@ -16,10 +17,11 @@ from app.application.providers.utility.cartao_ponto_builder import (
     DiaCartao,
 )
 from app.core.tempo import day_bounds, local_date_of, local_tz
-from app.domain.entities.rh import RegistroPonto
+from app.domain.entities.rh import HorarioTrabalho, RegistroPonto
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 from app.domain.services.rh_cartao_ponto import montar_linha
+from app.domain.services.rh_ponto_calculo import resultado_dia
 
 _MAX_DIAS = 366
 _MAX_FUNCIONARIOS = 500
@@ -31,10 +33,12 @@ class RhPontoExportService:
         funcionario_repo: FuncionarioRepository,
         registro_ponto_repo: RegistroPontoRepository,
         builder: CartaoPontoBuilder | None = None,
+        horario_repo: HorarioTrabalhoRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.registro_ponto_repo = registro_ponto_repo
         self.builder = builder or CartaoPontoBuilder()
+        self.horario_repo = horario_repo
 
     async def exportar_cartoes(
         self,
@@ -64,15 +68,19 @@ class RhPontoExportService:
             chave = (registro.funcionario_id, local_date_of(registro.timestamp))
             por_funcionario_e_dia[chave].append(registro)
 
+        horarios = await self._horarios_por_funcionario(team_id, funcionarios)
+
         dias_do_periodo = self._dias_do_periodo(inicio, fim)
         cartoes = [
             CartaoFuncionario(
                 nome=funcionario.nome,
                 cargo=funcionario.cargo,
                 dias=[
-                    DiaCartao(
-                        data=dia,
-                        linha=montar_linha(por_funcionario_e_dia.get((funcionario.id, dia), []), tz),
+                    self._montar_dia(
+                        dia,
+                        por_funcionario_e_dia.get((funcionario.id, dia), []),
+                        horarios.get(funcionario.id),
+                        tz,
                     )
                     for dia in dias_do_periodo
                 ],
@@ -85,6 +93,29 @@ class RhPontoExportService:
             inicio=inicio,
             fim=fim,
             cartoes=cartoes,
+        )
+
+    async def _horarios_por_funcionario(self, team_id: UUID, funcionarios: list) -> dict[UUID, HorarioTrabalho]:
+        if self.horario_repo is None:
+            return {}
+        return await self.horario_repo.list_by_funcionarios(team_id, [f.id for f in funcionarios])
+
+    def _montar_dia(
+        self,
+        dia: date,
+        registros_do_dia: list[RegistroPonto],
+        horario: HorarioTrabalho | None,
+        tz,
+    ) -> DiaCartao:
+        # Sem horario cadastrado o turno do dia e sempre None; resultado_dia trata isso como
+        # esperado=0, entao qualquer batida vira hora extra em vez de sumir do cartao.
+        turno = horario.turno_para_dia(dia.weekday()) if horario is not None else None
+        resultado = resultado_dia(registros_do_dia, turno)
+        return DiaCartao(
+            data=dia,
+            linha=montar_linha(registros_do_dia, tz),
+            extra_min=resultado.extra_min,
+            falta_min=resultado.falta_min,
         )
 
     def nome_arquivo(self, inicio: date, fim: date) -> str:

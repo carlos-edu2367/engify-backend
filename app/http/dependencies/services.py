@@ -353,6 +353,7 @@ async def get_rh_ponto_export_service(session: Session) -> RhPontoExportService:
     return RhPontoExportService(
         funcionario_repo=FuncionarioRepositoryImpl(session),
         registro_ponto_repo=RegistroPontoRepositoryImpl(session),
+        horario_repo=HorarioTrabalhoRepositoryImpl(session),
     )
 
 

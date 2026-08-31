@@ -8,8 +8,9 @@ depender de formatacao de celula ou do locale de quem abrir o arquivo.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, time as Time, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -17,8 +18,8 @@ from openpyxl.styles import Alignment, Border, Font, Side
 
 from app.domain.services.rh_cartao_ponto import LinhaCartao
 
-_COLUNAS = ["Data", "Dia", "entrada", "saída intervalo", "retorno intervalo", "saída", "assinatura"]
-_LARGURAS = [12, 8, 12, 18, 20, 12, 30]
+_COLUNAS = ["Data", "Dia", "entrada", "saída intervalo", "retorno intervalo", "saída", "HE", "atrasos"]
+_LARGURAS = [12, 8, 12, 18, 20, 12, 10, 10]
 _DIAS_SEMANA = ["SEG", "TER", "QUA", "QUI", "SEX", "SAB", "DOM"]
 _MESES = [
     "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -33,6 +34,8 @@ _LIMITE_NOME_ABA = 31
 class DiaCartao:
     data: date
     linha: LinhaCartao
+    extra_min: Decimal = field(default_factory=lambda: Decimal("0"))
+    falta_min: Decimal = field(default_factory=lambda: Decimal("0"))
 
 
 @dataclass(frozen=True)
@@ -125,13 +128,18 @@ class CartaoPontoBuilder:
                 self._hhmm(dia.linha.saida_intervalo),
                 self._hhmm(dia.linha.retorno_intervalo),
                 self._hhmm(dia.linha.saida),
-                None,
+                self._hhmm_minutos(dia.extra_min),
+                self._hhmm_minutos(dia.falta_min),
             ]
             for indice, valor in enumerate(valores, start=1):
                 celula = sheet.cell(row=linha, column=indice, value=valor)
                 celula.border = borda
-                if indice <= 6:
-                    celula.alignment = centro
+                celula.alignment = centro
 
     def _hhmm(self, valor: Time | None) -> str | None:
         return valor.strftime("%H:%M") if valor is not None else None
+
+    def _hhmm_minutos(self, minutos: Decimal) -> str:
+        total = int(minutos.to_integral_value(rounding=ROUND_HALF_UP))
+        horas, resto = divmod(total, 60)
+        return f"{horas:02d}:{resto:02d}"
