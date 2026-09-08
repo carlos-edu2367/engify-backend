@@ -23,6 +23,7 @@ from app.domain.entities.rh import (
     TabelaProgressiva,
     TipoAtestado,
 )
+from app.domain.entities.rh_abono import AbonoFalta
 from app.domain.entities.rh_calendario import EventoCalendarioRh
 
 
@@ -525,4 +526,22 @@ class EventoCalendarioRepository(ABC):
 
     @abstractmethod
     async def list_by_periodo(self, team_id: UUID, start: date, end: date) -> list[EventoCalendarioRh]:
+        pass
+
+
+class AbonoFaltaRepository(ABC):
+    @abstractmethod
+    async def save(self, abono: AbonoFalta) -> AbonoFalta:
+        pass
+
+    @abstractmethod
+    async def get_by_id(self, id: UUID, team_id: UUID) -> AbonoFalta:
+        pass
+
+    @abstractmethod
+    async def list_by_periodo(self, team_id: UUID, start: date, end: date, funcionario_id: UUID | None = None) -> list[AbonoFalta]:
+        pass
+
+    @abstractmethod
+    async def list_by_funcionario_periodo(self, team_id: UUID, funcionario_id: UUID, start: date, end: date) -> list[AbonoFalta]:
         pass

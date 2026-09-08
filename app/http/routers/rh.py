@@ -6,6 +6,8 @@ from app.core.limiter import limiter
 from app.core.config import settings
 
 from app.application.dtos.rh import (
+    AbonarFaltaItemDTO,
+    AbonarFaltasDTO,
     AjustePontoFiltersDTO,
     AtestadoFiltersDTO,
     BatidaDiaDTO,
@@ -31,11 +33,12 @@ from app.application.dtos.rh import (
 from app.application.services.rh_ponto_service import RequestContext, hash_ip
 from app.application.providers.utility.storage_provider import DirectUploadRequest
 from app.domain.entities.rh import AjustePonto, Atestado, Beneficio, FaixaEncargo, Ferias, Funcionario, Holerite, HoleriteItem, HorarioTrabalho, LocalPonto, RegistroPonto, RegraEncargo, RhAuditLog, RhFolhaJob, StatusAjuste, StatusAtestado, StatusBeneficio, StatusFerias, StatusHolerite, StatusPonto, StatusRegraEncargo, TabelaProgressiva, TipoAtestado
+from app.domain.entities.rh_abono import AbonoFalta
 from app.domain.entities.rh_calendario import EventoCalendarioRh
 from app.domain.errors import DomainError
 from app.http.dependencies.auth import CurrentUser, RHAdminUser
 from app.http.dependencies.pagination import Pagination
-from app.http.dependencies.services import RhCalendarioServiceDep, RhDashboardServiceDep, RhEncargoServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoExportServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
+from app.http.dependencies.services import RhAbonoServiceDep, RhCalendarioServiceDep, RhDashboardServiceDep, RhEncargoServiceDep, RhFolhaServiceDep, RhFuncionarioServiceDep, RhLocalPontoServiceDep, RhPontoExportServiceDep, RhPontoServiceDep, RhSolicitacoesServiceDep, StorageProviderDep
 from app.http.schemas.common import MessageResponse, PaginatedResponse
 from app.http.schemas.rh import (
     RhFuncionarioCreateRequest,
@@ -67,9 +70,12 @@ from app.http.schemas.rh import (
     RhBeneficioFuncionarioResponse,
     RhBeneficioResponse,
     RhBeneficioUpdateRequest,
+    RhAbonarFaltasRequest,
+    RhAbonoFaltaResponse,
     RhDashboardSummaryResponse,
     RhEventoCalendarioCreateRequest,
     RhEventoCalendarioResponse,
+    RhFaltaPendenteResponse,
     RhFecharFolhaRequest,
     RhFeriasCreateRequest,
     RhFeriasResponse,
@@ -1339,6 +1345,86 @@ async def delete_evento_calendario(evento_id: UUID, user: RHAdminUser, svc: RhCa
     except DomainError as exc:
         raise _map_rh_error(exc)
     return MessageResponse(message="Evento de calendario removido com sucesso")
+
+
+@router.get("/faltas", response_model=list[RhFaltaPendenteResponse])
+async def list_faltas(
+    user: RHAdminUser,
+    svc: RhAbonoServiceDep,
+    start: date = Query(...),
+    end: date = Query(...),
+    funcionario_id: UUID | None = Query(default=None),
+):
+    try:
+        faltas = await svc.listar_faltas(user, start, end, funcionario_id=funcionario_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return [
+        RhFaltaPendenteResponse(funcionario_id=item.funcionario_id, funcionario_nome=item.funcionario_nome, data=item.data)
+        for item in faltas
+    ]
+
+
+@router.post("/abonos", response_model=list[RhAbonoFaltaResponse], status_code=201)
+async def criar_abonos(body: RhAbonarFaltasRequest, user: RHAdminUser, svc: RhAbonoServiceDep):
+    try:
+        criados = await svc.abonar(
+            AbonarFaltasDTO(
+                itens=[AbonarFaltaItemDTO(funcionario_id=item.funcionario_id, data=item.data) for item in body.itens],
+                motivo=body.motivo,
+            ),
+            user,
+        )
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return [_to_abono_response(item) for item in criados]
+
+
+@router.get("/abonos", response_model=list[RhAbonoFaltaResponse])
+async def list_abonos(
+    user: RHAdminUser,
+    svc: RhAbonoServiceDep,
+    start: date = Query(...),
+    end: date = Query(...),
+    funcionario_id: UUID | None = Query(default=None),
+):
+    try:
+        abonos = await svc.listar_abonos(user, start, end, funcionario_id=funcionario_id)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return [_to_abono_response(item) for item in abonos]
+
+
+@router.delete("/abonos/{abono_id}", response_model=MessageResponse)
+async def revogar_abono(abono_id: UUID, user: RHAdminUser, svc: RhAbonoServiceDep):
+    try:
+        await svc.revogar(abono_id, user)
+    except DomainError as exc:
+        raise _map_rh_error(exc)
+    return MessageResponse(message="Abono revogado com sucesso")
+
+
+@router.get("/me/abonos", response_model=list[RhAbonoFaltaResponse])
+@limiter.limit("30/minute")
+async def get_meus_abonos(
+    request: Request,
+    user: CurrentUser,
+    svc: RhAbonoServiceDep,
+    desde: date = Query(...),
+    ate: date = Query(...),
+):
+    abonos = await svc.listar_meus_abonos(user, desde, ate)
+    return [_to_abono_response(item) for item in abonos]
+
+
+def _to_abono_response(abono: AbonoFalta) -> RhAbonoFaltaResponse:
+    return RhAbonoFaltaResponse(
+        id=abono.id,
+        funcionario_id=abono.funcionario_id,
+        data=abono.data,
+        motivo=abono.motivo,
+        created_by_user_id=abono.created_by_user_id,
+    )
 
 
 def _to_evento_calendario_response(evento: EventoCalendarioRh) -> RhEventoCalendarioResponse:

@@ -47,6 +47,7 @@ from app.domain.entities.rh import (
     TurnoHorario,
 )
 from app.domain.entities.identities import CPF
+from app.domain.entities.rh_abono import AbonoFalta
 from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
 from app.infra.db.models.base import Base, TimestampMixin
 
@@ -1329,3 +1330,48 @@ class EventoCalendarioRhModel(Base, TimestampMixin):
         self.aplica_todos = evento.aplica_todos
         self.funcionario_ids = evento.funcionario_ids
         self.is_deleted = evento.is_deleted
+
+
+class AbonoFaltaModel(Base, TimestampMixin):
+    __tablename__ = "rh_abonos_falta"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    funcionario_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rh_funcionarios.id", ondelete="CASCADE"), nullable=False)
+    data: Mapped[date] = mapped_column(Date, nullable=False)
+    motivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index("idx_rh_abonos_falta_team_funcionario_data", "team_id", "funcionario_id", "data"),
+        Index("idx_rh_abonos_falta_team_data", "team_id", "data", "is_deleted"),
+    )
+
+    def to_domain(self) -> AbonoFalta:
+        abono = object.__new__(AbonoFalta)
+        abono.id = self.id
+        abono.team_id = self.team_id
+        abono.funcionario_id = self.funcionario_id
+        abono.data = self.data
+        abono.motivo = self.motivo
+        abono.created_by_user_id = self.created_by_user_id
+        abono.is_deleted = self.is_deleted
+        return abono
+
+    @classmethod
+    def from_domain(cls, abono: AbonoFalta) -> "AbonoFaltaModel":
+        return cls(
+            id=abono.id or uuid.uuid4(),
+            team_id=abono.team_id,
+            funcionario_id=abono.funcionario_id,
+            data=abono.data,
+            motivo=abono.motivo,
+            created_by_user_id=abono.created_by_user_id,
+            is_deleted=abono.is_deleted,
+        )
+
+    def update_from_domain(self, abono: AbonoFalta) -> None:
+        self.data = abono.data
+        self.motivo = abono.motivo
+        self.is_deleted = abono.is_deleted

@@ -354,7 +354,22 @@ class _FakeEventoCalendarioRepo:
         return [item for item in self.eventos if item.team_id == team_id and start <= item.data <= end]
 
 
-def _build_service(funcionarios, horarios, registros=None, ferias_items=None, holerites=None, regras=None, eventos_calendario=None):
+class _FakeAbonoRepo:
+    def __init__(self, items=None) -> None:
+        self.items = list(items or [])
+
+    async def list_by_periodo(self, team_id, start, end, funcionario_id=None):
+        return [
+            item
+            for item in self.items
+            if item.team_id == team_id
+            and start <= item.data <= end
+            and not item.is_deleted
+            and (funcionario_id is None or item.funcionario_id == funcionario_id)
+        ]
+
+
+def _build_service(funcionarios, horarios, registros=None, ferias_items=None, holerites=None, regras=None, eventos_calendario=None, abonos=None):
     from app.application.services.rh_folha_service import RhFolhaService
 
     item_repo = _FakeHoleriteItemRepo()
@@ -380,6 +395,7 @@ def _build_service(funcionarios, horarios, registros=None, ferias_items=None, ho
         folha_queue=job_queue,
         encargo_cache=encargo_cache,
         evento_calendario_repo=_FakeEventoCalendarioRepo(eventos_calendario),
+        abono_repo=_FakeAbonoRepo(abonos),
     )
     service.holerite_item_repo = item_repo
     service.folha_job_repo = job_repo
@@ -573,6 +589,31 @@ async def test_generate_draft_does_not_discount_absence_covered_by_feriado_event
 
     # Sem o feriado, cada quinta sem registro vira falta cheia; com o feriado cobrindo 02/04,
     # essa data especifica nao gera desconto (mas as outras quintas de abril continuam gerando).
+    assert result[0].descontos_falta.amount < Decimal("1760.00")
+
+
+@pytest.mark.asyncio
+async def test_generate_draft_does_not_discount_absence_covered_by_abono_manual():
+    from app.domain.entities.rh_abono import AbonoFalta
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    horario = HorarioTrabalho(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        turnos=[TurnoHorario(dia_semana=3, hora_entrada=time(8, 0), hora_saida=time(17, 0))],
+    )
+    abono = AbonoFalta(
+        team_id=admin.team.id,
+        funcionario_id=funcionario.id,
+        data=date(2026, 4, 2),
+        motivo="Falta abonada pelo RH",
+    )
+    service = _build_service([funcionario], {funcionario.id: horario}, abonos=[abono])
+
+    result = await service.gerar_rascunho_folha(admin, 4, 2026, funcionario_id=funcionario.id)
+
+    # Mesma logica do teste de feriado: sem o abono cada quinta sem registro vira falta cheia.
     assert result[0].descontos_falta.amount < Decimal("1760.00")
 
 

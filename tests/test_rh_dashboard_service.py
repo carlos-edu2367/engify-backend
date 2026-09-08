@@ -462,6 +462,34 @@ def test_summarize_estado_ponto_7_dias_aplica_liberacao_antecipada():
     assert resumo.horas_extras == Decimal("0.00")
 
 
+def test_summarize_estado_ponto_7_dias_aplica_abono_manual():
+    from app.application.services.rh_dashboard_service import RhDashboardService
+
+    admin = _make_user(Roles.ADMIN)
+    funcionario_id = uuid4()
+    horario = _make_daily_horario(admin.team.id, funcionario_id)
+    service = RhDashboardService(
+        funcionario_repo=_FakeFuncionarioRepo(),
+        horario_repo=_FakeHorarioRepo(),
+        ajuste_repo=_FakeAjusteRepo(),
+        ferias_repo=_FakeFeriasRepo(),
+        atestado_repo=_FakeAtestadoRepo(),
+        registro_ponto_repo=_FakeRegistroRepo(),
+        holerite_repo=_FakeHoleriteRepo(),
+        audit_repo=_FakeAuditRepo(),
+        uow=_FakeUow(),
+    )
+    dia = date(2026, 7, 6)
+
+    resumo = service._summarize_estado_ponto_7_dias(
+        dia, dia, horario, [], funcionario_id, [], datas_abonadas_extra={dia}
+    )
+
+    assert resumo.dias[0].situacao == "abonado"
+    assert resumo.horas_faltantes == Decimal("0.00")
+    assert resumo.faltas == 0
+
+
 def test_summarize_estado_ponto_7_dias_sem_liberacao_gera_falta():
     from app.application.services.rh_dashboard_service import RhDashboardService
 

@@ -38,6 +38,7 @@ from app.application.services.rh_folha_service import RhFolhaService
 from app.application.services.rh_encargo_service import RhEncargoService
 from app.application.services.rh_solicitacoes_service import RhSolicitacoesService
 from app.application.services.rh_calendario_service import RhCalendarioService
+from app.application.services.rh_abono_service import RhAbonoService
 from app.infra.cache.rh_geofence_cache import RedisRhGeofenceCache
 from app.infra.cache.rh_encargo_cache import NullRhEncargoCache
 from app.infra.db.repositories.obra_repository import (
@@ -61,6 +62,7 @@ from app.infra.db.repositories.rh_repository import (
     AtestadoRepositoryImpl,
     BeneficioRepositoryImpl,
     BeneficioFuncionarioRepositoryImpl,
+    AbonoFaltaRepositoryImpl,
     EventoCalendarioRepositoryImpl,
     FeriasRepositoryImpl,
     HoleriteItemRepositoryImpl,
@@ -406,6 +408,7 @@ async def get_rh_folha_service(session: Session) -> RhFolhaService:
         beneficio_repo=BeneficioRepositoryImpl(session),
         beneficio_funcionario_repo=BeneficioFuncionarioRepositoryImpl(session),
         evento_calendario_repo=EventoCalendarioRepositoryImpl(session),
+        abono_repo=AbonoFaltaRepositoryImpl(session),
     )
 
 
@@ -430,6 +433,22 @@ async def get_rh_dashboard_service(session: Session) -> RhDashboardService:
         atestado_repo=AtestadoRepositoryImpl(session),
         registro_ponto_repo=RegistroPontoRepositoryImpl(session),
         holerite_repo=HoleriteRepositoryImpl(session),
+        audit_repo=RhAuditLogRepositoryImpl(session),
+        uow=SQLAlchemyUOW(session),
+        evento_calendario_repo=EventoCalendarioRepositoryImpl(session),
+        abono_repo=AbonoFaltaRepositoryImpl(session),
+    )
+
+
+async def get_rh_abono_service(session: Session) -> RhAbonoService:
+    return RhAbonoService(
+        funcionario_repo=FuncionarioRepositoryImpl(session),
+        horario_repo=HorarioTrabalhoRepositoryImpl(session),
+        registro_ponto_repo=RegistroPontoRepositoryImpl(session),
+        ferias_repo=FeriasRepositoryImpl(session),
+        atestado_repo=AtestadoRepositoryImpl(session),
+        tipo_atestado_repo=TipoAtestadoRepositoryImpl(session),
+        abono_repo=AbonoFaltaRepositoryImpl(session),
         audit_repo=RhAuditLogRepositoryImpl(session),
         uow=SQLAlchemyUOW(session),
         evento_calendario_repo=EventoCalendarioRepositoryImpl(session),
@@ -601,6 +620,7 @@ RhPontoServiceDep = Annotated[RhPontoService, Depends(get_rh_ponto_service)]
 RhPontoExportServiceDep = Annotated[RhPontoExportService, Depends(get_rh_ponto_export_service)]
 RhSolicitacoesServiceDep = Annotated[RhSolicitacoesService, Depends(get_rh_solicitacoes_service)]
 RhCalendarioServiceDep = Annotated[RhCalendarioService, Depends(get_rh_calendario_service)]
+RhAbonoServiceDep = Annotated[RhAbonoService, Depends(get_rh_abono_service)]
 RhFolhaServiceDep = Annotated[RhFolhaService, Depends(get_rh_folha_service)]
 RhEncargoServiceDep = Annotated[RhEncargoService, Depends(get_rh_encargo_service)]
 RhDashboardServiceDep = Annotated[RhDashboardService, Depends(get_rh_dashboard_service)]

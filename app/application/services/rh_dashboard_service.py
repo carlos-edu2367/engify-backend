@@ -19,6 +19,7 @@ from app.application.dtos.rh import (
     RhUltimoPontoDTO,
 )
 from app.application.providers.repo.rh_repo import (
+    AbonoFaltaRepository,
     AjustePontoRepository,
     AtestadoRepository,
     EventoCalendarioRepository,
@@ -63,6 +64,7 @@ class RhDashboardService:
         audit_repo: RhAuditLogRepository,
         uow: UOWProvider,
         evento_calendario_repo: EventoCalendarioRepository | None = None,
+        abono_repo: AbonoFaltaRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.horario_repo = horario_repo
@@ -74,6 +76,7 @@ class RhDashboardService:
         self.audit_repo = audit_repo
         self.uow = uow
         self.evento_calendario_repo = evento_calendario_repo
+        self.abono_repo = abono_repo
 
     async def obter_dashboard(self, current_user: User, mes: int, ano: int) -> RhDashboardSummaryDTO:
         self._ensure_rh_admin(current_user)
@@ -326,7 +329,15 @@ class RhDashboardService:
             if self.evento_calendario_repo is not None
             else []
         )
-        return self._summarize_estado_ponto_7_dias(inicio, fim, horario, registros, funcionario_id, eventos_calendario)
+        abonos = (
+            await self.abono_repo.list_by_funcionario_periodo(team_id, funcionario_id, inicio, fim)
+            if self.abono_repo is not None
+            else []
+        )
+        datas_abonadas_extra = {item.data for item in abonos}
+        return self._summarize_estado_ponto_7_dias(
+            inicio, fim, horario, registros, funcionario_id, eventos_calendario, datas_abonadas_extra
+        )
 
     async def _calcular_ponto_hoje(self, team_id, funcionario_id, horario, agora: datetime) -> RhPontoHojeDTO | None:
         """Fatos do dia corrente. Nunca classifica falta.
@@ -379,6 +390,7 @@ class RhDashboardService:
         registros: list[RegistroPonto],
         funcionario_id=None,
         eventos_calendario: list[EventoCalendarioRh] | None = None,
+        datas_abonadas_extra: set | None = None,
     ) -> RhEstadoPonto7DiasDTO:
         if horario is None:
             def turno_para_dia(_weekday: int) -> TurnoHorario | None:
@@ -386,7 +398,7 @@ class RhDashboardService:
         else:
             turno_para_dia = horario.turno_para_dia
 
-        datas_abonadas: set = set()
+        datas_abonadas: set = set(datas_abonadas_extra or ())
         liberacoes: dict = {}
         for evento in eventos_calendario or []:
             if not evento.aplica_a(funcionario_id):

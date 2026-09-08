@@ -261,3 +261,27 @@ class CreateEventoCalendarioDTO(BaseModel):
 class EventoCalendarioFiltersDTO(BaseModel):
     start: date | None = None
     end: date | None = None
+
+
+class AbonarFaltaItemDTO(BaseModel):
+    funcionario_id: UUID
+    data: date
+
+
+class AbonarFaltasDTO(BaseModel):
+    itens: list[AbonarFaltaItemDTO] = Field(min_length=1)
+    motivo: str
+
+
+class RhFaltaPendenteDTO(BaseModel):
+    funcionario_id: UUID
+    funcionario_nome: str
+    data: date
+
+
+class RhAbonoFaltaDTO(BaseModel):
+    id: UUID
+    funcionario_id: UUID
+    data: date
+    motivo: str
+    created_by_user_id: UUID | None = None

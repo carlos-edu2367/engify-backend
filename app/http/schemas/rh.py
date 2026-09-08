@@ -710,3 +710,29 @@ class RhEventoCalendarioResponse(BaseModel):
     hora_corte: time | None = None
     aplica_todos: bool
     funcionario_ids: list[UUID]
+
+
+class RhFaltaPendenteResponse(BaseModel):
+    funcionario_id: UUID
+    funcionario_nome: str
+    data: date
+
+
+class RhAbonarFaltaItemRequest(BaseModel):
+    funcionario_id: UUID
+    data: date
+
+
+class RhAbonarFaltasRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    itens: list[RhAbonarFaltaItemRequest] = Field(min_length=1)
+    motivo: str
+
+
+class RhAbonoFaltaResponse(BaseModel):
+    id: UUID
+    funcionario_id: UUID
+    data: date
+    motivo: str
+    created_by_user_id: UUID | None = None

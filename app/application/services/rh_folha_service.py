@@ -10,6 +10,7 @@ from uuid import UUID
 
 from app.application.providers.repo.financeiro_repo import PagamentoAgendadoRepository
 from app.application.providers.repo.rh_repo import (
+    AbonoFaltaRepository,
     AtestadoRepository,
     BeneficioRepository,
     BeneficioFuncionarioRepository,
@@ -94,6 +95,7 @@ class RhFolhaService:
         beneficio_repo: BeneficioRepository | None = None,
         beneficio_funcionario_repo: BeneficioFuncionarioRepository | None = None,
         evento_calendario_repo: EventoCalendarioRepository | None = None,
+        abono_repo: AbonoFaltaRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.horario_repo = horario_repo
@@ -115,6 +117,7 @@ class RhFolhaService:
         self.beneficio_repo = beneficio_repo
         self.beneficio_funcionario_repo = beneficio_funcionario_repo
         self.evento_calendario_repo = evento_calendario_repo
+        self.abono_repo = abono_repo
 
     async def gerar_rascunho_folha(
         self,
@@ -146,6 +149,13 @@ class RhFolhaService:
             statuses={StatusAtestado.ENTREGUE},
         )
         abono_por_atestado = await self._build_atestado_abono_map(atestados)
+        abonos_manuais = (
+            await self.abono_repo.list_by_periodo(team_id, start.date(), end.date())
+            if self.abono_repo is not None
+            else []
+        )
+        for abono in abonos_manuais:
+            abono_por_atestado[abono.funcionario_id].add(abono.data)
         registros_por_funcionario = self._group_by_funcionario(registros)
         ferias_por_funcionario = self._group_by_funcionario(ferias_items)
         eventos_calendario = (

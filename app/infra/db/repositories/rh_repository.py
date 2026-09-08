@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.application.providers.repo.rh_repo import (
+    AbonoFaltaRepository,
     AjustePontoRepository,
     AtestadoRepository,
     BeneficioRepository,
@@ -57,9 +58,11 @@ from app.domain.entities.rh import (
     TabelaProgressiva,
     TipoAtestado,
 )
+from app.domain.entities.rh_abono import AbonoFalta
 from app.domain.entities.rh_calendario import EventoCalendarioRh
 from app.domain.errors import DomainError
 from app.infra.db.models.rh_model import (
+    AbonoFaltaModel,
     AjustePontoModel,
     AtestadoModel,
     BeneficioModel,
@@ -1528,3 +1531,27 @@ class EventoCalendarioRepositoryImpl(_SoftDeleteRepository, EventoCalendarioRepo
         )
         result = await self._session.execute(stmt)
         return [model.to_domain() for model in result.scalars().all()]
+
+
+class AbonoFaltaRepositoryImpl(_SoftDeleteRepository, AbonoFaltaRepository):
+    async def save(self, abono: AbonoFalta) -> AbonoFalta:
+        return await self._save(abono, AbonoFaltaModel, "Abono de falta nao encontrado para atualizacao")
+
+    async def get_by_id(self, id: UUID, team_id: UUID) -> AbonoFalta:
+        return (await self._get_by_id(AbonoFaltaModel, id, team_id, "Abono de falta nao encontrado")).to_domain()
+
+    async def list_by_periodo(self, team_id: UUID, start, end, funcionario_id: UUID | None = None) -> list[AbonoFalta]:
+        conditions = [
+            AbonoFaltaModel.team_id == team_id,
+            AbonoFaltaModel.data >= start,
+            AbonoFaltaModel.data <= end,
+            AbonoFaltaModel.is_deleted == False,  # noqa: E712
+        ]
+        if funcionario_id is not None:
+            conditions.append(AbonoFaltaModel.funcionario_id == funcionario_id)
+        stmt = select(AbonoFaltaModel).where(*conditions).order_by(AbonoFaltaModel.data.asc())
+        result = await self._session.execute(stmt)
+        return [model.to_domain() for model in result.scalars().all()]
+
+    async def list_by_funcionario_periodo(self, team_id: UUID, funcionario_id: UUID, start, end) -> list[AbonoFalta]:
+        return await self.list_by_periodo(team_id, start, end, funcionario_id=funcionario_id)
