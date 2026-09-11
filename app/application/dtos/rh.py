@@ -1,6 +1,6 @@
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -266,6 +266,8 @@ class EventoCalendarioFiltersDTO(BaseModel):
 class AbonarFaltaItemDTO(BaseModel):
     funcionario_id: UUID
     data: date
+    # Vazio abona o dia inteiro; preenchido perdoa so esses minutos devidos.
+    minutos: int | None = None
 
 
 class AbonarFaltasDTO(BaseModel):
@@ -277,6 +279,9 @@ class RhFaltaPendenteDTO(BaseModel):
     funcionario_id: UUID
     funcionario_nome: str
     data: date
+    # "falta": nao trabalhou nada. "horas": trabalhou menos que a jornada.
+    tipo: Literal["falta", "horas"] = "falta"
+    minutos_devidos: int = 0
 
 
 class RhAbonoFaltaDTO(BaseModel):
@@ -285,3 +290,4 @@ class RhAbonoFaltaDTO(BaseModel):
     data: date
     motivo: str
     created_by_user_id: UUID | None = None
+    minutos: int | None = None

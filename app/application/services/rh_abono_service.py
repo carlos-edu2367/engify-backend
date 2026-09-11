@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from datetime import date, timedelta
+from decimal import Decimal
 from uuid import UUID
 
 from app.application.dtos.rh import AbonarFaltasDTO, RhFaltaPendenteDTO
@@ -18,11 +20,11 @@ from app.application.providers.repo.rh_repo import (
 from app.application.providers.uow import UOWProvider
 from app.core.tempo import day_bounds, local_tz
 from app.domain.entities.rh import Atestado, Funcionario, RhAuditLog, StatusAtestado, StatusFerias
-from app.domain.entities.rh_abono import AbonoFalta
+from app.domain.entities.rh_abono import AbonoFalta, separar_abonos
 from app.domain.entities.rh_calendario import TipoEventoCalendario
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
-from app.domain.services.rh_ponto_calculo import SituacaoDia, resumir_periodo
+from app.domain.services.rh_ponto_calculo import SituacaoDia, minutos_liberacao, resumir_periodo
 
 _EVENTOS_QUE_ABONAM = {
     TipoEventoCalendario.FERIADO,
@@ -62,7 +64,15 @@ class RhAbonoService:
         start: date,
         end: date,
         funcionario_id: UUID | None = None,
+        incluir_horas: bool = False,
     ) -> list[RhFaltaPendenteDTO]:
+        """Dias com divida de jornada ainda nao abonada.
+
+        Por padrao so faltas (dia sem trabalho). Com incluir_horas, tambem os
+        dias em que a pessoa trabalhou menos que a jornada, com os minutos
+        que ainda deve. Opt-in para nao mudar a resposta de quem ja consome
+        o endpoint esperando so faltas.
+        """
         self._ensure_rh_admin(current_user)
         team_id = current_user.team.id
         funcionarios = await self._load_funcionarios(team_id, funcionario_id)
@@ -90,9 +100,7 @@ class RhAbonoService:
 
         registros_por_funcionario = self._group_by_funcionario(registros)
         ferias_por_funcionario = self._group_by_funcionario(ferias_items)
-        abonos_por_funcionario: dict[UUID, set[date]] = defaultdict(set)
-        for abono in abonos_existentes:
-            abonos_por_funcionario[abono.funcionario_id].add(abono.data)
+        datas_abono_manual, minutos_abono_manual = separar_abonos(abonos_existentes)
 
         pendentes: list[RhFaltaPendenteDTO] = []
         for funcionario in funcionarios:
@@ -101,16 +109,26 @@ class RhAbonoService:
                 continue
 
             datas_abonadas = set(abono_por_atestado.get(funcionario.id, set()))
-            datas_abonadas |= abonos_por_funcionario.get(funcionario.id, set())
+            datas_abonadas |= datas_abono_manual.get(funcionario.id, set())
             for ferias in ferias_por_funcionario.get(funcionario.id, []):
                 dia = ferias.data_inicio.date()
                 fim_ferias = ferias.data_fim.date()
                 while dia <= fim_ferias:
                     datas_abonadas.add(dia)
                     dia += timedelta(days=1)
+            # A liberacao antecipada entra aqui pelo mesmo motivo que entra na
+            # folha: sem ela, quem saiu no horario liberado apareceria devendo
+            # horas que a folha nao desconta.
+            liberacoes: dict[date, Decimal] = {}
             for evento in eventos:
-                if evento.tipo in _EVENTOS_QUE_ABONAM and evento.aplica_a(funcionario.id):
+                if not evento.aplica_a(funcionario.id):
+                    continue
+                if evento.tipo in _EVENTOS_QUE_ABONAM:
                     datas_abonadas.add(evento.data)
+                elif evento.tipo == TipoEventoCalendario.LIBERACAO_ANTECIPADA:
+                    turno_dia = horario.turno_para_dia(evento.data.weekday())
+                    if turno_dia is not None:
+                        liberacoes[evento.data] = minutos_liberacao(turno_dia, evento.hora_corte)
 
             resumo = resumir_periodo(
                 registros=registros_por_funcionario.get(funcionario.id, []),
@@ -118,13 +136,28 @@ class RhAbonoService:
                 inicio=start,
                 fim=end,
                 datas_abonadas=datas_abonadas,
+                liberacoes=liberacoes,
+                minutos_abonados=minutos_abono_manual.get(funcionario.id),
                 tz=local_tz(),
             )
             for dia in resumo.dias:
                 if dia.situacao == SituacaoDia.FALTA:
-                    pendentes.append(
-                        RhFaltaPendenteDTO(funcionario_id=funcionario.id, funcionario_nome=funcionario.nome, data=dia.data)
+                    tipo = "falta"
+                elif incluir_horas and dia.situacao == SituacaoDia.PARCIAL:
+                    tipo = "horas"
+                else:
+                    continue
+                pendentes.append(
+                    RhFaltaPendenteDTO(
+                        funcionario_id=funcionario.id,
+                        funcionario_nome=funcionario.nome,
+                        data=dia.data,
+                        tipo=tipo,
+                        # Arredonda para cima: abonar o valor exibido quita a
+                        # divida inteira, ate os segundos da batida.
+                        minutos_devidos=math.ceil(dia.falta_min),
                     )
+                )
 
         pendentes.sort(key=lambda item: (item.data, item.funcionario_nome))
         return pendentes
@@ -135,13 +168,15 @@ class RhAbonoService:
 
         datas = [item.data for item in dto.itens]
         existentes = await self.abono_repo.list_by_periodo(team_id, min(datas), max(datas))
-        ja_abonadas = {(item.funcionario_id, item.data) for item in existentes}
+        # So o abono do dia inteiro encerra o dia. Abonos de horas podem se
+        # somar: o calculo limita o total a divida, entao nunca vira credito.
+        dias_fechados = {(item.funcionario_id, item.data) for item in existentes if item.dia_inteiro}
 
         criados: list[AbonoFalta] = []
         vistos: set[tuple[UUID, date]] = set()
         for item in dto.itens:
             chave = (item.funcionario_id, item.data)
-            if chave in ja_abonadas or chave in vistos:
+            if chave in dias_fechados or chave in vistos:
                 continue
             vistos.add(chave)
             abono = AbonoFalta(
@@ -150,6 +185,7 @@ class RhAbonoService:
                 data=item.data,
                 motivo=dto.motivo,
                 created_by_user_id=current_user.id,
+                minutos=item.minutos,
             )
             saved = await self.abono_repo.save(abono)
             criados.append(saved)
@@ -230,6 +266,7 @@ class RhAbonoService:
             "funcionario_id": str(abono.funcionario_id),
             "data": abono.data.isoformat(),
             "motivo": abono.motivo,
+            "minutos": abono.minutos,
             "is_deleted": abono.is_deleted,
         }
 

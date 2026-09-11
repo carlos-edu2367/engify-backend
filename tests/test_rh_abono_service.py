@@ -11,8 +11,11 @@ from app.domain.entities.rh import (
     Atestado,
     Funcionario,
     HorarioTrabalho,
+    RegistroPonto,
     StatusAtestado,
+    StatusPonto,
     TipoAtestado,
+    TipoPonto,
     TurnoHorario,
 )
 from app.domain.entities.rh_abono import AbonoFalta
@@ -270,6 +273,67 @@ async def test_abonar_ignora_data_ja_abonada_para_o_mesmo_funcionario():
 
 
 @pytest.mark.asyncio
+async def test_abonar_horas_cria_abono_parcial_com_os_minutos_informados():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    service = _build_service(funcionarios=[funcionario])
+
+    criados = await service.abonar(
+        AbonarFaltasDTO(
+            itens=[AbonarFaltaItemDTO(funcionario_id=funcionario.id, data=date(2026, 3, 12), minutos=90)],
+            motivo="Consulta medica",
+        ),
+        admin,
+    )
+
+    assert len(criados) == 1
+    assert criados[0].minutos == 90
+    assert criados[0].dia_inteiro is False
+
+
+@pytest.mark.asyncio
+async def test_abonar_horas_no_mesmo_dia_de_um_abono_parcial_existente_nao_e_bloqueado():
+    # So o abono do dia inteiro fecha o dia. Um segundo abono de horas no
+    # mesmo dia deve entrar; o calculo, e nao a criacao, limita o total a
+    # divida real.
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    existente = AbonoFalta(
+        team_id=admin.team.id, funcionario_id=funcionario.id, data=date(2026, 3, 12), motivo="Transito", minutos=30
+    )
+    service = _build_service(funcionarios=[funcionario], abonos=[existente])
+
+    criados = await service.abonar(
+        AbonarFaltasDTO(
+            itens=[AbonarFaltaItemDTO(funcionario_id=funcionario.id, data=date(2026, 3, 12), minutos=60)],
+            motivo="Consulta medica",
+        ),
+        admin,
+    )
+
+    assert len(criados) == 1
+    assert criados[0].minutos == 60
+
+
+@pytest.mark.asyncio
+async def test_abonar_horas_no_mesmo_dia_de_um_abono_do_dia_inteiro_e_bloqueado():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    existente = AbonoFalta(team_id=admin.team.id, funcionario_id=funcionario.id, data=date(2026, 3, 12), motivo="Atestado")
+    service = _build_service(funcionarios=[funcionario], abonos=[existente])
+
+    criados = await service.abonar(
+        AbonarFaltasDTO(
+            itens=[AbonarFaltaItemDTO(funcionario_id=funcionario.id, data=date(2026, 3, 12), minutos=60)],
+            motivo="Consulta medica",
+        ),
+        admin,
+    )
+
+    assert criados == []
+
+
+@pytest.mark.asyncio
 async def test_listar_abonos_filtra_por_periodo_e_nega_role_funcionario():
     admin = _make_user(Roles.ADMIN)
     funcionario = _make_funcionario(admin.team.id)
@@ -355,6 +419,78 @@ async def test_listar_faltas_retorna_dia_sem_registro():
     assert len(result) == 1
     assert result[0].funcionario_id == funcionario.id
     assert result[0].data == date(2026, 3, 9)
+    assert result[0].tipo == "falta"
+    # Turno 08-17 sem intervalo cadastrado em _make_horario: 9h esperadas,
+    # e o dia inteiro sem batida deve tudo isso.
+    assert result[0].minutos_devidos == 540
+
+
+@pytest.mark.asyncio
+async def test_listar_faltas_ignora_dia_com_horas_parciais_por_padrao():
+    # 2026-03-09 e segunda, turno 08-17 (9h esperadas, sem intervalo cadastrado
+    # em _make_horario). Saiu as 15h: 7h trabalhadas, 2h devidas — nao e falta.
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    horario = _make_horario(admin.team.id, funcionario.id)
+    registros = [
+        RegistroPonto(
+            team_id=admin.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.ENTRADA,
+            timestamp=datetime(2026, 3, 9, 8, 0, tzinfo=timezone.utc),
+            latitude=0.0,
+            longitude=0.0,
+            status=StatusPonto.VALIDADO,
+        ),
+        RegistroPonto(
+            team_id=admin.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.SAIDA,
+            timestamp=datetime(2026, 3, 9, 15, 0, tzinfo=timezone.utc),
+            latitude=0.0,
+            longitude=0.0,
+            status=StatusPonto.VALIDADO,
+        ),
+    ]
+    service = _build_service(funcionarios=[funcionario], horarios={funcionario.id: horario}, registros=registros)
+
+    result = await service.listar_faltas(admin, date(2026, 3, 9), date(2026, 3, 9))
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_listar_faltas_com_incluir_horas_lista_dia_parcial_com_minutos_devidos():
+    admin = _make_user(Roles.ADMIN)
+    funcionario = _make_funcionario(admin.team.id)
+    horario = _make_horario(admin.team.id, funcionario.id)
+    registros = [
+        RegistroPonto(
+            team_id=admin.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.ENTRADA,
+            timestamp=datetime(2026, 3, 9, 8, 0, tzinfo=timezone.utc),
+            latitude=0.0,
+            longitude=0.0,
+            status=StatusPonto.VALIDADO,
+        ),
+        RegistroPonto(
+            team_id=admin.team.id,
+            funcionario_id=funcionario.id,
+            tipo=TipoPonto.SAIDA,
+            timestamp=datetime(2026, 3, 9, 15, 0, tzinfo=timezone.utc),
+            latitude=0.0,
+            longitude=0.0,
+            status=StatusPonto.VALIDADO,
+        ),
+    ]
+    service = _build_service(funcionarios=[funcionario], horarios={funcionario.id: horario}, registros=registros)
+
+    result = await service.listar_faltas(admin, date(2026, 3, 9), date(2026, 3, 9), incluir_horas=True)
+
+    assert len(result) == 1
+    assert result[0].tipo == "horas"
+    assert result[0].minutos_devidos == 120
 
 
 @pytest.mark.asyncio

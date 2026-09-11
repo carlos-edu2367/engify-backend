@@ -493,3 +493,70 @@ def test_resumir_periodo_agrupa_batidas_pelo_dia_do_fuso_informado():
     # As duas batidas pertencem ao mesmo dia local: 5h de span, nada faltando.
     assert resumo.dias[0].trabalhado_min == Decimal("300")
     assert resumo.dias[0].falta_min == Decimal("0")
+
+
+# Abono de horas: turno de 8h (08-17 com 1h de almoco) em 06/07/2026, segunda.
+_DIA_ABONO = date(2026, 7, 6)
+
+
+def _resumir_com_abono(registros, minutos_abonados):
+    turno = _turno_8h()
+    return resumir_periodo(
+        registros=registros,
+        turno_para_dia=lambda dia: turno if dia == 0 else None,
+        inicio=_DIA_ABONO,
+        fim=_DIA_ABONO,
+        datas_abonadas=set(),
+        minutos_abonados=minutos_abonados,
+    )
+
+
+def _saiu_as_15h():
+    # 08h-15h menos 1h de almoco = 6h trabalhadas, 2h devidas.
+    return [_reg(time(8, 0), TipoPonto.ENTRADA), _reg(time(15, 0), TipoPonto.SAIDA)]
+
+
+def test_abono_de_horas_abate_so_os_minutos_perdoados():
+    resumo = _resumir_com_abono(_saiu_as_15h(), {_DIA_ABONO: Decimal("90")})
+
+    assert resumo.dias[0].falta_min == Decimal("30")
+    assert resumo.dias[0].situacao.value == "parcial"
+    assert resumo.falta_min == Decimal("30")
+
+
+def test_abono_de_horas_que_cobre_a_divida_deixa_o_dia_completo():
+    resumo = _resumir_com_abono(_saiu_as_15h(), {_DIA_ABONO: Decimal("120")})
+
+    assert resumo.dias[0].falta_min == Decimal("0")
+    assert resumo.dias[0].situacao.value == "completo"
+
+
+def test_abono_de_horas_maior_que_a_divida_nao_vira_hora_extra():
+    resumo = _resumir_com_abono(_saiu_as_15h(), {_DIA_ABONO: Decimal("300")})
+
+    assert resumo.falta_min == Decimal("0")
+    assert resumo.extra_min == Decimal("0")
+    assert resumo.dias[0].situacao.value == "completo"
+
+
+def test_dia_sem_batida_com_divida_toda_perdoada_em_minutos_vira_abonado():
+    resumo = _resumir_com_abono([], {_DIA_ABONO: Decimal("480")})
+
+    assert resumo.dias[0].situacao.value == "abonado"
+    assert resumo.faltas == 0
+    assert resumo.falta_min == Decimal("0")
+
+
+def test_dia_sem_batida_parcialmente_perdoado_continua_falta_com_menos_minutos():
+    resumo = _resumir_com_abono([], {_DIA_ABONO: Decimal("240")})
+
+    assert resumo.dias[0].situacao.value == "falta"
+    assert resumo.dias[0].falta_min == Decimal("240")
+    assert resumo.faltas == 1
+
+
+def test_abono_de_horas_nao_mexe_em_dia_com_batidas_impares():
+    resumo = _resumir_com_abono([_reg(time(8, 0), TipoPonto.ENTRADA)], {_DIA_ABONO: Decimal("60")})
+
+    assert resumo.dias[0].situacao.value == "incompleto"
+    assert resumo.dias_incompletos == 1

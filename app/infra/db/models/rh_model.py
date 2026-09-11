@@ -1342,6 +1342,8 @@ class AbonoFaltaModel(Base, TimestampMixin):
     motivo: Mapped[str] = mapped_column(String(255), nullable=False)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Nulo = abono do dia inteiro.
+    minutos: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         Index("idx_rh_abonos_falta_team_funcionario_data", "team_id", "funcionario_id", "data"),
@@ -1357,6 +1359,7 @@ class AbonoFaltaModel(Base, TimestampMixin):
         abono.motivo = self.motivo
         abono.created_by_user_id = self.created_by_user_id
         abono.is_deleted = self.is_deleted
+        abono.minutos = self.minutos
         return abono
 
     @classmethod
@@ -1369,9 +1372,11 @@ class AbonoFaltaModel(Base, TimestampMixin):
             motivo=abono.motivo,
             created_by_user_id=abono.created_by_user_id,
             is_deleted=abono.is_deleted,
+            minutos=abono.minutos,
         )
 
     def update_from_domain(self, abono: AbonoFalta) -> None:
         self.data = abono.data
         self.motivo = abono.motivo
         self.is_deleted = abono.is_deleted
+        self.minutos = abono.minutos

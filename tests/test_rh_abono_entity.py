@@ -50,3 +50,44 @@ def test_revogar_marca_como_deletado():
     abono.revogar()
 
     assert abono.is_deleted is True
+
+
+def test_abono_sem_minutos_abona_o_dia_inteiro():
+    abono = AbonoFalta(team_id=uuid4(), funcionario_id=uuid4(), data=date(2026, 3, 12), motivo="Atestado")
+
+    assert abono.minutos is None
+    assert abono.dia_inteiro is True
+
+
+def test_abono_de_horas_guarda_os_minutos_perdoados():
+    abono = AbonoFalta(
+        team_id=uuid4(), funcionario_id=uuid4(), data=date(2026, 3, 12), motivo="Consulta medica", minutos=90
+    )
+
+    assert abono.minutos == 90
+    assert abono.dia_inteiro is False
+
+
+@pytest.mark.parametrize("minutos", [0, -5, 24 * 60 + 1])
+def test_abono_recusa_minutos_fora_de_um_dia(minutos):
+    with pytest.raises(DomainError):
+        AbonoFalta(team_id=uuid4(), funcionario_id=uuid4(), data=date(2026, 3, 12), motivo="Atestado", minutos=minutos)
+
+
+def test_separar_abonos_soma_horas_do_mesmo_dia_e_isola_o_dia_inteiro():
+    from decimal import Decimal
+
+    from app.domain.entities.rh_abono import separar_abonos
+
+    team_id, ana, bruno = uuid4(), uuid4(), uuid4()
+    dia = date(2026, 3, 12)
+    abonos = [
+        AbonoFalta(team_id=team_id, funcionario_id=ana, data=dia, motivo="Consulta", minutos=60),
+        AbonoFalta(team_id=team_id, funcionario_id=ana, data=dia, motivo="Transito", minutos=30),
+        AbonoFalta(team_id=team_id, funcionario_id=bruno, data=dia, motivo="Atestado"),
+    ]
+
+    datas, minutos = separar_abonos(abonos)
+
+    assert datas == {bruno: {dia}}
+    assert minutos == {ana: {dia: Decimal("90")}}

@@ -1,5 +1,6 @@
 from datetime import date, datetime, time
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -716,11 +717,14 @@ class RhFaltaPendenteResponse(BaseModel):
     funcionario_id: UUID
     funcionario_nome: str
     data: date
+    tipo: Literal["falta", "horas"] = "falta"
+    minutos_devidos: int = 0
 
 
 class RhAbonarFaltaItemRequest(BaseModel):
     funcionario_id: UUID
     data: date
+    minutos: int | None = Field(default=None, ge=1, le=1440)
 
 
 class RhAbonarFaltasRequest(BaseModel):
@@ -736,3 +740,4 @@ class RhAbonoFaltaResponse(BaseModel):
     data: date
     motivo: str
     created_by_user_id: UUID | None = None
+    minutos: int | None = None

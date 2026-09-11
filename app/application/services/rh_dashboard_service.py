@@ -34,6 +34,7 @@ from app.application.providers.uow import UOWProvider
 from app.application.services.rh_audit_service import RhAuditService
 from app.core.tempo import day_bounds, local_date_of, local_tz, marker_bounds
 from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, RhAuditLog, StatusAjuste, StatusAtestado, StatusFerias, StatusHolerite, StatusPonto, TurnoHorario
+from app.domain.entities.rh_abono import separar_abonos
 from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
 from app.domain.services.rh_ponto_calculo import minutos_liberacao, resultado_dia, resumir_periodo
 from app.domain.entities.user import Roles, User
@@ -334,9 +335,16 @@ class RhDashboardService:
             if self.abono_repo is not None
             else []
         )
-        datas_abonadas_extra = {item.data for item in abonos}
+        datas_manuais, minutos_manuais = separar_abonos(abonos)
         return self._summarize_estado_ponto_7_dias(
-            inicio, fim, horario, registros, funcionario_id, eventos_calendario, datas_abonadas_extra
+            inicio,
+            fim,
+            horario,
+            registros,
+            funcionario_id,
+            eventos_calendario,
+            datas_manuais.get(funcionario_id, set()),
+            minutos_abonados=minutos_manuais.get(funcionario_id),
         )
 
     async def _calcular_ponto_hoje(self, team_id, funcionario_id, horario, agora: datetime) -> RhPontoHojeDTO | None:
@@ -391,6 +399,7 @@ class RhDashboardService:
         funcionario_id=None,
         eventos_calendario: list[EventoCalendarioRh] | None = None,
         datas_abonadas_extra: set | None = None,
+        minutos_abonados: dict | None = None,
     ) -> RhEstadoPonto7DiasDTO:
         if horario is None:
             def turno_para_dia(_weekday: int) -> TurnoHorario | None:
@@ -417,6 +426,7 @@ class RhDashboardService:
             fim=fim,
             datas_abonadas=datas_abonadas,
             liberacoes=liberacoes,
+            minutos_abonados=minutos_abonados,
             tz=local_tz(),
         )
         return RhEstadoPonto7DiasDTO(

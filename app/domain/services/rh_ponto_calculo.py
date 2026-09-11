@@ -144,6 +144,23 @@ def resultado_dia(registros: list[RegistroPonto], turno: TurnoHorario | None, es
     return ResultadoDia(esperado, trabalhado, extra, falta, incompleto=False)
 
 
+def _abater_minutos_abonados(resultado: ResultadoDia, minutos: Decimal) -> ResultadoDia:
+    """Abate as horas devidas que o RH perdoou, sem nunca passar da divida do dia.
+
+    Dia incompleto (batidas impares) nao tem divida calculavel e fica como
+    esta ate o ponto ser corrigido.
+    """
+    if minutos <= Decimal("0") or resultado.incompleto:
+        return resultado
+    return ResultadoDia(
+        esperado_min=resultado.esperado_min,
+        trabalhado_min=resultado.trabalhado_min,
+        extra_min=resultado.extra_min,
+        falta_min=max(Decimal("0"), resultado.falta_min - minutos),
+        incompleto=False,
+    )
+
+
 @dataclass(frozen=True)
 class ResumoPeriodo:
     esperado_min: Decimal
@@ -162,6 +179,7 @@ def resumir_periodo(
     fim: date,
     datas_abonadas: set[date],
     liberacoes: dict[date, Decimal] | None = None,
+    minutos_abonados: dict[date, Decimal] | None = None,
     *,
     tz: tzinfo = timezone.utc,
 ) -> ResumoPeriodo:
@@ -171,11 +189,16 @@ def resumir_periodo(
     antecipada). Quando presente para uma data, substitui o esperado do turno
     para aquele dia, evitando que a saida antecipada autorizada vire falta.
 
+    minutos_abonados mapeia data -> minutos perdoados pelo RH naquele dia.
+    Diferente da liberacao, nao mexe no esperado: so abate as horas devidas,
+    e nunca passa delas, entao nao cria hora extra nem credito.
+
     tz define o fuso usado para decidir a que dia cada batida pertence. Em
     UTC-3, uma batida as 23h locais chega como o dia seguinte em UTC; agrupar
     por UTC jogaria essa batida para o dia errado.
     """
     liberacoes = liberacoes or {}
+    minutos_abonados = minutos_abonados or {}
     por_dia: dict[date, list[RegistroPonto]] = defaultdict(list)
     pontos_inconsistentes = 0
     for r in registros:
@@ -216,7 +239,22 @@ def resumir_periodo(
 
         esperado_dia = liberacoes.get(atual, _esperado_min(turno))
         esperado_total += esperado_dia
-        if atual in datas_abonadas:
+        r = None
+        if atual not in datas_abonadas:
+            r = _abater_minutos_abonados(
+                resultado_dia(registros_dia, turno, esperado_min_override=esperado_dia),
+                minutos_abonados.get(atual, Decimal("0")),
+            )
+        # Dia sem trabalho cuja divida inteira foi perdoada em minutos e, na
+        # pratica, um dia abonado: nao pode contar como falta.
+        dia_todo_perdoado = (
+            r is not None
+            and not r.incompleto
+            and r.trabalhado_min == Decimal("0")
+            and r.falta_min == Decimal("0")
+            and esperado_dia > Decimal("0")
+        )
+        if r is None or dia_todo_perdoado:
             dias.append(
                 ResumoDia(
                     data=atual,
@@ -228,7 +266,6 @@ def resumir_periodo(
                 )
             )
         else:
-            r = resultado_dia(registros_dia, turno, esperado_min_override=esperado_dia)
             extra_total += r.extra_min
             falta_total += r.falta_min
             if r.incompleto:

@@ -59,6 +59,7 @@ from app.domain.services.rh_beneficio_calculo import (
     dias_uteis_competencia,
     valor_beneficio,
 )
+from app.domain.entities.rh_abono import separar_abonos
 from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
 from app.domain.services.rh_folha_calculation_engine import FolhaCalculationEngine
 from app.domain.services.rh_ponto_calculo import (
@@ -154,8 +155,9 @@ class RhFolhaService:
             if self.abono_repo is not None
             else []
         )
-        for abono in abonos_manuais:
-            abono_por_atestado[abono.funcionario_id].add(abono.data)
+        datas_abono_manual, minutos_abono_manual = separar_abonos(abonos_manuais)
+        for funcionario_abonado, datas in datas_abono_manual.items():
+            abono_por_atestado[funcionario_abonado] |= datas
         registros_por_funcionario = self._group_by_funcionario(registros)
         ferias_por_funcionario = self._group_by_funcionario(ferias_items)
         eventos_calendario = (
@@ -190,6 +192,7 @@ class RhFolhaService:
                 ferias_items=ferias_por_funcionario.get(funcionario.id, []),
                 abono_atestado=abono_por_atestado.get(funcionario.id, set()),
                 eventos_calendario=eventos_calendario,
+                minutos_abonados=minutos_abono_manual.get(funcionario.id),
             )
             acrescimos = existing.acrescimos_manuais if existing else Money(Decimal("0.00"))
             descontos = existing.descontos_manuais if existing else Money(Decimal("0.00"))
@@ -752,6 +755,7 @@ class RhFolhaService:
         ferias_items: list[Ferias],
         abono_atestado: set[date],
         eventos_calendario: list[EventoCalendarioRh] | None = None,
+        minutos_abonados: dict[date, Decimal] | None = None,
     ) -> tuple[Money, Money]:
         start, end = self._competencia_bounds(mes, ano)
         datas_abonadas = set(abono_atestado)
@@ -771,6 +775,7 @@ class RhFolhaService:
             fim=end.date(),
             datas_abonadas=datas_abonadas,
             liberacoes=liberacoes,
+            minutos_abonados=minutos_abonados,
             tz=local_tz(),
         )
         horas_extras = valor_hora_extra(funcionario.salario_base, resumo.extra_min, config)

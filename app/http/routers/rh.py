@@ -1354,13 +1354,22 @@ async def list_faltas(
     start: date = Query(...),
     end: date = Query(...),
     funcionario_id: UUID | None = Query(default=None),
+    incluir_horas: bool = Query(default=False),
 ):
     try:
-        faltas = await svc.listar_faltas(user, start, end, funcionario_id=funcionario_id)
+        faltas = await svc.listar_faltas(
+            user, start, end, funcionario_id=funcionario_id, incluir_horas=incluir_horas
+        )
     except DomainError as exc:
         raise _map_rh_error(exc)
     return [
-        RhFaltaPendenteResponse(funcionario_id=item.funcionario_id, funcionario_nome=item.funcionario_nome, data=item.data)
+        RhFaltaPendenteResponse(
+            funcionario_id=item.funcionario_id,
+            funcionario_nome=item.funcionario_nome,
+            data=item.data,
+            tipo=item.tipo,
+            minutos_devidos=item.minutos_devidos,
+        )
         for item in faltas
     ]
 
@@ -1370,7 +1379,10 @@ async def criar_abonos(body: RhAbonarFaltasRequest, user: RHAdminUser, svc: RhAb
     try:
         criados = await svc.abonar(
             AbonarFaltasDTO(
-                itens=[AbonarFaltaItemDTO(funcionario_id=item.funcionario_id, data=item.data) for item in body.itens],
+                itens=[
+                    AbonarFaltaItemDTO(funcionario_id=item.funcionario_id, data=item.data, minutos=item.minutos)
+                    for item in body.itens
+                ],
                 motivo=body.motivo,
             ),
             user,
@@ -1424,6 +1436,7 @@ def _to_abono_response(abono: AbonoFalta) -> RhAbonoFaltaResponse:
         data=abono.data,
         motivo=abono.motivo,
         created_by_user_id=abono.created_by_user_id,
+        minutos=abono.minutos,
     )
 
 
