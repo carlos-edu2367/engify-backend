@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 
 from app.application.services.rh_ponto_export_service import RhPontoExportService
 from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, StatusPonto, TipoPonto, TurnoHorario
+from app.domain.entities.rh_abono import AbonoFalta
 from app.domain.entities.user import Roles
 from app.domain.errors import DomainError
 
@@ -41,6 +42,14 @@ class _FakeRegistroRepo:
         return [r for r in self._registros if r.funcionario_id in funcionario_ids]
 
 
+class _FakeAbonoRepo:
+    def __init__(self, abonos=None):
+        self._abonos = abonos or []
+
+    async def list_by_periodo(self, team_id, start, end):
+        return [a for a in self._abonos if start <= a.data <= end]
+
+
 def _funcionario(nome, cargo):
     return SimpleNamespace(id=uuid4(), nome=nome, cargo=cargo)
 
@@ -65,11 +74,12 @@ def _reg(funcionario_id, team_id, momento, tipo):
     )
 
 
-def _service(funcionarios, registros, horarios=None):
+def _service(funcionarios, registros, horarios=None, abonos=None):
     return RhPontoExportService(
         funcionario_repo=_FakeFuncionarioRepo(funcionarios),
         registro_ponto_repo=_FakeRegistroRepo(registros),
         horario_repo=_FakeHorarioRepo(horarios),
+        abono_repo=_FakeAbonoRepo(abonos),
     )
 
 
@@ -186,3 +196,55 @@ async def test_recusa_usuario_sem_perfil_de_rh():
 def test_nome_arquivo_usa_o_periodo():
     service = _service([], [])
     assert service.nome_arquivo(date(2026, 3, 1), date(2026, 3, 31)) == "cartoes-ponto-2026-03-01-a-2026-03-31.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_abono_dia_inteiro_remove_falta_do_cartao():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    horario = HorarioTrabalho(
+        team_id=team_id,
+        funcionario_id=funcionario.id,
+        turnos=[TurnoHorario(dia_semana=0, hora_entrada=time(8, 0), hora_saida=time(17, 0))],  # 2026-03-02 e segunda
+    )
+    registros = []  # sem registro de ponto, seria falta
+    abono = AbonoFalta(
+        team_id=team_id,
+        funcionario_id=funcionario.id,
+        data=date(2026, 3, 2),
+        motivo="Abono teste",
+    )
+    service = _service([funcionario], registros, horarios={funcionario.id: horario}, abonos=[abono])
+    conteudo = await service.exportar_cartoes(
+        _user(team_id), date(2026, 3, 1), date(2026, 3, 31), funcionario_id=funcionario.id
+    )
+    aba = load_workbook(BytesIO(conteudo)).worksheets[0]
+    assert aba["H8"].value == "00:00", "Dia abonado nao deve ter falta"
+
+
+@pytest.mark.asyncio
+async def test_abono_parcial_abate_horas_do_cartao():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    horario = HorarioTrabalho(
+        team_id=team_id,
+        funcionario_id=funcionario.id,
+        turnos=[TurnoHorario(dia_semana=0, hora_entrada=time(8, 0), hora_saida=time(17, 0))],  # 2026-03-02 e segunda
+    )
+    registros = [
+        _reg(funcionario.id, team_id, datetime(2026, 3, 2, 8, 0, tzinfo=timezone.utc), TipoPonto.ENTRADA),
+        _reg(funcionario.id, team_id, datetime(2026, 3, 2, 15, 0, tzinfo=timezone.utc), TipoPonto.SAIDA),
+    ]  # saiu 1 hora antes: 2 horas de falta normalmente
+    abono = AbonoFalta(
+        team_id=team_id,
+        funcionario_id=funcionario.id,
+        data=date(2026, 3, 2),
+        motivo="Abono parcial",
+        minutos=60,  # abona 1 hora das 2 de falta
+    )
+    service = _service([funcionario], registros, horarios={funcionario.id: horario}, abonos=[abono])
+    conteudo = await service.exportar_cartoes(
+        _user(team_id), date(2026, 3, 1), date(2026, 3, 31), funcionario_id=funcionario.id
+    )
+    aba = load_workbook(BytesIO(conteudo)).worksheets[0]
+    assert aba["H8"].value == "01:00", "Abono parcial deve abater 1 hora das 2 de falta"

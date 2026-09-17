@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, timedelta
+from decimal import Decimal
 from uuid import UUID
 
 from app.application.providers.repo.rh_repo import (
+    AbonoFaltaRepository,
     FuncionarioRepository,
     HorarioTrabalhoRepository,
     RegistroPontoRepository,
@@ -18,10 +20,11 @@ from app.application.providers.utility.cartao_ponto_builder import (
 )
 from app.core.tempo import day_bounds, local_date_of, local_tz
 from app.domain.entities.rh import HorarioTrabalho, RegistroPonto
+from app.domain.entities.rh_abono import separar_abonos
 from app.domain.entities.user import Roles, User
 from app.domain.errors import DomainError
 from app.domain.services.rh_cartao_ponto import montar_linha
-from app.domain.services.rh_ponto_calculo import resultado_dia
+from app.domain.services.rh_ponto_calculo import resultado_dia, _abater_minutos_abonados
 
 _MAX_DIAS = 366
 _MAX_FUNCIONARIOS = 500
@@ -34,11 +37,13 @@ class RhPontoExportService:
         registro_ponto_repo: RegistroPontoRepository,
         builder: CartaoPontoBuilder | None = None,
         horario_repo: HorarioTrabalhoRepository | None = None,
+        abono_repo: AbonoFaltaRepository | None = None,
     ) -> None:
         self.funcionario_repo = funcionario_repo
         self.registro_ponto_repo = registro_ponto_repo
         self.builder = builder or CartaoPontoBuilder()
         self.horario_repo = horario_repo
+        self.abono_repo = abono_repo
 
     async def exportar_cartoes(
         self,
@@ -62,6 +67,14 @@ class RhPontoExportService:
             janela_fim,
         )
 
+        abonos_por_func = {}
+        minutos_abonados_por_func = {}
+        if self.abono_repo is not None:
+            abonos_existentes = await self.abono_repo.list_by_periodo(team_id, inicio, fim)
+            datas_abonadas, minutos_abonados = separar_abonos(abonos_existentes)
+            abonos_por_func = datas_abonadas
+            minutos_abonados_por_func = minutos_abonados
+
         tz = local_tz()
         por_funcionario_e_dia: dict[tuple[UUID, date], list[RegistroPonto]] = defaultdict(list)
         for registro in registros:
@@ -81,6 +94,8 @@ class RhPontoExportService:
                         por_funcionario_e_dia.get((funcionario.id, dia), []),
                         horarios.get(funcionario.id),
                         tz,
+                        datas_abonadas=abonos_por_func.get(funcionario.id, set()),
+                        minutos_abonados=minutos_abonados_por_func.get(funcionario.id, {}),
                     )
                     for dia in dias_do_periodo
                 ],
@@ -106,11 +121,21 @@ class RhPontoExportService:
         registros_do_dia: list[RegistroPonto],
         horario: HorarioTrabalho | None,
         tz,
+        datas_abonadas: set[date] | None = None,
+        minutos_abonados: dict[date, Decimal] | None = None,
     ) -> DiaCartao:
         # Sem horario cadastrado o turno do dia e sempre None; resultado_dia trata isso como
         # esperado=0, entao qualquer batida vira hora extra em vez de sumir do cartao.
         turno = horario.turno_para_dia(dia.weekday()) if horario is not None else None
-        resultado = resultado_dia(registros_do_dia, turno)
+        datas_abonadas = datas_abonadas or set()
+        minutos_abonados = minutos_abonados or {}
+
+        if dia in datas_abonadas:
+            resultado = resultado_dia(registros_do_dia, turno, esperado_min_override=Decimal("0"))
+        else:
+            resultado = resultado_dia(registros_do_dia, turno)
+            resultado = _abater_minutos_abonados(resultado, minutos_abonados.get(dia, Decimal("0")))
+
         return DiaCartao(
             data=dia,
             linha=montar_linha(registros_do_dia, tz),
