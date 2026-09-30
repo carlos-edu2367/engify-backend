@@ -15,7 +15,7 @@ from app.http.dependencies.services import TeamServiceDep, DiaristServiceDep, Us
 from app.application.dtos.team import CreateTeam, CreateFirstUser, CreateDiarist, EditDiarist
 from app.application.dtos.user import CreateSolicitacaoRegistro
 from app.infra.cache.client import get_redis
-from app.infra.cache.keys import team_key, diaristas_list_key, diaristas_pattern
+from app.infra.cache.keys import team_key, team_response_key, diaristas_list_key, diaristas_pattern
 from app.core.limiter import limiter
 from app.domain.errors import DomainError
 
@@ -63,7 +63,7 @@ async def create_first_user(request: Request, body: CreateFirstUserRequest, svc:
         raise HTTPException(status_code=400, detail=str(e))
     # Invalida cache do time (key foi consumida — estado do time mudou)
     redis = get_redis()
-    await redis.delete(team_key(user.team.id))
+    await redis.delete(team_key(user.team.id), team_response_key(user.team.id))
     return {"message": "Administrador criado com sucesso", "user_id": str(user.id)}
 
 
@@ -71,7 +71,7 @@ async def create_first_user(request: Request, body: CreateFirstUserRequest, svc:
 async def get_my_team(user: CurrentUser, svc: TeamServiceDep):
     """Retorna os dados do time do usuário autenticado. Cache Redis 60s."""
     redis = get_redis()
-    cache_key = team_key(user.team.id)
+    cache_key = team_response_key(user.team.id)
     cached = await redis.get(cache_key)
     if cached:
         return TeamResponse.model_validate_json(cached)
@@ -99,7 +99,7 @@ async def update_team(body: UpdateTeamRequest, user: AdminUser, svc: TeamService
 
     # Invalida cache do time
     redis = get_redis()
-    await redis.delete(team_key(saved.id))
+    await redis.delete(team_key(saved.id), team_response_key(saved.id))
 
     return TeamResponse(
         id=saved.id, title=saved.title,

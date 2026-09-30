@@ -46,7 +46,7 @@ async def obras_get_detail(params: dict, ctx: ArkyToolContext) -> dict:
         "description": obra.description,
         "status": _status_label(obra.status),
         "status_value": obra.status.value,
-        "responsavel_id": str(obra.responsavel_id),
+        "responsavel_id": str(obra.responsavel_id) if obra.responsavel_id else None,
         "data_entrega": obra.data_entrega.isoformat() if obra.data_entrega else None,
         "created_date": obra.created_date.isoformat() if obra.created_date else None,
         "has_valor": obra.valor is not None,

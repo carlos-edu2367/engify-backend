@@ -13,6 +13,11 @@ def team_key(team_id: UUID) -> str:
     return f"{team_id}:team"
 
 
+def team_response_key(team_id: UUID) -> str:
+    """Resposta serializada de GET /teams/me (formato distinto de team_key)."""
+    return f"{team_id}:team:response"
+
+
 def obras_list_key(team_id: UUID, page: int, limit: int, status: str = "all") -> str:
     return f"{team_id}:obras:list:{page}:{limit}:{status}"
 

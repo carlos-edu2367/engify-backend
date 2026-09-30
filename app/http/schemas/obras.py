@@ -35,7 +35,7 @@ class ObraResponse(BaseModel):
     id: UUID
     title: str
     description: str
-    responsavel_id: UUID
+    responsavel_id: Optional[UUID] = None
     team_id: UUID
     status: Status
     valor: Optional[Decimal] = None
@@ -49,7 +49,7 @@ class ObraListItem(BaseModel):
     id: UUID
     title: str
     status: Status
-    responsavel_id: UUID
+    responsavel_id: Optional[UUID] = None
     valor: Optional[Decimal] = None
     total_recebido: Decimal = Decimal("0")
     data_entrega: Optional[datetime] = None

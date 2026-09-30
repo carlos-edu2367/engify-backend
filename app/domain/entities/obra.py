@@ -22,7 +22,7 @@ class ObraOrigem(Enum):
 
 class Obra():
     def __init__(self, title: str,
-                 team_id: UUID, responsavel_id: UUID,
+                 team_id: UUID, responsavel_id: UUID | None,
                  description: str, id: UUID = None,
                  valor: Money = None, status: Status = Status.PLANEJAMENTO,
                  created_date: datetime = None, data_entrega: datetime = None,
