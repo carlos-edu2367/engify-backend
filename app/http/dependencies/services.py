@@ -356,6 +356,11 @@ async def get_rh_ponto_export_service(session: Session) -> RhPontoExportService:
         funcionario_repo=FuncionarioRepositoryImpl(session),
         registro_ponto_repo=RegistroPontoRepositoryImpl(session),
         horario_repo=HorarioTrabalhoRepositoryImpl(session),
+        abono_repo=AbonoFaltaRepositoryImpl(session),
+        ferias_repo=FeriasRepositoryImpl(session),
+        atestado_repo=AtestadoRepositoryImpl(session),
+        tipo_atestado_repo=TipoAtestadoRepositoryImpl(session),
+        evento_calendario_repo=EventoCalendarioRepositoryImpl(session),
     )
 
 

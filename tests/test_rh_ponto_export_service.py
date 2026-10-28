@@ -7,8 +7,18 @@ import pytest
 from openpyxl import load_workbook
 
 from app.application.services.rh_ponto_export_service import RhPontoExportService
-from app.domain.entities.rh import HorarioTrabalho, RegistroPonto, StatusPonto, TipoPonto, TurnoHorario
+from app.domain.entities.rh import (
+    Ferias,
+    HorarioTrabalho,
+    RegistroPonto,
+    StatusAtestado,
+    StatusFerias,
+    StatusPonto,
+    TipoPonto,
+    TurnoHorario,
+)
 from app.domain.entities.rh_abono import AbonoFalta
+from app.domain.entities.rh_calendario import EventoCalendarioRh, TipoEventoCalendario
 from app.domain.entities.user import Roles
 from app.domain.errors import DomainError
 
@@ -50,6 +60,38 @@ class _FakeAbonoRepo:
         return [a for a in self._abonos if start <= a.data <= end]
 
 
+class _FakeFeriasRepo:
+    def __init__(self, ferias=None):
+        self._ferias = ferias or []
+
+    async def list_by_competencia(self, team_id, funcionario_ids, start, end, statuses):
+        return [f for f in self._ferias if f.funcionario_id in funcionario_ids and f.status in statuses]
+
+
+class _FakeAtestadoRepo:
+    def __init__(self, atestados=None):
+        self._atestados = atestados or []
+
+    async def list_by_competencia(self, team_id, funcionario_ids, start, end, statuses):
+        return [a for a in self._atestados if a.funcionario_id in funcionario_ids and a.status in statuses]
+
+
+class _FakeTipoAtestadoRepo:
+    def __init__(self, tipos=None):
+        self._tipos = tipos or {}
+
+    async def get_by_id(self, id, team_id):
+        return self._tipos[id]
+
+
+class _FakeEventoRepo:
+    def __init__(self, eventos=None):
+        self._eventos = eventos or []
+
+    async def list_by_periodo(self, team_id, start, end):
+        return [e for e in self._eventos if start <= e.data <= end]
+
+
 def _funcionario(nome, cargo):
     return SimpleNamespace(id=uuid4(), nome=nome, cargo=cargo)
 
@@ -74,13 +116,31 @@ def _reg(funcionario_id, team_id, momento, tipo):
     )
 
 
-def _service(funcionarios, registros, horarios=None, abonos=None):
+def _service(funcionarios, registros, horarios=None, abonos=None, ferias=None, atestados=None, tipos_atestado=None, eventos=None):
     return RhPontoExportService(
         funcionario_repo=_FakeFuncionarioRepo(funcionarios),
         registro_ponto_repo=_FakeRegistroRepo(registros),
         horario_repo=_FakeHorarioRepo(horarios),
         abono_repo=_FakeAbonoRepo(abonos),
+        ferias_repo=_FakeFeriasRepo(ferias),
+        atestado_repo=_FakeAtestadoRepo(atestados),
+        tipo_atestado_repo=_FakeTipoAtestadoRepo(tipos_atestado),
+        evento_calendario_repo=_FakeEventoRepo(eventos),
     )
+
+
+def _horario_segunda(team_id, funcionario_id):
+    # 2026-03-02 e segunda; turno de 9h sem intervalo cadastrado.
+    return HorarioTrabalho(
+        team_id=team_id,
+        funcionario_id=funcionario_id,
+        turnos=[TurnoHorario(dia_semana=0, hora_entrada=time(8, 0), hora_saida=time(17, 0))],
+    )
+
+
+async def _celula(service, team_id, funcionario, celula, inicio=date(2026, 3, 1), fim=date(2026, 3, 31)):
+    conteudo = await service.exportar_cartoes(_user(team_id), inicio, fim, funcionario_id=funcionario.id)
+    return load_workbook(BytesIO(conteudo)).worksheets[0][celula].value
 
 
 @pytest.mark.asyncio
@@ -248,3 +308,90 @@ async def test_abono_parcial_abate_horas_do_cartao():
     )
     aba = load_workbook(BytesIO(conteudo)).worksheets[0]
     assert aba["H8"].value == "01:00", "Abono parcial deve abater 1 hora das 2 de falta"
+
+
+@pytest.mark.asyncio
+async def test_feriado_do_calendario_nao_vira_atraso():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    feriado = EventoCalendarioRh(team_id=team_id, tipo=TipoEventoCalendario.FERIADO, data=date(2026, 3, 2), descricao="Feriado")
+    service = _service([funcionario], [], horarios={funcionario.id: _horario_segunda(team_id, funcionario.id)}, eventos=[feriado])
+    assert await _celula(service, team_id, funcionario, "H8") == "00:00"
+
+
+@pytest.mark.asyncio
+async def test_evento_de_outro_funcionario_nao_abona():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    abono = EventoCalendarioRh(
+        team_id=team_id, tipo=TipoEventoCalendario.ABONO, data=date(2026, 3, 2), descricao="Abono",
+        aplica_todos=False, funcionario_ids=[uuid4()],
+    )
+    service = _service([funcionario], [], horarios={funcionario.id: _horario_segunda(team_id, funcionario.id)}, eventos=[abono])
+    assert await _celula(service, team_id, funcionario, "H8") == "09:00"
+
+
+@pytest.mark.asyncio
+async def test_liberacao_antecipada_reduz_jornada_esperada():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    liberacao = EventoCalendarioRh(
+        team_id=team_id, tipo=TipoEventoCalendario.LIBERACAO_ANTECIPADA, data=date(2026, 3, 2),
+        descricao="Liberados as 15h", hora_corte=time(15, 0),
+    )
+    registros = [
+        _reg(funcionario.id, team_id, datetime(2026, 3, 2, 11, 0, tzinfo=timezone.utc), TipoPonto.ENTRADA),  # 08:00 local
+        _reg(funcionario.id, team_id, datetime(2026, 3, 2, 18, 0, tzinfo=timezone.utc), TipoPonto.SAIDA),  # 15:00 local
+    ]
+    service = _service([funcionario], registros, horarios={funcionario.id: _horario_segunda(team_id, funcionario.id)}, eventos=[liberacao])
+    assert await _celula(service, team_id, funcionario, "H8") == "00:00"
+
+
+@pytest.mark.asyncio
+async def test_ferias_aprovadas_nao_viram_atraso():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    ferias = Ferias(
+        team_id=team_id, funcionario_id=funcionario.id,
+        data_inicio=datetime(2026, 3, 2, 12, 0, tzinfo=timezone.utc), data_fim=datetime(2026, 3, 13, 12, 0, tzinfo=timezone.utc),
+        status=StatusFerias.APROVADO,
+    )
+    service = _service([funcionario], [], horarios={funcionario.id: _horario_segunda(team_id, funcionario.id)}, ferias=[ferias])
+    assert await _celula(service, team_id, funcionario, "H8") == "00:00"
+
+
+@pytest.mark.asyncio
+async def test_atestado_que_abona_remove_atraso_e_o_que_nao_abona_mantem():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    tipo_abona, tipo_nao_abona = uuid4(), uuid4()
+    atestados = [
+        SimpleNamespace(
+            funcionario_id=funcionario.id, tipo_atestado_id=tipo_abona, status=StatusAtestado.ENTREGUE,
+            data_inicio=datetime(2026, 3, 2, 12, 0, tzinfo=timezone.utc), data_fim=datetime(2026, 3, 2, 12, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            funcionario_id=funcionario.id, tipo_atestado_id=tipo_nao_abona, status=StatusAtestado.ENTREGUE,
+            data_inicio=datetime(2026, 3, 9, 12, 0, tzinfo=timezone.utc), data_fim=datetime(2026, 3, 9, 12, 0, tzinfo=timezone.utc),
+        ),
+    ]
+    tipos = {tipo_abona: SimpleNamespace(abona_falta=True), tipo_nao_abona: SimpleNamespace(abona_falta=False)}
+    service = _service(
+        [funcionario], [], horarios={funcionario.id: _horario_segunda(team_id, funcionario.id)},
+        atestados=atestados, tipos_atestado=tipos,
+    )
+    assert await _celula(service, team_id, funcionario, "H8") == "00:00"
+    assert await _celula(service, team_id, funcionario, "H15") == "09:00"  # 09/03
+
+
+@pytest.mark.asyncio
+async def test_dia_futuro_nao_vira_atraso():
+    team_id = uuid4()
+    funcionario = _funcionario("Sandro Barbosa", "Serralheiro")
+    horario = HorarioTrabalho(
+        team_id=team_id,
+        funcionario_id=funcionario.id,
+        turnos=[TurnoHorario(dia_semana=d, hora_entrada=time(8, 0), hora_saida=time(17, 0)) for d in range(7)],
+    )
+    service = _service([funcionario], [], horarios={funcionario.id: horario})
+    assert await _celula(service, team_id, funcionario, "H7", inicio=date(2099, 3, 1), fim=date(2099, 3, 31)) == "00:00"
